@@ -1,7 +1,7 @@
 LOCAL_DEPS/
 123codexnpm-cache/
 历史数据_保留/
-outputs/
+LOCAL_RUN/
 *.pyc
 __pycache__/
 .pytest_cache/

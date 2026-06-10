@@ -6,6 +6,8 @@ from typing import Any
 
 import yaml
 
+from okx_signal_system.paths import package_project_root
+
 
 @dataclass(frozen=True)
 class ProjectPaths:
@@ -15,11 +17,8 @@ class ProjectPaths:
 
 
 def project_paths(start: Path | None = None) -> ProjectPaths:
-    base = (start or Path(__file__)).resolve()
-    for parent in [base, *base.parents]:
-        if (parent / "pyproject.toml").exists():
-            return ProjectPaths(parent, parent / "config", parent / "outputs")
-    raise RuntimeError("project root not found")
+    root = package_project_root(start)
+    return ProjectPaths(root, root / "config", root / "outputs")
 
 
 def load_yaml(path: str | Path) -> dict[str, Any]:
