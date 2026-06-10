@@ -1,0 +1,14 @@
+LOCAL_DEPS/
+123codexnpm-cache/
+历史数据_保留/
+outputs/
+*.pyc
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.env
+.env.*
+!.env.example
