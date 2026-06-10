@@ -21,4 +21,4 @@ def test_run_backtest_returns_trade_table() -> None:
 def test_summarize_trades_has_required_metrics() -> None:
     trades = run_backtest(btc_frame(), inst_id="BTC-USDT-SWAP")
     summary = summarize_trades(trades)
-    assert {"total_return", "profit_factor", "win_rate", "total_trades", "status"}.issubset(summary)
+    assert {"total_return", "profit_factor", "payoff_ratio", "max_drawdown", "win_rate", "total_trades", "status"}.issubset(summary)

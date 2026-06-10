@@ -74,12 +74,13 @@ def estimate_costs(
     entry_time: pd.Timestamp,
     exit_time: pd.Timestamp,
     config: CostConfig = CostConfig(),
+    slippage_bps: float | None = None,
 ) -> CostBreakdown:
     notional_entry = abs(entry_price * qty)
     notional_exit = abs(exit_price * qty)
     entry_fee = notional_entry * config.taker_fee_rate
     exit_fee = notional_exit * config.taker_fee_rate
-    slip_rate = config.normal_slippage_bps / 10000
+    slip_rate = (config.normal_slippage_bps if slippage_bps is None else slippage_bps) / 10000
     slippage_cost = notional_entry * slip_rate + notional_exit * slip_rate
     events = funding_events_crossed(entry_time, exit_time, interval_hours=config.funding_interval_hours)
     avg_position_value = (notional_entry + notional_exit) / 2

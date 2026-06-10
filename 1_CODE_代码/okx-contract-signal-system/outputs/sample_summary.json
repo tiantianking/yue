@@ -1,7 +1,13 @@
 {
   "total_return": -0.27017534681275146,
   "profit_factor": 0.666837574751354,
+  "payoff_ratio": 1.4289376601814725,
   "win_rate": 0.3181818181818182,
   "total_trades": 242,
+  "max_drawdown": 0.28096629810174584,
+  "avg_hold_hours": 13.834710743801653,
+  "max_loss_streak": 12,
+  "hit_27pct_stop": 1,
+  "pnl_share_from_gt5x": 0.046278966885850155,
   "status": "passed"
 }

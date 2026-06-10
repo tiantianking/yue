@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 
+import pandas as pd
+
 from okx_signal_system.backtest.runner import run_backtest, summarize_trades
 from okx_signal_system.config import project_paths
 from okx_signal_system.data.loader import load_symbol_file
@@ -23,8 +25,12 @@ def main() -> None:
     paths.output_dir.mkdir(parents=True, exist_ok=True)
     trades_path = paths.output_dir / "sample_trades.csv"
     summary_path = paths.output_dir / "sample_summary.json"
+    portfolio_path = paths.output_dir / "portfolio_result.csv"
     trades.to_csv(trades_path, index=False, encoding="utf-8")
     summary_path.write_text(json.dumps(summarize_trades(trades), indent=2), encoding="utf-8")
+    pd.DataFrame([{**{"portfolio_name": "sample_single_symbol", "symbols_included": 1}, **summarize_trades(trades)}]).to_csv(
+        portfolio_path, index=False, encoding="utf-8"
+    )
 
 
 if __name__ == "__main__":

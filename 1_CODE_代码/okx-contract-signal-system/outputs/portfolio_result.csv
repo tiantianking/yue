@@ -1,0 +1,2 @@
+portfolio_name,symbols_included,total_return,profit_factor,payoff_ratio,win_rate,total_trades,max_drawdown,avg_hold_hours,max_loss_streak,hit_27pct_stop,pnl_share_from_gt5x,status
+sample_single_symbol,1,-0.27017534681275146,0.666837574751354,1.4289376601814725,0.3181818181818182,242,0.28096629810174584,13.834710743801653,12,1,0.046278966885850155,passed

@@ -102,7 +102,20 @@ def align_completed_4h_to_1h(frame_1h: pd.DataFrame, frame_4h_features: pd.DataF
     return aligned
 
 
-def build_feature_frame(frame_1h: pd.DataFrame) -> pd.DataFrame:
-    one_h = add_1h_features(frame_1h)
-    four_h = add_4h_trend(resample_4h(frame_1h))
+def build_feature_frame(
+    frame_1h: pd.DataFrame,
+    *,
+    fast_ema: int = 20,
+    slow_ema: int = 60,
+    breakout_window: int = 40,
+    atr_window: int = 14,
+) -> pd.DataFrame:
+    one_h = add_1h_features(
+        frame_1h,
+        fast_ema=fast_ema,
+        slow_ema=slow_ema,
+        breakout_window=breakout_window,
+        atr_window=atr_window,
+    )
+    four_h = add_4h_trend(resample_4h(frame_1h), fast_ema=fast_ema, slow_ema=slow_ema)
     return align_completed_4h_to_1h(one_h, four_h)

@@ -10,9 +10,13 @@ Side = Literal["long", "short", "flat"]
 
 @dataclass(frozen=True)
 class StrategyParams:
+    fast_ema: int = 20
+    slow_ema: int = 60
+    breakout_window: int = 40
     atr_stop_mult: float = 2.0
     take_profit_mult: float = 2.0
     max_hold_bars: int = 48
+    atr_window: int = 14
 
 
 @dataclass(frozen=True)
