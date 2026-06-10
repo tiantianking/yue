@@ -1,0 +1,1 @@
+"""Semi-automatic signal service."""
