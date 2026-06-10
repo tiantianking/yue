@@ -1,0 +1,19 @@
+project:
+  name: okx-contract-signal-system
+  timezone: UTC
+  exchange: OKX
+  mode: research
+
+data:
+  historical_root: "D:/JIAOYI-CX/历史数据_保留/lightweight_history/okx_1h_extended"
+  manifest: "D:/JIAOYI-CX/历史数据_保留/lightweight_history/okx_1h_extended/manifest.json"
+  timeframe: 1h
+  symbols:
+    - BTC-USDT-SWAP
+    - ETH-USDT-SWAP
+    - SOL-USDT-SWAP
+
+execution:
+  live_order_enabled: false
+  dry_run_enabled: true
+  exchange_adapter: okx

@@ -1,0 +1,24 @@
+fees:
+  taker_fee_rate: 0.0006
+  maker_fee_rate: 0.0002
+  default_use_taker: true
+
+slippage:
+  normal_bps: 5
+  stress_bps: 10
+  participation_tiers:
+    - max_rate: 0.001
+      bps_add: 0
+    - max_rate: 0.005
+      bps_add: 5
+    - max_rate: 0.01
+      bps_add: 10
+
+funding:
+  baseline_rate: 0.0001
+  baseline_hours: 8
+  stress_rates:
+    - rate: 0.0003
+      hours: 8
+    - rate: 0.0001
+      hours: 4
