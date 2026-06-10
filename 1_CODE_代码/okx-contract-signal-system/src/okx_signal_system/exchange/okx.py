@@ -41,6 +41,8 @@ def okx_place_order_preview(
 ) -> dict[str, str]:
     if margin_mode != "isolated":
         raise ValueError("only isolated margin is allowed")
+    if not inst_id.endswith("-SWAP"):
+        raise ValueError("only OKX SWAP instruments are allowed")
     if side not in {"buy", "sell"}:
         raise ValueError("side must be buy or sell")
     if size <= 0:
