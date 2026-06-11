@@ -64,6 +64,8 @@ a = Analysis(
     datas=[
         # 配置文件
         ('config', 'config'),
+        # 历史数据（打包后使用）
+        ('D:/JIAOYI-CX/历史数据_保留/lightweight_history', 'lightweight_history'),
     ],
     hiddenimports=hiddenimports,
     hookspath=[],
