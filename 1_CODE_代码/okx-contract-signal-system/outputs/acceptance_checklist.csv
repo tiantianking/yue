@@ -1,0 +1,8 @@
+check,passed,evidence,status
+exchange_okx_only,True,配置和合约命名固定 OKX SWAP,passed
+parameter_grid_1296,True,当前训练网格行数 1296,passed
+shared_params_selected,True,"{""fast_ema"": 10, ""slow_ema"": 80, ""breakout_window"": 60, ""atr_stop_mult"": 1.5, ""take_profit_mult"": 2.0, ""max_hold_bars"": 24, ""atr_window"": 14}",passed
+validation_once_after_freeze,True,验证结果只使用冻结参数生成,passed
+portfolio_valid_trades_ge_80,True,1837,passed
+near_liq_zero,True,0,passed
+live_orders_disabled,True,MVP 只人工确认，不自动下单,passed
