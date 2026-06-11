@@ -12,6 +12,9 @@ def base_row(**overrides):
         "bias_4h": "long",
         "breakout_high": 100.0,
         "breakout_low": 90.0,
+        # 趋势强度检查需要 EMA 字段（间距 > 0.5% 才算强趋势）
+        "ema_fast": 112.0,   # 快线在价格上方
+        "ema_slow": 109.0,   # 慢线在价格下方
     }
     row.update(overrides)
     return pd.Series(row)
@@ -43,7 +46,7 @@ def test_risk_accepts_protected_signal_and_caps_leverage() -> None:
     decision = validate_signal(signal, Ledger("BTC-USDT-SWAP", init_capital=10000, equity=10000))
     assert decision.accepted
     assert decision.margin_mode == "isolated"
-    assert decision.position_mode == "net_mode"
+    assert decision.position_mode == "one_way"
     assert decision.leverage_cap <= 10
     assert decision.qty and decision.qty > 0
 
@@ -52,4 +55,4 @@ def test_risk_rejects_open_position() -> None:
     signal = build_signal(base_row(), inst_id="BTC-USDT-SWAP")
     decision = validate_signal(signal, Ledger("BTC-USDT-SWAP", init_capital=10000, equity=10000, open_positions=1))
     assert not decision.accepted
-    assert decision.reason == "ledger_not_allowed"
+    assert decision.reason == "position_open"
