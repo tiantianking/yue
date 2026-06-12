@@ -151,17 +151,21 @@ def check_pid_file() -> bool:
             else:
                 import subprocess
                 result = subprocess.run(
-                    ["tasklist", "/FI", f"PID eq {old_pid}", "/NH"],
+                    ["tasklist", "/FI", f"PID eq {old_pid}", "/NH", "/FO", "CSV"],
                     capture_output=True,
                     text=True,
                     encoding='mbcs' if sys.platform == 'win32' else 'utf-8',
                     errors='replace',
                     creationflags=0x08000000 if sys.platform == 'win32' else 0,
                 )
-                # /NH 无表头，检查输出中是否包含精确 PID
                 output = result.stdout.strip()
-                # 如果任务不存在，输出包含 "INFO:" 或为空
-                if old_pid in output and "INFO" not in output.upper():
+                # CSV 格式下，进程存在输出如: "python.exe","18396","Console","1","xx MB"
+                # 进程不存在输出如: 信息: 没有运行的任务匹配指定标准。
+                is_running = (
+                    old_pid in output
+                    and not any(kw in output for kw in ["信息", "INFO", "No tasks", "no running"])
+                )
+                if is_running:
                     logger.error(f"系统已在运行 (PID: {old_pid})")
                     return False
                 # 进程已死，清理旧 PID 文件
