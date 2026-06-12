@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 import threading
 from dataclasses import asdict, dataclass
@@ -29,6 +30,15 @@ from okx_signal_system.exchange.okx import (
     test_connection,
 )
 from okx_signal_system.paths import find_lightweight_history
+from okx_signal_system.strategy.trend_breakout import (
+    build_signal, TradeSignal, StrategyParams, 
+    generate_signals
+)
+from okx_signal_system.risk.model import (
+    validate_signal, RiskConfig, Ledger, RiskDecision, 
+    apply_halt_policy, COST_BUFFER_RATE
+)
+from okx_signal_system.features.indicators import build_feature_frame
 
 log = logging.getLogger(__name__)
 
@@ -250,8 +260,15 @@ class OKXWebSocketClient:
         self._candle_cache: dict[str, dict] = {}
 
     def _get_wss_url(self) -> str:
-        """获取WebSocket URL"""
-        return "wss://ws.okx.com:8443/ws/v5/public"
+        """获取WebSocket URL（根据模拟/实盘模式自动切换）"""
+        import os
+        is_simulated = os.environ.get("OKX_IS_SIMULATED", "true").lower() != "false"
+        if is_simulated:
+            # OKX 模拟盘 WebSocket 地址
+            return "wss://wspap.okx.com:8443/ws/v5/public"
+        else:
+            # OKX 实盘 WebSocket 地址
+            return "wss://ws.okx.com:8443/ws/v5/public"
 
     def connect(self, subscriptions: list[str]) -> bool:
         """连接WebSocket"""
@@ -309,9 +326,9 @@ class OKXWebSocketClient:
 
         # 订阅K线数据
         for inst_id in self._subscriptions:
-            # 1小时K线
+            # 1小时K线（与配置一致）
             args = [{
-                "channel": "candle1m",
+                "channel": "candle1H",
                 "instId": inst_id,
             }]
             msg = {
@@ -319,7 +336,7 @@ class OKXWebSocketClient:
                 "args": args
             }
             self._ws.send(json.dumps(msg))
-            log.info(f"Subscribed: {inst_id} candle1m")
+            log.info(f"Subscribed: {inst_id} candle1H")
 
         # 订阅ticker数据
         for inst_id in self._subscriptions:
@@ -347,7 +364,7 @@ class OKXWebSocketClient:
         inst_id = arg.get("instId", "")
         items = data.get("data", [])
 
-        if channel == "candle1m":
+        if channel == "candle1H":
             for item in items:
                 # K线格式: [ts, open, high, low, close, vol, confirm]
                 candle = {
@@ -378,25 +395,28 @@ class OKXWebSocketClient:
                     self.on_ticker(inst_id, ticker)
 
     def _handle_disconnect(self):
-        """处理断连"""
-        if not self._running:
-            return
+        """处理断连 — 使用迭代重连循环，避免递归栈溢出"""
+        while self._running and self._reconnect_count <= self._max_reconnect:
+            self._reconnect_count += 1
 
-        self._reconnect_count += 1
+            if self._reconnect_count > self._max_reconnect:
+                log.error(f"Max reconnect ({self._max_reconnect}) reached, giving up")
+                self._running = False
+                return
 
-        if self._reconnect_count > self._max_reconnect:
-            log.error(f"Max reconnect ({self._max_reconnect}) reached, giving up")
+            log.info(f"Reconnecting in {RECONNECT_DELAY}s... ({self._reconnect_count}/{self._max_reconnect})")
+            time.sleep(RECONNECT_DELAY)
+
+            try:
+                self._start_websocket()
+                return  # 重连成功 → 退出
+            except Exception as e:
+                log.error(f"Reconnect attempt {self._reconnect_count} failed: {e}")
+                # 继续循环尝试
+
+        # 如果 _running 被外部设为 False 但尚未标记，补标记
+        if self._running:
             self._running = False
-            return
-
-        log.info(f"Reconnecting in {RECONNECT_DELAY}s... ({self._reconnect_count}/{self._max_reconnect})")
-        time.sleep(RECONNECT_DELAY)
-
-        try:
-            self._start_websocket()
-        except Exception as e:
-            log.error(f"Reconnect error: {e}")
-            self._handle_disconnect()
 
     def disconnect(self):
         """断开连接"""
@@ -460,7 +480,11 @@ class OKXRealtimeAPI:
         self._ticker_cache[inst_id] = (ticker, time.time())
 
     async def connect(self, symbols: list[str] | None = None) -> bool:
-        """连接交易所WebSocket"""
+        """连接交易所WebSocket（幂等：已连接时直接返回True）"""
+        if self._connected and self._ws_client and self._ws_client._running:
+            log.info("Already connected to OKX WebSocket, skipping reconnect")
+            return True
+
         if symbols is None:
             # 默认监控配置中的币种
             from okx_signal_system.config import load_config
@@ -691,16 +715,20 @@ class OKXRealtimeAPI:
     def sync_from_api(self, inst_id: str) -> int:
         """从API同步数据到本地"""
         try:
-            raw_bars = get_candles(inst_id, bar="1h", limit=300)
+            resp = get_candles(inst_id, bar="1H", limit=300)
 
+            if not resp or not isinstance(resp, dict):
+                return 0
+
+            raw_bars = resp.get("data", [])
             if not raw_bars:
                 return 0
 
             df = pd.DataFrame(raw_bars, columns=[
                 "ts", "open", "high", "low", "close", "vol",
-                "quote_vol", "turnover", "confirm", "ignore"
+                "volCcy", "volCcyQuote", "confirm"
             ])
-            df["ts"] = pd.to_datetime(df["ts"], utc=True)
+            df["ts"] = pd.to_datetime(df["ts"], utc=True, unit="ms")
 
             count = 0
             for _, row in df.iterrows():
@@ -710,7 +738,7 @@ class OKXRealtimeAPI:
                     "high": float(row["high"]),
                     "low": float(row["low"]),
                     "close": float(row["close"]),
-                    "volume": float(row["vol"]) if "vol" in df.columns else 0,
+                    "volume": float(row["vol"]) if pd.notna(row["vol"]) else 0,
                 }
                 self._data_store.append_candle(inst_id, candle)
                 count += 1
@@ -738,6 +766,22 @@ class LiveSignalMonitor:
         self._running = False
         self._monitor_task: asyncio.Task | None = None
 
+        # --- 风控模型 ---
+        initial_equity = float(os.environ.get("INITIAL_EQUITY", 10000))
+        self._risk_cfg = RiskConfig(initial_equity=initial_equity)
+        self._ledger = Ledger(
+            inst_id="portfolio",
+            init_capital=initial_equity,
+            equity=initial_equity,
+        )
+
+        # --- 市场环境自适应（延迟导入避免循环依赖） ---
+        from okx_signal_system.ml.regime_adaptive import AdaptiveParamsManager
+        self._regime_mgr = AdaptiveParamsManager()
+
+        # --- 持仓追踪 (max_hold_bars) ---
+        self._position_entries: dict[str, tuple[pd.Timestamp, StrategyParams]] = {}
+
     async def start(self):
         """启动监控"""
         if not await self.api.connect():
@@ -752,18 +796,82 @@ class LiveSignalMonitor:
         return True
 
     async def _monitor_loop(self):
-        """监控循环"""
+        """监控循环 — 信号生成 + 风控 + 环境自适应 + 持仓超时"""
+        PREV_SIGNAL_COOLDOWN = 300  # 同一币种信号冷却5分钟
+        _last_signal_time: dict[str, float] = {}
+
         while self._running:
             try:
-                # 检查持仓的止损止盈
                 positions = await self.api.get_positions()
+                pos_inst_ids = {p.inst_id for p in positions}
 
+                # ── 持仓管理: TP/SL + max_hold_bars ──
                 for pos in positions:
                     market = await self.api.get_market_data(pos.inst_id)
                     if market:
                         await self._check_exit_conditions(pos, market)
+                        await self._check_hold_timeout(pos, market)
 
-                # 每30秒持久化一次数据
+                # ── 清理已平仓的追踪记录 ──
+                for inst_id in list(self._position_entries):
+                    if inst_id not in pos_inst_ids:
+                        del self._position_entries[inst_id]
+
+                # ── 信号生成 ──
+                symbols = self.api._watched_symbols
+                for symbol in symbols:
+                    inst_id = symbol if isinstance(symbol, str) else symbol
+
+                    # 已有持仓则跳过
+                    if inst_id in pos_inst_ids:
+                        continue
+
+                    # 冷却期
+                    if inst_id in _last_signal_time and time.time() - _last_signal_time[inst_id] < PREV_SIGNAL_COOLDOWN:
+                        continue
+
+                    # 获取K线数据
+                    df = await self.api.get_candles(inst_id, bar="1h", limit=200)
+                    if len(df) < 50:
+                        continue
+
+                    # 构建特征帧
+                    features = build_feature_frame(df)
+
+                    # 更新市场环境 → 获取自适应参数
+                    regime, strategy_params = self._regime_mgr.update_regime(features)
+
+                    # 生成信号
+                    latest_row = features.iloc[-1]
+                    signal = build_signal(
+                        latest_row,
+                        inst_id=inst_id,
+                        params=strategy_params,
+                        frame=features,
+                        idx=len(features) - 1
+                    )
+
+                    if not signal.accepted:
+                        continue
+
+                    # 风控校验
+                    ledger = apply_halt_policy(self._ledger, self._risk_cfg)
+                    decision = validate_signal(signal, ledger, self._risk_cfg)
+
+                    if decision.accepted:
+                        _last_signal_time[inst_id] = time.time()
+                        log.info(
+                            f"✅ SIGNAL: {inst_id} {signal.side.upper()} "
+                            f"@ {signal.entry_ref:.2f} | "
+                            f"score={decision.signal_score:.0f}/10 | "
+                            f"regime={self._regime_mgr.get_regime_name_cn()} | "
+                            f"RR={decision.risk_reward_ratio:.1f}:1 | "
+                            f"lev={decision.leverage_used:.1f}x"
+                        )
+                        if self.signal_callback:
+                            self.signal_callback(signal, decision)
+
+                # 持久化
                 self.api.persist_data()
 
                 await asyncio.sleep(10)
@@ -823,6 +931,52 @@ class LiveSignalMonitor:
                     size=position.size,
                     reduce_only=True,
                 ))
+
+    async def _check_hold_timeout(self, position: Position, market: MarketData) -> None:
+        """检查持仓超时 (max_hold_bars)：首次出现时记录入场时间，超时则强制平仓"""
+        inst_id = position.inst_id
+
+        # 首次出现 → 记录入场时间
+        if inst_id not in self._position_entries:
+            # 用当前时间近似入场（精确到小时）
+            self._position_entries[inst_id] = (
+                pd.Timestamp.now(tz="UTC"),
+                self._regime_mgr.current_params,
+            )
+            return
+
+        entry_time, entry_params = self._position_entries[inst_id]
+        max_bars = entry_params.max_hold_bars
+        now = pd.Timestamp.now(tz="UTC")
+
+        # 计算持仓K线数（按小时）
+        hours_held = (now - entry_time).total_seconds() / 3600
+        bars_held = int(hours_held)
+
+        if bars_held >= max_bars:
+            log.warning(
+                f"⏰ {inst_id} 持仓超时 ({bars_held} bars >= {max_bars}), 强制平仓"
+            )
+            try:
+                side = "close_long" if position.side == "long" else "close_short"
+                await self.api.place_order(OrderRequest(
+                    inst_id=inst_id,
+                    side=side,
+                    size=position.size,
+                    reduce_only=True,
+                ))
+                # 平仓后清除追踪
+                self._position_entries.pop(inst_id, None)
+            except Exception as e:
+                log.error(f"Failed to close expired position {inst_id}: {e}")
+
+    async def monitor_forever(self):
+        """等待监控循环结束（兼容 main.py CLI 模式）"""
+        try:
+            if self._monitor_task:
+                await self._monitor_task
+        except asyncio.CancelledError:
+            pass
 
 
 # ============================================================

@@ -151,6 +151,8 @@ def check_pid_file() -> bool:
                 ["tasklist", "/FI", f"PID eq {old_pid}"],
                 capture_output=True,
                 text=True,
+                encoding='mbcs' if sys.platform == 'win32' else 'utf-8',
+                errors='replace',
                 creationflags=0x08000000 if sys.platform == 'win32' else 0,
             )
             if old_pid in result.stdout:
