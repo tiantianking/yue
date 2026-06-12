@@ -5,6 +5,7 @@ OKX合约信号系统 - 桌面程序入口
 
 import sys
 import time
+import asyncio
 import logging
 from pathlib import Path
 
@@ -71,7 +72,7 @@ def check_feishu():
         return False
 
 
-def start_realtime_monitor():
+async def start_realtime_monitor():
     """启动实时监控"""
     from okx_signal_system.exchange.realtime import OKXRealtimeAPI
     from okx_signal_system.config import load_yaml, project_paths
@@ -89,16 +90,14 @@ def start_realtime_monitor():
         logger.info("Connecting to OKX WebSocket...")
         print("Connecting to OKX WebSocket...")
 
-        if api.connect():
+        connected = await api.connect(symbols)
+        if connected:
             logger.info("[OK] WebSocket connected")
             print("[OK] WebSocket connected")
 
-            # 初始化数据存储
-            api.init_stores(symbols)
-
             # 等待初始数据
             print("\nFetching initial K-line data...")
-            time.sleep(3)
+            await asyncio.sleep(3)
 
             return api
         else:
@@ -112,20 +111,22 @@ def start_realtime_monitor():
         return None
 
 
-def signal_loop(api, feishu_enabled):
-    """信号检测循环"""
-    from okx_signal_system.exchange.realtime import LiveSignalMonitor
-    from okx_signal_system.notification.feishu import feishu_send_signal_card, feishu_send_status_card
+async def signal_loop_async(api, feishu_enabled):
+    """信号检测循环 (异步版本)"""
     from okx_signal_system.config import load_yaml, project_paths
+    from okx_signal_system.data.loader import load_symbol_file
+    from okx_signal_system.features.indicators import build_feature_frame
+    from okx_signal_system.strategy.trend_breakout import StrategyParams, generate_signals
+    from okx_signal_system.notification.feishu import feishu_send_signal_card, feishu_send_status_card
 
     paths = project_paths()
     config = load_yaml(paths.config_dir / "base.yaml")
     symbols = config.get('trading', {}).get('watch_symbols', ['BTC-USDT-SWAP'])
 
-    monitor = LiveSignalMonitor(api, symbols)
-
+    params = StrategyParams()
     last_status_time = 0
     status_interval = 1800  # 30 minutes
+    scan_interval = 900  # 15 minutes scan cycle
 
     logger.info("Signal monitoring started")
     print("\n" + "=" * 50)
@@ -135,49 +136,68 @@ def signal_loop(api, feishu_enabled):
 
     while True:
         try:
-            # 检测信号
-            result = monitor.check_signals()
-
-            # 获取最新数据状态
+            # 每个扫描周期：对所有监控币种生成信号
             for inst_id in symbols:
-                store = api.get_store(inst_id)
-                if store:
-                    bars = store.get_bars('1h', count=5)
-                    if bars is not None and len(bars) > 0:
-                        latest = bars.iloc[-1]
-                        ts = latest.name
+                try:
+                    # 尝试从实时数据存储获取数据
+                    local_data = api._data_store.load(inst_id)
 
-                        # 每10秒打印状态
-                        current_time = time.time()
-                        if current_time - last_status_time >= 10:
-                            complete = "[OK]" if latest.get('complete_1h', False) else "[..]"
-                            print(f"[{time.strftime('%H:%M:%S')}] {inst_id}: "
-                                  f"close={latest['close']:.2f} {complete}")
-                            last_status_time = current_time
+                    if local_data.empty or len(local_data) < 100:
+                        # 实时数据不足，从API同步
+                        count = api.sync_from_api(inst_id)
+                        if count > 0:
+                            logger.info(f"Synced {count} bars for {inst_id}")
+                            local_data = api._data_store.load(inst_id)
 
-                        # 检测到有效信号
-                        if result and result.get('signal', {}).get('side') in ['long', 'short']:
-                            signal = result['signal']
+                    if local_data.empty or len(local_data) < 100:
+                        continue
 
-                            logger.info(f"Signal detected: {signal['side']} {inst_id}")
-                            print(f"\n*** SIGNAL: {signal['side'].upper()} {inst_id} ***")
+                    # 构建特征并生成信号
+                    features = build_feature_frame(local_data, **{
+                        k: getattr(params, k)
+                        for k in ['fast_ema', 'slow_ema', 'breakout_window', 'atr_window']
+                    })
+                    signals = generate_signals(features, inst_id=inst_id, params=params)
+                    accepted = [s for s in signals if s.accepted]
 
-                            if feishu_enabled:
-                                feishu_send_signal_card(
-                                    inst_id=inst_id,
-                                    direction=signal['side'],
-                                    qty=result.get('risk', {}).get('qty', 0.01),
-                                    leverage=signal.get('leverage', 5),
-                                    entry_price=signal.get('entry_ref', 0),
-                                    stop_loss=signal.get('stop_loss', 0),
-                                    take_profit=signal.get('take_profit', 0),
-                                    reason=signal.get('reason', '')
-                                )
-                                print("[OK] Feishu notification sent")
-                            else:
-                                print("[SKIP] Feishu not configured")
+                    # 每10秒打印状态
+                    current_time = time.time()
+                    if current_time - last_status_time >= 10:
+                        latest = local_data.iloc[-1]
+                        print(f"[{time.strftime('%H:%M:%S')}] {inst_id}: "
+                              f"close={latest['close']:.2f}")
+                        last_status_time = current_time
 
-            time.sleep(1)
+                    # 检测到有效信号
+                    if accepted:
+                        signal = accepted[-1]
+
+                        logger.info(f"Signal detected: {signal.side} {inst_id}")
+                        print(f"\n*** SIGNAL: {signal.side.upper()} {inst_id} ***")
+
+                        if feishu_enabled:
+                            feishu_send_signal_card(
+                                inst_id=inst_id,
+                                direction=signal.side,
+                                qty=0.01,
+                                leverage=5.0,
+                                entry_price=signal.entry_ref or 0,
+                                stop_loss=signal.stop_loss or 0,
+                                take_profit=signal.take_profit or 0,
+                                reason=signal.reject_reason or "signal_valid",
+                            )
+                            print("[OK] Feishu notification sent")
+                        else:
+                            print("[SKIP] Feishu not configured")
+
+                except Exception as e:
+                    logger.error(f"Error scanning {inst_id}: {e}")
+
+            # 定期持久化
+            api.persist_data()
+
+            # 等待下一个扫描周期
+            await asyncio.sleep(scan_interval)
 
         except KeyboardInterrupt:
             logger.info("User interrupted, exiting")
@@ -185,12 +205,26 @@ def signal_loop(api, feishu_enabled):
             break
         except Exception as e:
             logger.error(f"Loop error: {e}")
-            time.sleep(5)
+            await asyncio.sleep(5)
 
 
 def main():
     """主函数"""
     print_banner()
+
+    # 检查 Python 依赖
+    missing = []
+    for lib in ['numpy', 'pandas', 'yaml', 'requests']:
+        try:
+            __import__(lib)
+        except ImportError:
+            missing.append(lib)
+
+    if missing:
+        print(f"\n[ERROR] 缺少必需的 Python 库: {', '.join(missing)}")
+        print(f"请运行: pip install {' '.join(missing)}")
+        input("\nPress Enter to exit...")
+        return
 
     # 检查配置
     if not check_config():
@@ -202,14 +236,20 @@ def main():
 
     print()
 
+    # 使用 asyncio 运行异步代码
+    asyncio.run(_main_async(feishu_enabled))
+
+
+async def _main_async(feishu_enabled):
+    """异步主逻辑"""
     # 启动实时监控
-    api = start_realtime_monitor()
+    api = await start_realtime_monitor()
 
     if api:
         try:
-            signal_loop(api, feishu_enabled)
+            await signal_loop_async(api, feishu_enabled)
         finally:
-            api.disconnect()
+            await api.disconnect()
             logger.info("Disconnected")
     else:
         print("Failed to start real-time monitor")
