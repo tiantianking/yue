@@ -146,21 +146,33 @@ def check_pid_file() -> bool:
     if pid_file.exists():
         try:
             old_pid = pid_file.read_text().strip()
-            import subprocess
-            result = subprocess.run(
-                ["tasklist", "/FI", f"PID eq {old_pid}"],
-                capture_output=True,
-                text=True,
-                encoding='mbcs' if sys.platform == 'win32' else 'utf-8',
-                errors='replace',
-                creationflags=0x08000000 if sys.platform == 'win32' else 0,
-            )
-            if old_pid in result.stdout:
-                logger.error(f"系统已在运行 (PID: {old_pid})")
-                return False
+            if not old_pid.isdigit():
+                pid_file.unlink()
+            else:
+                import subprocess
+                result = subprocess.run(
+                    ["tasklist", "/FI", f"PID eq {old_pid}", "/NH"],
+                    capture_output=True,
+                    text=True,
+                    encoding='mbcs' if sys.platform == 'win32' else 'utf-8',
+                    errors='replace',
+                    creationflags=0x08000000 if sys.platform == 'win32' else 0,
+                )
+                # /NH 无表头，检查输出中是否包含精确 PID
+                output = result.stdout.strip()
+                # 如果任务不存在，输出包含 "INFO:" 或为空
+                if old_pid in output and "INFO" not in output.upper():
+                    logger.error(f"系统已在运行 (PID: {old_pid})")
+                    return False
+                # 进程已死，清理旧 PID 文件
+                logger.info(f"清理过期 PID 文件 (旧 PID {old_pid} 已不在运行)")
+                pid_file.unlink()
         except Exception:
             pass
-        pid_file.unlink()
+            try:
+                pid_file.unlink()
+            except Exception:
+                pass
 
     pid_file.write_text(str(os.getpid()))
     return True
