@@ -1,6 +1,6 @@
 """
 OKX 合约信号系统 - 智能交易大脑
-整合所有模块：在线学习 + 强化学习 + 币种轮换 + 实时API
+整合所有模块：在线学习 + 强化学习 + 币种轮换 + 实时API + 环境自适应 + 多策略投票 + 滚动回测 + 模式识别
 """
 from __future__ import annotations
 
@@ -30,7 +30,13 @@ from okx_signal_system.ml.symbol_rotation import (
     SymbolRotator,
     create_rotator,
 )
-from okx_signal_system.notification.feishu import feishu_send_signal_card, feishu_send_status_card
+from okx_signal_system.ml.regime_adaptive import (
+    AdaptiveParamsManager,
+    RegimeDetector,
+)
+from okx_signal_system.ml.rolling_backtest import RollingBacktestValidator
+from okx_signal_system.ml.pattern_recognition import PatternRecognizer
+from okx_signal_system.notify.feishu import feishu_send_signal_card, send_text
 from okx_signal_system.data.gap_handler import IncrementalSyncer
 from okx_signal_system.paths import find_lightweight_history
 from okx_signal_system.strategy.trend_breakout import StrategyParams, generate_signals, build_signal
@@ -71,7 +77,8 @@ class TradingBrain:
         # 实时API
         api_config = self.config.get("api", {})
         self.api = create_realtime_api(api_config)
-        # SignalExecutor removed - not defined in realtime module
+        # 信号执行器（使用 position_monitor 替代）
+        self.auto_stop = None  # 延迟初始化
 
         # 增量数据同步器
         self.syncer = IncrementalSyncer(self.data_dir.parent.parent / "data" / "okx_1h_extended")
@@ -170,16 +177,9 @@ class TradingBrain:
             except Exception as e:
                 log.error(f"Error processing {inst_id}: {e}")
 
-        # 发送状态报告
+        # 状态报告仅记录日志，不推送飞书（减少噪音）
         balance = await self.api.get_account_balance()
-        feishu_send_status_card(
-            equity=balance.total_equity,
-            open_positions=len(await self.api.get_positions()),
-            status="active",
-            loss_streak=0,
-            max_drawdown=0.05,
-            cycle_count=self._cycle_count,
-        )
+        log.info(f"Cycle #{self._cycle_count} | equity={balance.total_equity} | positions={len(await self.api.get_positions())}")
 
         log.info(f"Cycle #{self._cycle_count} completed. Signals: {len(signals_generated)}")
 

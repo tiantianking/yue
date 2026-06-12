@@ -5,7 +5,8 @@ from itertools import product
 
 import pandas as pd
 
-from okx_signal_system.backtest.runner import run_backtest, summarize_trades
+from okx_signal_system.backtest.runner import run_backtest_from_features, summarize_trades
+from okx_signal_system.features.indicators import build_feature_frame
 from okx_signal_system.strategy.trend_breakout import StrategyParams
 
 
@@ -19,32 +20,57 @@ def parameter_grid() -> list[StrategyParams]:
             take_profit_mult=tp_mult,
             max_hold_bars=max_hold,
         )
-        for fast, slow, atr_mult, tp_mult, max_hold in product(
+        for fast, slow, breakout, atr_mult, tp_mult, max_hold in product(
             [10, 20, 30],
             [50, 60, 80],
+            [20, 40, 60],
             [1.5, 2.0, 2.5, 3.0],
             [1.5, 2.0, 3.0, 4.0],
             [24, 48, 72],
         )
-        for breakout in [40]
     ]
 
 
 def run_grid_search(frame: pd.DataFrame, *, inst_id: str, params_grid: list[StrategyParams] | None = None) -> pd.DataFrame:
     rows = []
+    feature_cache: dict[tuple[int, int, int, int], pd.DataFrame] = {}
     for params in params_grid or parameter_grid():
-        trades = run_backtest(frame, inst_id=inst_id, params=params)
+        feature_key = (params.fast_ema, params.slow_ema, params.breakout_window, params.atr_window)
+        if feature_key not in feature_cache:
+            feature_cache[feature_key] = build_feature_frame(
+                frame,
+                fast_ema=params.fast_ema,
+                slow_ema=params.slow_ema,
+                breakout_window=params.breakout_window,
+                atr_window=params.atr_window,
+            )
+        trades = run_backtest_from_features(feature_cache[feature_key], inst_id=inst_id, params=params)
         summary = summarize_trades(trades)
         rows.append({**asdict(params), **{f"train_{key}": value for key, value in summary.items()}})
     return pd.DataFrame(rows)
 
 
 def select_best_params(grid_results: pd.DataFrame) -> StrategyParams:
+    """
+    参数选择策略：以盈亏比(Profit Factor)为主，胜率为辅助参考
+
+    核心原则：
+    1. 盈亏比是衡量策略质量的核心指标
+    2. 胜率只是辅助参考，高盈亏比即使胜率低也可以
+    3. 在盈亏比相同的情况下选择胜率更高的
+    """
     if grid_results.empty:
         raise ValueError("grid results are empty")
     ranked = grid_results.copy()
+
+    # 标准化盈亏比（处理inf情况）
     ranked["rank_pf"] = ranked["train_profit_factor"].replace(float("inf"), 999999)
-    ranked = ranked.sort_values(["train_status", "rank_pf", "train_total_return", "train_total_trades"], ascending=[False, False, False, False])
+
+    # 按盈亏比为主、胜率为辅排序
+    ranked = ranked.sort_values(
+        ["train_status", "rank_pf", "train_win_rate", "train_total_return", "train_total_trades"],
+        ascending=[False, False, False, False, False],
+    )
     row = ranked.iloc[0]
     return StrategyParams(
         fast_ema=int(row["fast_ema"]),

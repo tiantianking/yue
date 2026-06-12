@@ -1,6 +1,6 @@
 from okx_signal_system.backtest.evaluation import evaluate_symbol
 from okx_signal_system.backtest.grid_search import parameter_grid, run_grid_search, select_best_params
-from okx_signal_system.backtest.research import run_dataset_research, run_train_valid_symbol
+from okx_signal_system.backtest.research import run_dataset_research, run_dataset_research_artifacts, run_train_valid_symbol, write_research_artifacts
 from okx_signal_system.data.loader import load_symbol_file
 from okx_signal_system.paths import find_lightweight_history
 from okx_signal_system.strategy.trend_breakout import StrategyParams
@@ -10,8 +10,8 @@ def btc_frame(rows: int = 700):
     return load_symbol_file(find_lightweight_history("okx_1h_extended") / "BTC_USDT_USDT_1h.parquet").frame.head(rows)
 
 
-def test_parameter_grid_has_432_combinations() -> None:
-    assert len(parameter_grid()) == 432
+def test_parameter_grid_has_1296_combinations() -> None:
+    assert len(parameter_grid()) == 1296
 
 
 def test_grid_search_selects_params() -> None:
@@ -48,3 +48,19 @@ def test_dataset_research_outputs_symbol_result_table() -> None:
         params_grid=[StrategyParams(fast_ema=10, slow_ema=50, breakout_window=20, max_hold_bars=24)],
     )
     assert {"symbol", "valid_profit_factor", "pass_fail", "fail_reasons"}.issubset(table.columns)
+    assert table["shared_params"].all()
+
+
+def test_shared_research_artifacts_use_one_param_set(tmp_path) -> None:
+    grid = [
+        StrategyParams(fast_ema=10, slow_ema=50, breakout_window=20, max_hold_bars=24),
+        StrategyParams(fast_ema=20, slow_ema=60, breakout_window=40, max_hold_bars=48),
+    ]
+    artifacts = run_dataset_research_artifacts(max_symbols=2, params_grid=grid)
+    single = artifacts["single_symbol_results"]
+    assert single["fast_ema"].nunique() == 1
+    assert single["slow_ema"].nunique() == 1
+    assert {"train_grid_results", "selected_params", "validation_results", "portfolio_results", "leverage_risk", "acceptance_checklist"}.issubset(artifacts)
+    paths = write_research_artifacts(artifacts, tmp_path)
+    for key in ["train_grid_results", "selected_params", "validation_results", "single_symbol_results", "portfolio_results", "leverage_risk", "acceptance_checklist", "final_report"]:
+        assert paths[key].exists()

@@ -1,6 +1,6 @@
 risk:
   margin_mode: isolated
-  position_mode: net_mode
+  position_mode: one_way  # OKX 单向持仓模式
   max_leverage: 10
   per_symbol_initial_equity: 10000
   halt_equity_ratio: 0.73

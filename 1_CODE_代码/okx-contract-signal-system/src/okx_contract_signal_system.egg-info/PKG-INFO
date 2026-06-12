@@ -1,0 +1,12 @@
+Metadata-Version: 2.4
+Name: okx-contract-signal-system
+Version: 0.1.0
+Summary: Local OKX contract backtest and semi-automatic signal system
+Requires-Python: >=3.11
+Requires-Dist: numpy
+Requires-Dist: pandas
+Requires-Dist: pyarrow
+Requires-Dist: pyyaml
+Requires-Dist: requests
+Requires-Dist: plotly
+Requires-Dist: streamlit

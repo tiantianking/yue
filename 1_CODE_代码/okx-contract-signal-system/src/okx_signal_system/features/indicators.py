@@ -41,6 +41,22 @@ def prior_breakout_levels(frame: pd.DataFrame, window: int) -> pd.DataFrame:
     )
 
 
+def volume_features(frame: pd.DataFrame, sma_window: int = 20) -> pd.DataFrame:
+    """成交量特征：量比和成交量SMA"""
+    df = frame.copy()
+    df["volume_sma"] = df["volume"].rolling(window=sma_window, min_periods=sma_window).mean()
+    df["vol_ratio"] = df["volume"] / df["volume_sma"]
+    return df[["vol_ratio", "volume_sma"]]
+
+
+def detect_extreme_volatility(frame: pd.DataFrame, atr_window: int = 14, threshold_multiplier: float = 3.0) -> pd.Series:
+    """检测连续极端波动：最近 N 根 bar 中有 >= M 根 ATR 异常放大"""
+    atr = atr(frame, atr_window)
+    atr_pct = atr / frame["close"]
+    rolling_extreme = atr_pct.rolling(window=3, min_periods=3).max()
+    return rolling_extreme > threshold_multiplier * atr_pct.mean() if atr_pct.mean() > 0 else pd.Series(False, index=frame.index)
+
+
 def add_1h_features(
     frame: pd.DataFrame,
     *,
@@ -118,4 +134,10 @@ def build_feature_frame(
         atr_window=atr_window,
     )
     four_h = add_4h_trend(resample_4h(frame_1h), fast_ema=fast_ema, slow_ema=slow_ema)
-    return align_completed_4h_to_1h(one_h, four_h)
+    aligned = align_completed_4h_to_1h(one_h, four_h)
+
+    # 添加成交量特征
+    vol_feats = volume_features(aligned, sma_window=20)
+    aligned = pd.concat([aligned, vol_feats], axis=1)
+
+    return aligned

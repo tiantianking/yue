@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from okx_signal_system.backtest.research import run_dataset_research
+from okx_signal_system.backtest.research import run_dataset_research_artifacts, write_research_artifacts
 from okx_signal_system.config import project_paths
 from okx_signal_system.strategy.trend_breakout import StrategyParams
 
@@ -20,12 +20,16 @@ def main() -> None:
     parser.add_argument("--dataset", default="okx_1h_extended")
     parser.add_argument("--max-symbols", type=int, default=3)
     parser.add_argument("--full-grid", action="store_true")
+    parser.add_argument("--per-symbol-params", action="store_true")
     args = parser.parse_args()
     params_grid = None if args.full_grid else smoke_grid()
-    results = run_dataset_research(dataset=args.dataset, params_grid=params_grid, max_symbols=args.max_symbols)
-    output = project_paths().output_dir / "symbol_train_valid_results.csv"
-    output.parent.mkdir(parents=True, exist_ok=True)
-    results.to_csv(output, index=False, encoding="utf-8")
+    artifacts = run_dataset_research_artifacts(
+        dataset=args.dataset,
+        params_grid=params_grid,
+        max_symbols=args.max_symbols,
+        shared_params=not args.per_symbol_params,
+    )
+    write_research_artifacts(artifacts, project_paths().output_dir)
 
 
 if __name__ == "__main__":
