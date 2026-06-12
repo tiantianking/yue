@@ -1,48 +1,61 @@
-"""
-OKX 交易所适配器
+"""OKX exchange adapter.
+
+The module keeps network side effects explicit:
+- public market data works without credentials;
+- private account and trade endpoints require environment variables;
+- simulated trading is enabled by default unless OKX_IS_SIMULATED=false.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
-import base64
+import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlencode
 
 import requests
 
-# ============================================================
-# API 凭证配置
-# ============================================================
-OKX_API_KEY = "8fcab04d-14e3-4b88-89bb-b9beac7b9ad7"
-OKX_SECRET_KEY = "7ED970F8EC9892659726CD39275F1318"
-OKX_PASSPHRASE = "@Wang19861103"
-OKX_IS_SIMULATED = True  # 模拟盘
+BASE_URL = "https://www.okx.com"
+PRIVATE_PATH_PREFIXES = ("/api/v5/account/", "/api/v5/trade/")
+
+OKX_API_KEY = os.environ.get("OKX_API_KEY", "")
+OKX_SECRET_KEY = os.environ.get("OKX_SECRET_KEY", "")
+OKX_PASSPHRASE = os.environ.get("OKX_PASSPHRASE", "")
+OKX_IS_SIMULATED = os.environ.get("OKX_IS_SIMULATED", "true").lower() != "false"
 
 
 def _utc_now() -> str:
-    """生成OKX要求的ISO 8601时间戳"""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
+def _is_private_path(path: str) -> bool:
+    return path.startswith(PRIVATE_PATH_PREFIXES)
+
+
+def _credentials_ready() -> bool:
+    return bool(OKX_API_KEY and OKX_SECRET_KEY and OKX_PASSPHRASE)
+
+
 def _sign(message: str) -> str:
-    """HMAC-SHA256签名"""
-    mac = hmac.new(
-        OKX_SECRET_KEY.encode("utf-8"),
-        message.encode("utf-8"),
-        hashlib.sha256,
-    )
+    if not OKX_SECRET_KEY:
+        raise RuntimeError("OKX_SECRET_KEY is not configured")
+    mac = hmac.new(OKX_SECRET_KEY.encode("utf-8"), message.encode("utf-8"), hashlib.sha256)
     return base64.b64encode(mac.digest()).decode("utf-8")
 
 
-def _headers(method: str, path: str) -> dict[str, str]:
-    """生成带签名的请求头"""
-    timestamp = _utc_now()
-    message = timestamp + method + path
-    signature = _sign(message)
+def _headers(method: str, request_path: str) -> dict[str, str]:
+    if not _is_private_path(request_path):
+        return {"Content-Type": "application/json"}
 
+    if not _credentials_ready():
+        raise RuntimeError("OKX API credentials are not configured")
+
+    timestamp = _utc_now()
+    signature = _sign(timestamp + method + request_path)
     headers = {
         "OK-ACCESS-KEY": OKX_API_KEY,
         "OK-ACCESS-SIGN": signature,
@@ -55,211 +68,165 @@ def _headers(method: str, path: str) -> dict[str, str]:
     return headers
 
 
-BASE_URL = "https://www.okx.com"
-
-
 def _request(method: str, path: str, params: dict | None = None) -> dict[str, Any]:
-    """通用请求方法"""
+    method = method.upper()
+    params = params or {}
+    request_path = f"{path}?{urlencode(params)}" if method == "GET" and params else path
     url = BASE_URL + path
+    headers = _headers(method, request_path)
 
-    # 构建带查询参数的完整path（用于签名）
-    if params:
-        query_string = "&".join(f"{k}={v}" for k, v in params.items())
-        full_path = f"{path}?{query_string}"
-    else:
-        full_path = path
-
-    headers = _headers(method, full_path)
     try:
         if method == "GET":
-            resp = requests.get(url, headers=headers, params=params, timeout=15)
+            resp = requests.get(url, headers=headers, params=params or None, timeout=15)
         elif method == "POST":
-            resp = requests.post(url, headers=headers, json=params or {}, timeout=15)
+            resp = requests.post(url, headers=headers, json=params, timeout=15)
         elif method == "DELETE":
-            resp = requests.delete(url, headers=headers, timeout=15)
+            resp = requests.delete(url, headers=headers, json=params or None, timeout=15)
         else:
-            raise ValueError(f"Unsupported method: {method}")
+            raise ValueError(f"unsupported HTTP method: {method}")
+    except requests.RequestException as exc:
+        raise ConnectionError(f"OKX network error: {exc}") from exc
 
-        if resp.status_code != 200:
-            raise ConnectionError(f"OKX API错误: {resp.status_code} {resp.text}")
+    if resp.status_code != 200:
+        raise ConnectionError(f"OKX API error: {resp.status_code} {resp.text}")
 
-        result = resp.json()
-        if result.get("code") != "0":
-            raise ConnectionError(f"OKX API错误: {result.get('msg')} (code={result.get('code')})")
-
-        return result
-    except requests.RequestException as e:
-        raise ConnectionError(f"OKX网络错误: {e}")
+    result = resp.json()
+    if result.get("code") != "0":
+        raise ConnectionError(f"OKX API error: {result.get('msg')} (code={result.get('code')})")
+    return result
 
 
-# ============================================================
-# 账户查询
-# ============================================================
+def _to_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def get_account_balance(ccy: str = "BTC") -> dict[str, Any]:
-    """获取账户余额"""
     result = _request("GET", "/api/v5/account/balance", {"ccy": ccy})
-    data = result["data"][0]
-    details = data.get("details", [])
-    for d in details:
-        if d["ccy"] == ccy:
+    data = result.get("data", [{}])[0]
+    for detail in data.get("details", []):
+        if detail.get("ccy") == ccy:
             return {
                 "ccy": ccy,
-                "avail_eq": float(d["availEq"]),
-                "eq": float(d["eq"]),
-                "eq_usd": float(d["eqUsd"]),
+                "avail_eq": _to_float(detail.get("availEq")),
+                "eq": _to_float(detail.get("eq")),
+                "eq_usd": _to_float(detail.get("eqUsd")),
             }
     return {"ccy": ccy, "avail_eq": 0.0, "eq": 0.0, "eq_usd": 0.0}
 
 
 def get_account_positions(inst_id: str | None = None) -> list[dict[str, Any]]:
-    """获取持仓"""
-    inst_family = inst_id.split("-")[0] if inst_id else None
-    params = {"instType": "SWAP"}
-    if inst_id:
+    params: dict[str, str] = {"instType": "SWAP"}
+    if inst_id and inst_id.upper() not in {"SWAP", "FUTURES"}:
         params["instId"] = inst_id
+
     result = _request("GET", "/api/v5/account/positions", params)
     positions = []
     for pos in result.get("data", []):
-        if inst_family and not pos["instId"].startswith(inst_family):
+        size = _to_float(pos.get("pos"))
+        if size == 0:
             continue
-        positions.append({
-            "inst_id": pos["instId"],
-            "side": pos["posSide"].lower(),
-            "size": float(pos["pos"]),
-            "entry_price": float(pos["avgPx"]) if pos.get("avgPx") else 0.0,
-            "unrealized_pnl": float(pos["upl"]) if pos.get("upl") else 0.0,
-            "margin": float(pos["margin"]) if pos.get("margin") else 0.0,
-            "leverage": float(pos["lever"]) if pos.get("lever") else 0.0,
-        })
+        positions.append(
+            {
+                "inst_id": pos.get("instId", ""),
+                "side": (pos.get("posSide") or "net").lower(),
+                "size": abs(size),
+                "entry_price": _to_float(pos.get("avgPx")),
+                "unrealized_pnl": _to_float(pos.get("upl")),
+                "margin": _to_float(pos.get("margin")),
+                "leverage": _to_float(pos.get("lever")),
+                "raw": pos,
+            }
+        )
     return positions
 
 
-# ============================================================
-# 订单操作
-# ============================================================
 @dataclass
 class OrderParams:
-    """下单参数"""
     inst_id: str
-    side: str  # buy/sell
-    size: float
-    price: float | None = None  # None=市价单
+    side: str
+    size: float | str
+    price: float | None = None
     stop_loss: float | None = None
     take_profit: float | None = None
+    order_type: str = "market"
+    td_mode: str = "isolated"
+    reduce_only: bool = False
 
 
 def place_order(params: OrderParams) -> dict[str, Any]:
-    """市价开仓"""
-    body = {
+    if params.side not in {"buy", "sell"}:
+        raise ValueError("side must be buy or sell")
+    if float(params.size) <= 0:
+        raise ValueError("size must be positive")
+
+    body: dict[str, Any] = {
         "instId": params.inst_id,
-        "tdMode": "isolated",
+        "tdMode": params.td_mode,
         "side": params.side,
-        "ordType": "market",
+        "ordType": "limit" if params.price is not None else params.order_type,
         "sz": str(params.size),
-        "clOrdId": f"sig_{int(time.time()*1000)}",
+        "clOrdId": f"sig_{int(time.time() * 1000)}"[:32],
     }
     if params.price is not None:
-        body["ordType"] = "limit"
         body["px"] = str(params.price)
+    if params.reduce_only:
+        body["reduceOnly"] = "true"
 
     result = _request("POST", "/api/v5/trade/order", body)
-
-    order_id = result["data"][0]["ordId"]
-
-    # 设置止损止盈
-    if params.stop_loss or params.take_profit:
-        _set_sl_tp(order_id, params)
-
-    return result["data"][0]
+    return result.get("data", [{}])[0]
 
 
-def _set_sl_tp(ord_id: str, params: OrderParams) -> None:
-    """设置止损止盈"""
-    inst_id = params.inst_id
-    if params.stop_loss:
-        sl_side = "sell" if params.side == "buy" else "buy"
-        _request("POST", "/api/v5/trade/order", {
-            "instId": inst_id,
-            "tdMode": "isolated",
-            "side": sl_side,
-            "ordType": "market",
-            "sz": "0",
-            "slTriggerPx": str(params.stop_loss),
-            "slOrdType": "market",
-        })
-    if params.take_profit:
-        tp_side = "sell" if params.side == "buy" else "buy"
-        _request("POST", "/api/v5/trade/order", {
-            "instId": inst_id,
-            "tdMode": "isolated",
-            "side": tp_side,
-            "ordType": "market",
-            "sz": "0",
-            "tpTriggerPx": str(params.take_profit),
-            "tpOrdType": "market",
-        })
-
-
-def close_position(inst_id: str, size: float) -> dict[str, Any]:
-    """市价平仓"""
+def close_position(inst_id: str, size: float | str | None = None) -> dict[str, Any]:
     positions = get_account_positions(inst_id)
     if not positions:
-        return {"msg": "无持仓"}
+        return {"code": "1", "msg": "no open position", "data": []}
 
-    pos = positions[0]
-    side = "sell" if pos["side"] == "long" else "buy"
-
-    body = {
-        "instId": inst_id,
-        "tdMode": "isolated",
-        "side": side,
-        "ordType": "market",
-        "sz": str(size),
-        "clOrdId": f"close_{int(time.time()*1000)}",
-    }
-    result = _request("POST", "/api/v5/trade/order", body)
-    return result["data"][0]
+    position = positions[0]
+    close_size = str(size if size is not None else position["size"])
+    side = "sell" if position["side"] == "long" else "buy"
+    order = OrderParams(
+        inst_id=inst_id,
+        side=side,
+        size=close_size,
+        order_type="market",
+        reduce_only=True,
+    )
+    data = place_order(order)
+    return {"code": "0", "msg": "", "data": [data]}
 
 
 def get_open_orders(inst_id: str | None = None) -> list[dict[str, Any]]:
-    """获取未成交订单"""
-    params = {"instType": "SWAP", "state": "live"}
+    params: dict[str, str] = {"instType": "SWAP", "state": "live"}
     if inst_id:
         params["instId"] = inst_id
-    result = _request("GET", "/api/v5/trade/orders-pending", params)
-    return result.get("data", [])
+    return _request("GET", "/api/v5/trade/orders-pending", params).get("data", [])
 
 
-# ============================================================
-# 实时行情
-# ============================================================
 def get_ticker(inst_id: str) -> dict[str, Any]:
-    """获取实时行情"""
     result = _request("GET", "/api/v5/market/ticker", {"instId": inst_id})
-    d = result["data"][0]
+    data = result.get("data", [{}])[0]
     return {
-        "inst_id": d["instId"],
-        "last": float(d["last"]),
-        "bid": float(d["bidPx"]),
-        "ask": float(d["askPx"]),
-        "vol_24h": float(d["vol24h"]),
-        "ts": d["ts"],
+        "inst_id": data.get("instId", inst_id),
+        "last": _to_float(data.get("last")),
+        "bid": _to_float(data.get("bidPx")),
+        "ask": _to_float(data.get("askPx")),
+        "vol_24h": _to_float(data.get("vol24h")),
+        "ts": data.get("ts", ""),
     }
 
 
 def get_candles(inst_id: str, bar: str = "1h", limit: int = 100) -> list[list[Any]]:
-    """获取K线数据"""
-    result = _request("GET", "/api/v5/market/history-candles", {
-        "instId": inst_id,
-        "bar": bar,
-        "limit": str(limit),
-    })
+    result = _request(
+        "GET",
+        "/api/v5/market/history-candles",
+        {"instId": inst_id, "bar": bar, "limit": str(limit)},
+    )
     return result.get("data", [])
 
 
-# ============================================================
-# 工具函数
-# ============================================================
 @dataclass
 class OKXInstrument:
     base: str
@@ -296,7 +263,6 @@ def okx_place_order_preview(
     client_order_id: str,
     margin_mode: str = "isolated",
 ) -> dict[str, str]:
-    """下单预览（不实际下单）"""
     if margin_mode != "isolated":
         raise ValueError("only isolated margin is allowed")
     if not inst_id.endswith("-SWAP"):
@@ -307,7 +273,7 @@ def okx_place_order_preview(
         raise ValueError("size must be positive")
     body = {
         "instId": inst_id,
-        "tdMode": "isolated",
+        "tdMode": margin_mode,
         "side": side,
         "ordType": "market" if price is None else "limit",
         "sz": str(size),
@@ -319,10 +285,15 @@ def okx_place_order_preview(
 
 
 def test_connection() -> dict[str, Any]:
-    """测试API连接"""
-    balance = get_account_balance("BTC")
+    if not _credentials_ready():
+        return {
+            "connected": False,
+            "balance": None,
+            "simulated": OKX_IS_SIMULATED,
+            "reason": "missing_credentials",
+        }
     return {
         "connected": True,
-        "balance": balance,
+        "balance": get_account_balance("BTC"),
         "simulated": OKX_IS_SIMULATED,
     }

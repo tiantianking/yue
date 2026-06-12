@@ -41,7 +41,9 @@ def safe_input(prompt=""):
         return ""
 
 # 添加 src/ 到 Python 路径
+APP_VERSION = "v3"
 _project_root = Path(__file__).parent
+_runtime_root = Path(sys.executable).parent if getattr(sys, "frozen", False) else _project_root
 _src_path = _project_root / "src"
 if str(_src_path) not in sys.path:
     sys.path.insert(0, str(_src_path))
@@ -80,14 +82,14 @@ if not check_dependencies():
 def load_env_file() -> None:
     """手动加载 .env 文件到环境变量"""
     if hasattr(sys, '_MEIPASS'):
-        base_path = Path(sys._MEIPASS)
+        base_path = Path(sys.executable).parent
     else:
-        base_path = Path(".")
+        base_path = _project_root
 
     env_file = base_path / ".env"
 
     if not env_file.exists():
-        env_file = Path(".") / ".env"
+        env_file = _runtime_root / ".env"
 
     if not env_file.exists():
         return
@@ -112,7 +114,7 @@ load_env_file()
 # ============================================================
 def setup_logging() -> logging.Logger:
     """配置日志：仅文件日志（GUI模式无控制台）"""
-    log_dir = Path("logs")
+    log_dir = _runtime_root / "logs"
     log_dir.mkdir(exist_ok=True)
 
     log_file = log_dir / f"okx_signal_{datetime.now(timezone.utc).strftime('%Y%m%d')}.log"
@@ -146,7 +148,7 @@ _lock_file = None
 def check_pid_file() -> bool:
     """使用文件锁防止重复启动（比 PID 文件更可靠，无编码/权限问题）"""
     global _lock_file
-    lock_path = Path("okx_signal.lock")
+    lock_path = _runtime_root / "okx_signal.lock"
     try:
         if sys.platform == 'win32':
             import msvcrt
@@ -180,7 +182,7 @@ def cleanup_pid_file() -> None:
         except Exception:
             pass
         _lock_file = None
-    lock_path = Path("okx_signal.lock")
+    lock_path = _runtime_root / "okx_signal.lock"
     if lock_path.exists():
         try:
             lock_path.unlink()
@@ -353,12 +355,9 @@ async def main_async() -> None:
 def main_cli() -> None:
     """命令行模式主函数"""
     print("\n+=========================================================+")
-    print("|       OKX Signal System v2.0                            |")
+    print(f"|       OKX Signal System {APP_VERSION:<31}|")
     print("|       Real-time K-line | Signal Detection | Feishu       |")
     print("+=========================================================+\n")
-
-    if not check_pid_file():
-        return
 
     def signal_handler(sig, frame):
         logger.info(f"收到信号 {sig}，正在退出...")
@@ -401,6 +400,35 @@ def main() -> None:
         except Exception as e:
             logger.error(f"启动 GUI 失败: {e}")
             sys.exit(1)
+
+
+def main() -> None:
+    use_cli = "--cli" in sys.argv
+
+    if use_cli:
+        main_cli()
+        return
+
+    if not check_environment():
+        safe_input("\nPress Enter to exit...")
+        return
+    if not check_pid_file():
+        safe_input("\nPress Enter to exit...")
+        return
+
+    try:
+        from gui import start_gui
+
+        start_gui()
+    except ImportError as exc:
+        logger.warning("GUI import failed: %s; falling back to CLI", exc)
+        cleanup_pid_file()
+        main_cli()
+    except Exception as exc:
+        logger.error("GUI startup failed: %s", exc)
+        sys.exit(1)
+    finally:
+        cleanup_pid_file()
 
 
 def global_exception_handler(exc_type, exc_value, exc_traceback):

@@ -18,6 +18,7 @@ warnings.warn(
 from okx_signal_system.notify.feishu import (  # noqa: F401
     feishu_send_text,
     feishu_send_signal_card,
+    feishu_send_status_card,
     feishu_test,
     FEISHU_WEBHOOK,
 )

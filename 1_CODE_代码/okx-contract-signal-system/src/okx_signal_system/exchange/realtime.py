@@ -715,12 +715,7 @@ class OKXRealtimeAPI:
     def sync_from_api(self, inst_id: str) -> int:
         """从API同步数据到本地"""
         try:
-            resp = get_candles(inst_id, bar="1H", limit=300)
-
-            if not resp or not isinstance(resp, dict):
-                return 0
-
-            raw_bars = resp.get("data", [])
+            raw_bars = get_candles(inst_id, bar="1H", limit=300)
             if not raw_bars:
                 return 0
 

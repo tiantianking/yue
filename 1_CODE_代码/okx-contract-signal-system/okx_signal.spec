@@ -55,6 +55,10 @@ hiddenimports = [
     'streamlit.elements',
     'streamlit.runtime',
     'streamlit.web',
+    'okx_signal_system.exchange.position_monitor',
+    'okx_signal_system.strategy.ensemble',
+    'okx_signal_system.ml.pattern_recognition',
+    'okx_signal_system.ml.rolling_backtest',
 ]
 
 a = Analysis(
@@ -72,7 +76,6 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        'tkinter',
         'matplotlib',
         'PIL',
         'cv2',

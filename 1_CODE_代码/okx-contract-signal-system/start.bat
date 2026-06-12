@@ -1,141 +1,88 @@
 @echo off
-setlocal EnableDelayedExpansion
-title OKX Signal System
+setlocal EnableExtensions EnableDelayedExpansion
+title OKX Signal System v3
+
+cd /d "%~dp0"
 
 echo ========================================
-echo  OKX Signal System — v2.0
+echo  OKX Signal System v3
 echo ========================================
 echo.
 
-REM ============================================================
-REM 确定正确的 Python 解释器
-REM 优先级：py launcher > 显式路径 > 系统 PATH 中的 python
-REM ============================================================
 set "PYTHON_EXE="
+set "LOCAL_PY=%~dp0..\..\LOCAL_DEPS\venv\Scripts\python.exe"
 
-REM 1. 尝试 py launcher（最可靠，自动找到正确版本）
-py --version > nul 2>&1
+if exist "%LOCAL_PY%" (
+    set "PYTHON_EXE=%LOCAL_PY%"
+    echo [INFO] Using workspace Python
+    goto python_found
+)
+
+py -3 --version > nul 2>&1
 if not errorlevel 1 (
-    set "PYTHON_EXE=py"
-    echo [INFO] Using Python Launcher (py)
-    goto :python_found
+    set "PYTHON_EXE=py -3"
+    echo [INFO] Using Python launcher
+    goto python_found
 )
 
-REM 2. 尝试 Python 3.12 显式路径
-if exist "C:\Users\26492\AppData\Local\Programs\Python\Python312\python.exe" (
-    set "PYTHON_EXE=C:\Users\26492\AppData\Local\Programs\Python\Python312\python.exe"
-    echo [INFO] Using Python 3.12 (explicit path)
-    goto :python_found
-)
-
-REM 3. 尝试系统 PATH 中的 python
 python --version > nul 2>&1
 if not errorlevel 1 (
     set "PYTHON_EXE=python"
-    echo [INFO] Using system python from PATH
-    goto :python_found
+    echo [INFO] Using Python from PATH
+    goto python_found
 )
 
-echo [ERROR] Python not found!
-echo.
-echo Install Python 3.8+ from:
-echo   https://www.python.org/downloads/
-echo.
-echo Make sure to check "Add Python to PATH" during install
+echo [ERROR] Python 3.11+ was not found.
+echo Install Python or restore LOCAL_DEPS\venv, then run this launcher again.
 pause
 exit /b 1
 
 :python_found
-for /f "tokens=2" %%i in ('%PYTHON_EXE% --version 2^>^&1') do set PYTHON_VERSION=%%i
-echo [OK]  Python version: %PYTHON_VERSION%
+%PYTHON_EXE% --version
 echo.
 
-REM Check dependencies
+if not defined OKX_IS_SIMULATED set "OKX_IS_SIMULATED=true"
+
 echo [INFO] Checking dependencies...
-%PYTHON_EXE% -c "import numpy, pandas, yaml, requests" 2> nul
+%PYTHON_EXE% -c "import numpy, pandas, yaml, requests, pyarrow, websocket" > nul 2>&1
 if errorlevel 1 (
-    echo [WARN] Missing dependencies, installing...
-    echo [INFO] Using python -m pip to ensure correct target...
-    %PYTHON_EXE% -m pip install --upgrade pip 2> nul
-    %PYTHON_EXE% -m pip install -r requirements.txt
+    echo [WARN] Missing dependencies; installing from requirements.
+    set "REQ_FILE=requirements.txt"
+    if not exist "!REQ_FILE!" set "REQ_FILE=requirements.lock"
+    if not exist "!REQ_FILE!" (
+        echo [ERROR] requirements.txt or requirements.lock not found.
+        pause
+        exit /b 1
+    )
+    %PYTHON_EXE% -m pip install -r "!REQ_FILE!"
     if errorlevel 1 (
-        echo [ERROR] Dependency install failed
-        echo [INFO] Try manually: %PYTHON_EXE% -m pip install numpy pandas pyarrow pyyaml requests websocket-client
+        echo [ERROR] Dependency install failed.
         pause
         exit /b 1
     )
-    echo [OK]  Dependencies installed
-) else (
-    echo [OK]  Dependencies ready
 )
-
-REM Check .env
+echo [OK] Dependencies ready
 echo.
-if not exist .env (
-    echo [WARN] .env file not found
-    if exist .env.example (
-        echo [INFO] Copying .env.example to .env...
-        copy .env.example .env > nul
-        echo [INFO] Please edit .env with your settings
-        notepad .env
-    ) else (
-        echo [ERROR] .env.example template not found
-        echo Please create .env manually
-        pause
-        exit /b 1
-    )
-) else (
-    echo [OK]  .env file found
-)
 
-REM Check config
-echo.
-if not exist config\base.yaml (
-    echo [ERROR] Config not found: config\base.yaml
+if not exist "config\base.yaml" (
+    echo [ERROR] Missing config\base.yaml
     pause
     exit /b 1
-) else (
-    echo [OK]  Config file found
 )
 
-REM Launch with auto-restart
-echo.
-echo [INFO] Starting application...
-echo ========================================
-echo.
+if not exist ".env" (
+    echo [INFO] .env not found; simulated mode is used unless environment variables are set.
+)
 
-set RESTART_COUNT=0
-
-:start
+echo [INFO] Starting desktop app...
+echo.
 %PYTHON_EXE% main.py
-set EXIT_CODE=%errorlevel%
+set "EXIT_CODE=%errorlevel%"
 
 echo.
-echo ========================================
-echo  Exit code: %EXIT_CODE%
-echo ========================================
-echo.
-
-if %EXIT_CODE%==0 (
-    echo Normal exit
-    goto end
-) else (
-    set /a RESTART_COUNT+=1
-    echo Abnormal exit (attempt #%RESTART_COUNT%)
-    
-    if %RESTART_COUNT% GEQ 10 (
-        echo.
-        echo [ERROR] Restarted 10 times, stopping
-        echo Check logs for details:
-        echo   logs\okx_signal_*.log
-        pause
-        exit /b 1
-    )
-    
-    echo Restarting in %RESTART_COUNT% seconds...
-    timeout /t %RESTART_COUNT% /nobreak > nul
-    goto start
+echo Exit code: %EXIT_CODE%
+if not "%EXIT_CODE%"=="0" (
+    echo [ERROR] App exited with an error. Check logs for details.
 )
-
-:end
 pause
+exit /b %EXIT_CODE%

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "okx-contract-signal-system"
-version = "0.1.0"
+version = "3.0.0"
 description = "Local OKX contract backtest and semi-automatic signal system"
 requires-python = ">=3.11"
 dependencies = [
@@ -13,6 +13,7 @@ dependencies = [
   "pyarrow",
   "pyyaml",
   "requests",
+  "websocket-client",
   "plotly",
   "streamlit",
 ]
