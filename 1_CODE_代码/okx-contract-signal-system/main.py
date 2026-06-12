@@ -140,54 +140,50 @@ logger = setup_logging()
 # ============================================================
 # PID 管理
 # ============================================================
-def check_pid_file() -> bool:
-    """检查 PID 文件，防止重复启动"""
-    pid_file = Path("okx_signal.pid")
-    if pid_file.exists():
-        try:
-            old_pid = pid_file.read_text().strip()
-            if not old_pid.isdigit():
-                pid_file.unlink()
-            else:
-                import subprocess
-                result = subprocess.run(
-                    ["tasklist", "/FI", f"PID eq {old_pid}", "/NH", "/FO", "CSV"],
-                    capture_output=True,
-                    text=True,
-                    encoding='mbcs' if sys.platform == 'win32' else 'utf-8',
-                    errors='replace',
-                    creationflags=0x08000000 if sys.platform == 'win32' else 0,
-                )
-                output = result.stdout.strip()
-                # CSV 格式下，进程存在输出如: "python.exe","18396","Console","1","xx MB"
-                # 进程不存在输出如: 信息: 没有运行的任务匹配指定标准。
-                is_running = (
-                    old_pid in output
-                    and not any(kw in output for kw in ["信息", "INFO", "No tasks", "no running"])
-                )
-                if is_running:
-                    logger.error(f"系统已在运行 (PID: {old_pid})")
-                    return False
-                # 进程已死，清理旧 PID 文件
-                logger.info(f"清理过期 PID 文件 (旧 PID {old_pid} 已不在运行)")
-                pid_file.unlink()
-        except Exception:
-            pass
-            try:
-                pid_file.unlink()
-            except Exception:
-                pass
+# 全局锁文件句柄（保持到进程退出）
+_lock_file = None
 
-    pid_file.write_text(str(os.getpid()))
-    return True
+def check_pid_file() -> bool:
+    """使用文件锁防止重复启动（比 PID 文件更可靠，无编码/权限问题）"""
+    global _lock_file
+    lock_path = Path("okx_signal.lock")
+    try:
+        if sys.platform == 'win32':
+            import msvcrt
+            _lock_file = open(lock_path, 'w')
+            msvcrt.locking(_lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+            _lock_file.write(str(os.getpid()))
+            _lock_file.flush()
+            logger.info(f"获取锁成功 (PID: {os.getpid()})")
+            return True
+        else:
+            import fcntl
+            _lock_file = open(lock_path, 'w')
+            fcntl.flock(_lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _lock_file.write(str(os.getpid()))
+            _lock_file.flush()
+            return True
+    except (OSError, IOError):
+        if _lock_file:
+            _lock_file.close()
+            _lock_file = None
+        logger.error("系统已在运行（无法获取文件锁）")
+        return False
 
 
 def cleanup_pid_file() -> None:
-    """清理 PID 文件"""
-    pid_file = Path("okx_signal.pid")
-    if pid_file.exists():
+    """释放文件锁并清理"""
+    global _lock_file
+    if _lock_file:
         try:
-            pid_file.unlink()
+            _lock_file.close()
+        except Exception:
+            pass
+        _lock_file = None
+    lock_path = Path("okx_signal.lock")
+    if lock_path.exists():
+        try:
+            lock_path.unlink()
         except Exception:
             pass
 
