@@ -28,3 +28,6 @@ execution:
   live_order_enabled: false
   dry_run_enabled: true
   exchange_adapter: okx
+
+feishu:
+  enabled: true

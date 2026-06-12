@@ -251,14 +251,46 @@ async def start_realtime_monitor() -> object | None:
 async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -> None:
     """信号检测循环"""
     from okx_signal_system.exchange.realtime import LiveSignalMonitor
+    from okx_signal_system.notify.feishu import send_signal_alert, send_text
 
-    monitor = LiveSignalMonitor(api, signal_callback=None, risk_config=None)
+    # 构建信号回调：信号通过风控后自动推飞书
+    def on_signal(signal, decision):
+        """信号回调：推送到飞书"""
+        try:
+            if not feishu_enabled:
+                return
+            send_signal_alert(
+                inst_id=signal.inst_id,
+                side=signal.side,
+                entry_ref=signal.entry_ref or 0,
+                stop_loss=signal.stop_loss or 0,
+                take_profit=signal.take_profit or 0,
+                qty=0.01,
+                leverage=decision.leverage_used if hasattr(decision, 'leverage_used') else 5.0,
+                reason=", ".join(signal.reason_codes) if signal.reason_codes else "",
+                signal_score=getattr(decision, 'signal_score', None),
+                risk_reward_ratio=getattr(decision, 'risk_reward_ratio', None),
+                max_loss_pct=getattr(decision, 'max_loss_pct', None),
+            )
+            logger.info(f"飞书推送: {signal.inst_id} {signal.side}")
+        except Exception as e:
+            logger.error(f"飞书推送失败: {e}")
+
+    monitor = LiveSignalMonitor(api, signal_callback=on_signal, risk_config=None)
 
     logger.info("信号监控系统已启动")
     print("\n" + "=" * 50)
     print("信号监控系统已启动")
     print("按 Ctrl+C 退出")
     print("=" * 50 + "\n")
+
+    # 推送启动通知到飞书
+    if feishu_enabled:
+        try:
+            from okx_signal_system.notify.feishu import send_text
+            send_text(f"🟢 OKX信号系统已启动\n监控 {len(symbols)} 个币种\n模式: {'模拟' if os.environ.get('OKX_IS_SIMULATED', 'true').lower() != 'false' else '实盘'}")
+        except Exception as e:
+            logger.error(f"启动通知推送失败: {e}")
 
     try:
         await monitor.start()

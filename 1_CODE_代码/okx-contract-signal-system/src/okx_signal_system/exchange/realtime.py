@@ -642,7 +642,7 @@ class OKXRealtimeAPI:
                 for p in positions
             ]
         except Exception as e:
-            log.error(f"Failed to get positions: {e}")
+            log.debug(f"Failed to get positions (normal for simulated mode): {e}")
             return []
 
     async def get_account_balance(self) -> AccountBalance:
@@ -802,7 +802,12 @@ class LiveSignalMonitor:
 
         while self._running:
             try:
-                positions = await self.api.get_positions()
+                # 获取持仓（模拟盘可能401，优雅降级）
+                positions = []
+                try:
+                    positions = await self.api.get_positions()
+                except Exception as e:
+                    log.debug(f"获取持仓失败（模拟盘正常）: {e}")
                 pos_inst_ids = {p.inst_id for p in positions}
 
                 # ── 持仓管理: TP/SL + max_hold_bars ──
@@ -868,8 +873,32 @@ class LiveSignalMonitor:
                             f"RR={decision.risk_reward_ratio:.1f}:1 | "
                             f"lev={decision.leverage_used:.1f}x"
                         )
+                        # 回调通知
                         if self.signal_callback:
-                            self.signal_callback(signal, decision)
+                            try:
+                                self.signal_callback(signal, decision)
+                            except Exception as cb_err:
+                                log.error(f"Signal callback error: {cb_err}")
+                        # 内嵌飞书推送（callback 未设置时的 fallback）
+                        else:
+                            try:
+                                from okx_signal_system.notify.feishu import send_signal_alert
+                                send_signal_alert(
+                                    inst_id=signal.inst_id,
+                                    side=signal.side,
+                                    entry_ref=signal.entry_ref or 0,
+                                    stop_loss=signal.stop_loss or 0,
+                                    take_profit=signal.take_profit or 0,
+                                    qty=0.01,
+                                    leverage=decision.leverage_used,
+                                    reason=", ".join(signal.reason_codes) if signal.reason_codes else "",
+                                    signal_score=decision.signal_score,
+                                    risk_reward_ratio=decision.risk_reward_ratio,
+                                    max_loss_pct=getattr(decision, 'max_loss_pct', None),
+                                )
+                                log.info(f"飞书推送(fallback): {inst_id} {signal.side}")
+                            except Exception as feishu_err:
+                                log.error(f"飞书推送失败: {feishu_err}")
 
                 # 持久化
                 self.api.persist_data()
