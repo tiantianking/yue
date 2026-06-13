@@ -5,8 +5,9 @@ project:
   mode: research
 
 data:
-  historical_dataset: okx_1h_extended
-  timeframe: 1h
+  historical_dataset: okx_15m_extended
+  timeframe: 15m
+  trend_timeframe: 1h
   symbols:
     - BTC-USDT-SWAP
     - ETH-USDT-SWAP
@@ -34,6 +35,15 @@ execution:
   live_order_enabled: false
   dry_run_enabled: true
   exchange_adapter: okx
+
+strategy:
+  fast_ema: 12
+  slow_ema: 64
+  breakout_window: 32
+  atr_stop_mult: 2.4
+  take_profit_mult: 4.0
+  max_hold_bars: 96
+  atr_window: 14
 
 feishu:
   enabled: true

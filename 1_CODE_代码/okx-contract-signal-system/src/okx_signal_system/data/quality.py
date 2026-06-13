@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 from okx_signal_system.data.loader import SymbolData, closed_bars, load_all_symbols
+from okx_signal_system.timeframe import timeframe_spec
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,9 @@ class QualityResult:
 
 def audit_symbol(data: SymbolData, *, expected_freq: str = "1h") -> QualityResult:
     df = data.frame.sort_values("ts").reset_index(drop=True)
+    if expected_freq == "auto":
+        expected_freq = str(df.get("timeframe", pd.Series(["1h"])).dropna().iloc[0] or "1h")
+    expected = timeframe_spec(expected_freq).pandas_freq
     rows = len(df)
     if rows == 0:
         return QualityResult(data.inst_id, 0, "", "", 0, 1.0, 0.0, 0, 0, 0, 0, 0.0, 0, "failed")
@@ -35,10 +39,10 @@ def audit_symbol(data: SymbolData, *, expected_freq: str = "1h") -> QualityResul
     ts = pd.to_datetime(df["ts"], utc=True)
     first_ts = ts.iloc[0]
     last_ts = ts.iloc[-1]
-    expected = pd.date_range(first_ts, last_ts, freq=expected_freq, tz="UTC")
+    expected_index = pd.date_range(first_ts, last_ts, freq=expected, tz="UTC")
     unique_ts = pd.DatetimeIndex(ts.drop_duplicates())
-    missing_bars = int(len(expected.difference(unique_ts)))
-    missing_ratio = missing_bars / max(len(expected), 1)
+    missing_bars = int(len(expected_index.difference(unique_ts)))
+    missing_ratio = missing_bars / max(len(expected_index), 1)
     duplicate_ts = int(ts.duplicated().sum())
     diffs = ts.drop_duplicates().sort_values().diff().dropna()
     max_gap_hours = float(diffs.max().total_seconds() / 3600) if not diffs.empty else 0.0
@@ -79,14 +83,14 @@ def audit_symbol(data: SymbolData, *, expected_freq: str = "1h") -> QualityResul
     )
 
 
-def audit_dataset(dataset: str = "okx_1h_extended") -> pd.DataFrame:
-    results = [asdict(audit_symbol(symbol_data)) for symbol_data in load_all_symbols(dataset)]
+def audit_dataset(dataset: str = "okx_1h_extended", *, expected_freq: str = "auto") -> pd.DataFrame:
+    results = [asdict(audit_symbol(symbol_data, expected_freq=expected_freq)) for symbol_data in load_all_symbols(dataset)]
     return pd.DataFrame(results).sort_values("inst_id").reset_index(drop=True)
 
 
-def write_quality_report(output_path: str | Path, dataset: str = "okx_1h_extended") -> Path:
+def write_quality_report(output_path: str | Path, dataset: str = "okx_1h_extended", *, expected_freq: str = "auto") -> Path:
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    report = audit_dataset(dataset)
+    report = audit_dataset(dataset, expected_freq=expected_freq)
     report.to_csv(path, index=False, encoding="utf-8")
     return path

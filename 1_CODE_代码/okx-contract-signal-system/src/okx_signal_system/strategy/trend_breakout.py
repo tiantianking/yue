@@ -14,7 +14,7 @@ TREND_STRENGTH_MIN = 0.005
 MOMENTUM_CONFIRM_BARS = 3
 
 # Conservative live-signal protection floors. They include room for OKX fees,
-# slippage, and normal 1h noise so alerts do not suggest tiny TP/SL bands.
+# slippage, and normal intraday noise so alerts do not suggest tiny TP/SL bands.
 COST_BUFFER_RATE = 0.002
 MIN_STOP_DISTANCE_PCT = 0.004
 MIN_TAKE_PROFIT_DISTANCE_PCT = 0.008
@@ -23,12 +23,12 @@ MIN_REWARD_TO_RISK = 3.5
 
 @dataclass(frozen=True)
 class StrategyParams:
-    fast_ema: int = 10
-    slow_ema: int = 80
-    breakout_window: int = 60
-    atr_stop_mult: float = 2.5
-    take_profit_mult: float = 3.5
-    max_hold_bars: int = 24
+    fast_ema: int = 12
+    slow_ema: int = 64
+    breakout_window: int = 32
+    atr_stop_mult: float = 2.4
+    take_profit_mult: float = 4.0
+    max_hold_bars: int = 96
     atr_window: int = 14
 
 
@@ -215,7 +215,7 @@ def _protection_reject_reason(*, close: float, stop_dist: float, tp_dist: float)
         return "stop_distance_too_close"
     if tp_pct < min_tp:
         return "take_profit_too_close"
-    if rr < MIN_REWARD_TO_RISK:
+    if rr + 1e-9 < MIN_REWARD_TO_RISK:
         return "risk_reward_too_low"
     return None
 
@@ -231,7 +231,9 @@ def build_signal(
     ts = pd.Timestamp(row["ts"])
     close = _num(row, "close")
     atr_value = _num(row, "atr")
-    bias = row.get("bias_4h", "flat")
+    bias = row.get("trend_bias", row.get("bias_4h", "flat"))
+    signal_tf = str(row.get("signal_timeframe", "1h")).upper()
+    trend_tf = str(row.get("trend_timeframe", "4h")).upper()
     high_level = _num(row, "breakout_high")
     low_level = _num(row, "breakout_low")
     atr_pct = _num(row, "atr_pct", atr_value / close if close > 0 else np.nan)
@@ -244,7 +246,7 @@ def build_signal(
     if np.isfinite(atr_pct) and atr_pct < ATR_PCT_MIN:
         return _reject(ts, inst_id, "ATR_PCT_LOW", "atr_pct_too_low")
     if bias not in {"long", "short"}:
-        return _reject(ts, inst_id, "4H_FLAT", "flat_4h_bias")
+        return _reject(ts, inst_id, "TREND_FLAT", "flat_trend_bias")
     if not np.isfinite(high_level) or not np.isfinite(low_level):
         return _reject(ts, inst_id, "BREAKOUT_MISSING", "breakout_missing")
     if np.isfinite(vol_ratio) and vol_ratio < VOL_RATIO_MIN:
@@ -283,7 +285,7 @@ def build_signal(
             stop_loss=close - stop_dist,
             take_profit=close + tp_dist,
             max_hold_bars=params.max_hold_bars,
-            reason_codes=("4H_TREND_LONG", "1H_BREAKOUT_UP", "ATR_OK", "VOL_OK", "TREND_STRONG"),
+            reason_codes=(f"{trend_tf}_TREND_LONG", f"{signal_tf}_BREAKOUT_UP", "ATR_OK", "VOL_OK", "TREND_STRONG"),
             signal_score=score,
             risk_reward_ratio=rr,
             stop_reason=f"ATR {params.atr_stop_mult:g}x with fee/slippage floor",
@@ -314,7 +316,7 @@ def build_signal(
             stop_loss=close + stop_dist,
             take_profit=close - tp_dist,
             max_hold_bars=params.max_hold_bars,
-            reason_codes=("4H_TREND_SHORT", "1H_BREAKOUT_DOWN", "ATR_OK", "VOL_OK", "TREND_STRONG"),
+            reason_codes=(f"{trend_tf}_TREND_SHORT", f"{signal_tf}_BREAKOUT_DOWN", "ATR_OK", "VOL_OK", "TREND_STRONG"),
             signal_score=score,
             risk_reward_ratio=rr,
             stop_reason=f"ATR {params.atr_stop_mult:g}x with fee/slippage floor",

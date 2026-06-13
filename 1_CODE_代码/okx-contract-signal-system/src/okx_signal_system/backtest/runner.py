@@ -24,6 +24,12 @@ from okx_signal_system.strategy.trend_breakout import (
 )
 
 
+def _trend_bias_series(features: pd.DataFrame) -> pd.Series:
+    if "trend_bias" in features.columns:
+        return features["trend_bias"].astype(str)
+    return features["bias_4h"].astype(str)
+
+
 @dataclass(frozen=True)
 class TradeRecord:
     inst_id: str
@@ -67,7 +73,7 @@ def signal_candidate_indices(features: pd.DataFrame) -> np.ndarray:
         if "atr_pct" in features.columns
         else np.divide(atr_value, close, out=np.full(len(features), np.nan), where=close > 0)
     )
-    bias = features["bias_4h"].astype(str).to_numpy()
+    bias = _trend_bias_series(features).to_numpy()
     breakout_high = features["breakout_high"].to_numpy(dtype=float)
     breakout_low = features["breakout_low"].to_numpy(dtype=float)
     vol_ratio = (
@@ -138,14 +144,14 @@ def exit_trade(features: pd.DataFrame, entry_idx: int, signal, params: StrategyP
                 return idx, float(signal.stop_loss), "stop_loss"
             if row["high"] >= signal.take_profit:
                 return idx, float(signal.take_profit), "take_profit"
-            if row.get("bias_4h") == "short" and idx + 1 < len(features):
+            if row.get("trend_bias", row.get("bias_4h")) == "short" and idx + 1 < len(features):
                 return idx + 1, float(features.iloc[idx + 1]["open"]), "trend_reverse"
         if signal.side == "short":
             if row["high"] >= signal.stop_loss:
                 return idx, float(signal.stop_loss), "stop_loss"
             if row["low"] <= signal.take_profit:
                 return idx, float(signal.take_profit), "take_profit"
-            if row.get("bias_4h") == "long" and idx + 1 < len(features):
+            if row.get("trend_bias", row.get("bias_4h")) == "long" and idx + 1 < len(features):
                 return idx + 1, float(features.iloc[idx + 1]["open"]), "trend_reverse"
     return end_idx, float(features.iloc[end_idx]["open"]), "max_hold"
 
@@ -188,6 +194,8 @@ def run_backtest(
     inst_id: str,
     params: StrategyParams = StrategyParams(),
     risk_config: RiskConfig = RiskConfig(),
+    signal_timeframe: str = "1h",
+    trend_timeframe: str | None = None,
 ) -> pd.DataFrame:
     features = build_feature_frame(
         frame_1h,
@@ -195,6 +203,8 @@ def run_backtest(
         slow_ema=params.slow_ema,
         breakout_window=params.breakout_window,
         atr_window=params.atr_window,
+        signal_timeframe=signal_timeframe,
+        trend_timeframe=trend_timeframe,
     ).reset_index(drop=True)
     return run_backtest_from_features(features, inst_id=inst_id, params=params, risk_config=risk_config)
 
@@ -227,7 +237,7 @@ def run_backtest_from_features(
         if "quote_volume" in features.columns
         else np.full(len(features), np.nan)
     )
-    bias = features["bias_4h"].astype(str).to_numpy()
+    bias = _trend_bias_series(features).to_numpy()
 
     candidate_indices = signal_candidate_indices(features)
 

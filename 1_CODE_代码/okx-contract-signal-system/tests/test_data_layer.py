@@ -1,10 +1,12 @@
 import pandas as pd
+from pathlib import Path
 
 from okx_signal_system.data.gap_handler import DataGap, DataGapHandler, summarize_sync_error
-from okx_signal_system.data.loader import closed_bars, file_symbol_to_inst_id, load_symbol_file
+from okx_signal_system.data.loader import closed_bars, file_symbol_to_inst_id, file_timeframe, load_symbol_file
 from okx_signal_system.data.quality import audit_symbol
 from okx_signal_system.exchange.realtime import RealtimeDataStore
 from okx_signal_system.paths import find_lightweight_history
+from okx_signal_system.timeframe import bars_for_hours, default_trend_timeframe, timeframe_spec
 
 
 def test_find_okx_history_root() -> None:
@@ -14,6 +16,15 @@ def test_find_okx_history_root() -> None:
 
 def test_file_symbol_maps_to_okx_inst_id() -> None:
     assert file_symbol_to_inst_id(find_lightweight_history("okx_1h_extended") / "BTC_USDT_USDT_1h.parquet") == "BTC-USDT-SWAP"
+
+
+def test_timeframe_helpers_support_15m_signal_mode() -> None:
+    spec = timeframe_spec("15m")
+    assert spec.okx_bar == "15m"
+    assert spec.ws_channel == "candle15m"
+    assert default_trend_timeframe("15m") == "1h"
+    assert bars_for_hours(24, "15m") == 96
+    assert file_timeframe(Path("HYPE_USDT_USDT_15m.parquet")) == "15m"
 
 
 def test_load_symbol_file_normalizes_columns() -> None:
@@ -37,7 +48,7 @@ def test_quality_audit_passes_btc_history() -> None:
 
 
 def test_realtime_store_preserves_quote_volume(tmp_path) -> None:
-    store = RealtimeDataStore(tmp_path)
+    store = RealtimeDataStore(tmp_path, timeframe="15m")
     store.append_candle(
         "ADA-USDT-SWAP",
         {
@@ -52,6 +63,7 @@ def test_realtime_store_preserves_quote_volume(tmp_path) -> None:
     )
     frame = store.load("ADA-USDT-SWAP")
     assert frame.iloc[-1]["quote_volume"] == 10000
+    assert (tmp_path / "ADA_USDT_USDT_15m.parquet").name == store._get_file_path("ADA-USDT-SWAP").name
 
 
 def test_gap_sync_stops_batch_after_rest_unavailable(tmp_path, monkeypatch) -> None:

@@ -39,6 +39,7 @@ from okx_signal_system.risk.model import (
     apply_halt_policy, COST_BUFFER_RATE
 )
 from okx_signal_system.features.indicators import build_feature_frame
+from okx_signal_system.timeframe import default_trend_timeframe, timeframe_spec
 
 log = logging.getLogger(__name__)
 
@@ -120,9 +121,16 @@ class RealtimeDataStore:
     轻量化存储 + 断网恢复
     """
 
-    def __init__(self, data_dir: Path | None = None):
+    def __init__(
+        self,
+        data_dir: Path | None = None,
+        *,
+        timeframe: str = "1h",
+        dataset: str | None = None,
+    ):
+        self.timeframe = timeframe_spec(timeframe)
         if data_dir is None:
-            data_dir = find_lightweight_history("okx_1h_extended")
+            data_dir = find_lightweight_history(dataset or f"okx_{self.timeframe.file_suffix}_extended")
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -134,10 +142,10 @@ class RealtimeDataStore:
     def _get_file_path(self, inst_id: str) -> Path:
         """获取文件路径"""
         normalized = inst_id.replace("-", "_").replace("_SWAP", "").upper()
-        # BTC-USDT-SWAP -> BTC_USDT_USDT_1h.parquet
+        # BTC-USDT-SWAP -> BTC_USDT_USDT_<timeframe>.parquet
         if normalized.count("USDT") == 1:
             normalized = f"{normalized}_USDT"
-        return self.data_dir / f"{normalized}_1h.parquet"
+        return self.data_dir / f"{normalized}_{self.timeframe.file_suffix}.parquet"
 
     def load(self, inst_id: str) -> pd.DataFrame:
         """加载数据"""
@@ -172,6 +180,9 @@ class RealtimeDataStore:
             "close": float(candle["close"]),
             "volume": float(candle["volume"]),
             "quote_volume": float(quote_volume) if quote_volume not in (None, "") else float("nan"),
+            "symbol": inst_id,
+            "timeframe": self.timeframe.key,
+            "is_closed": bool(candle.get("is_closed", True)),
         }])
 
         # 去重 + 追加
@@ -247,8 +258,15 @@ class OKXWebSocketClient:
     处理实时K线推送 + 自动重连
     """
 
-    def __init__(self, on_candle: Callable[[str, dict], None] | None = None,
-                 on_ticker: Callable[[str, dict], None] | None = None):
+    def __init__(
+        self,
+        on_candle: Callable[[str, dict], None] | None = None,
+        on_ticker: Callable[[str, dict], None] | None = None,
+        *,
+        timeframe: str = "1h",
+    ):
+        self.timeframe = timeframe_spec(timeframe)
+        self._candle_channel = self.timeframe.ws_channel
         self._ws: Any | None = None
         self._thread: threading.Thread | None = None
         self._running = False
@@ -264,15 +282,11 @@ class OKXWebSocketClient:
         self._candle_cache: dict[str, dict] = {}
 
     def _get_wss_url(self) -> str:
-        """获取WebSocket URL（根据模拟/实盘模式自动切换）"""
-        import os
-        is_simulated = os.environ.get("OKX_IS_SIMULATED", "true").lower() != "false"
-        if is_simulated:
-            # OKX 模拟盘 WebSocket 地址
-            return "wss://wspap.okx.com:8443/ws/v5/public"
-        else:
-            # OKX 实盘 WebSocket 地址
-            return "wss://ws.okx.com:8443/ws/v5/public"
+        """获取公共行情 WebSocket URL。"""
+        configured = os.environ.get("OKX_PUBLIC_WS_URL", "").strip()
+        if configured:
+            return configured
+        return "wss://ws.okx.com:8443/ws/v5/public"
 
     def connect(self, subscriptions: list[str]) -> bool:
         """连接WebSocket"""
@@ -335,9 +349,8 @@ class OKXWebSocketClient:
 
         # 订阅K线数据
         for inst_id in self._subscriptions:
-            # 1小时K线（与配置一致）
             args = [{
-                "channel": "candle1H",
+                "channel": self._candle_channel,
                 "instId": inst_id,
             }]
             msg = {
@@ -345,7 +358,7 @@ class OKXWebSocketClient:
                 "args": args
             }
             self._ws.send(json.dumps(msg))
-            log.info(f"Subscribed: {inst_id} candle1H")
+            log.info(f"Subscribed: {inst_id} {self._candle_channel}")
 
         # 订阅ticker数据
         for inst_id in self._subscriptions:
@@ -373,9 +386,10 @@ class OKXWebSocketClient:
         inst_id = arg.get("instId", "")
         items = data.get("data", [])
 
-        if channel == "candle1H":
+        if channel == self._candle_channel:
             for item in items:
                 # K线格式: [ts, open, high, low, close, vol, volCcy, volCcyQuote, confirm]
+                confirm = str(item[8]) if len(item) > 8 else "1"
                 candle = {
                     "ts": item[0],
                     "open": float(item[1]),
@@ -384,6 +398,7 @@ class OKXWebSocketClient:
                     "close": float(item[4]),
                     "volume": float(item[5]),
                     "quote_volume": float(item[7]) if len(item) > 7 and item[7] not in (None, "") else None,
+                    "is_closed": confirm == "1",
                 }
                 self._candle_cache[inst_id] = candle
 
@@ -454,10 +469,22 @@ class OKXRealtimeAPI:
     """
 
     def __init__(self, config: dict | None = None):
+        if config is None:
+            try:
+                from okx_signal_system.config import load_config
+                config = load_config("base.yaml")
+            except Exception:
+                config = {}
         self.config = config or {}
+        data_cfg = self.config.get("data", {}) if isinstance(self.config, dict) else {}
+        self.timeframe = timeframe_spec(data_cfg.get("timeframe", "1h"))
+        self.trend_timeframe = timeframe_spec(
+            data_cfg.get("trend_timeframe") or default_trend_timeframe(self.timeframe.key)
+        )
+        self.dataset = data_cfg.get("historical_dataset") or f"okx_{self.timeframe.file_suffix}_extended"
         self._connected = False
         self._ws_client: OKXWebSocketClient | None = None
-        self._data_store = RealtimeDataStore()
+        self._data_store = RealtimeDataStore(timeframe=self.timeframe.key, dataset=self.dataset)
 
         # 监控的币种列表
         self._watched_symbols: list[str] = []
@@ -505,7 +532,12 @@ class OKXRealtimeAPI:
                 symbols = ["BTC-USDT-SWAP"]
 
         self._watched_symbols = symbols
-        log.info(f"Connecting to OKX WebSocket for {len(symbols)} symbols...")
+        log.info(
+            "Connecting to OKX WebSocket for %s symbols (%s signal / %s trend)...",
+            len(symbols),
+            self.timeframe.key,
+            self.trend_timeframe.key,
+        )
 
         # 先测试API连接
         try:
@@ -518,6 +550,7 @@ class OKXRealtimeAPI:
         self._ws_client = OKXWebSocketClient(
             on_candle=self._on_candle,
             on_ticker=self._on_ticker,
+            timeframe=self.timeframe.key,
         )
 
         success = self._ws_client.connect(symbols)
@@ -593,21 +626,36 @@ class OKXRealtimeAPI:
             log.error(f"Failed to get market data for {inst_id}: {e}")
             return None
 
-    async def get_candles(self, inst_id: str, bar: str = "1h", limit: int = 100) -> pd.DataFrame:
+    async def get_candles(self, inst_id: str, bar: str | None = None, limit: int = 100) -> pd.DataFrame:
         """获取K线数据（优先本地，必要时从API补数据）"""
+        bar = timeframe_spec(bar or self.timeframe.key).key
         # 先尝试本地数据
         local = self._data_store.load(inst_id)
 
-        if len(local) >= limit:
+        needs_refresh = True
+        if len(local) > 0:
+            try:
+                latest = pd.to_datetime(local["ts"].iloc[-1], utc=True)
+                age_hours = (pd.Timestamp.now(tz="UTC") - latest).total_seconds() / 3600
+                refresh_after_hours = max(self.timeframe.hours * 1.5, 5 / 60)
+                needs_refresh = age_hours > refresh_after_hours
+            except Exception:
+                needs_refresh = True
+
+        if len(local) >= limit and not needs_refresh:
             return local.tail(limit).reset_index(drop=True)
 
         # 本地数据不足，从API获取
         try:
             from okx_signal_system.exchange.okx import get_candles as okx_get_candles
             raw_bars = okx_get_candles(inst_id, bar=bar, limit=limit)
+            raw_bars = [row for row in raw_bars if len(row) < 9 or str(row[8]) == "1"]
 
             if raw_bars:
                 df = okx_candles_to_frame(raw_bars)
+                df["symbol"] = inst_id
+                df["timeframe"] = bar
+                df["is_closed"] = True
 
                 # 合并到本地
                 if len(local) > 0:
@@ -617,8 +665,9 @@ class OKXRealtimeAPI:
                     self._data_store._cache[inst_id] = combined
                 else:
                     self._data_store._cache[inst_id] = df
+                self._data_store.save(inst_id)
 
-                return df.tail(limit).reset_index(drop=True)
+                return self._data_store.load(inst_id).tail(limit).reset_index(drop=True)
         except Exception as e:
             log.error(f"Failed to get candles for {inst_id}: {e}")
 
@@ -715,7 +764,8 @@ class OKXRealtimeAPI:
     def sync_from_api(self, inst_id: str) -> int:
         """从API同步数据到本地"""
         try:
-            raw_bars = get_candles(inst_id, bar="1H", limit=300)
+            raw_bars = get_candles(inst_id, bar=self.timeframe.key, limit=300)
+            raw_bars = [row for row in raw_bars if len(row) < 9 or str(row[8]) == "1"]
             if not raw_bars:
                 return 0
 
@@ -731,6 +781,7 @@ class OKXRealtimeAPI:
                     "close": float(row["close"]),
                     "volume": float(row["volume"]) if pd.notna(row["volume"]) else 0,
                     "quote_volume": float(row["quote_volume"]) if "quote_volume" in row and pd.notna(row["quote_volume"]) else None,
+                    "is_closed": True,
                 }
                 self._data_store.append_candle(inst_id, candle)
                 count += 1
@@ -789,7 +840,13 @@ class LiveSignalMonitor:
 
         try:
             from okx_signal_system.training.startup_quality import run_startup_quality_gate
-            report = run_startup_quality_gate(symbols=self.api._watched_symbols or None, max_symbols=None)
+            report = run_startup_quality_gate(
+                symbols=self.api._watched_symbols or None,
+                dataset=self.api.dataset,
+                signal_timeframe=self.api.timeframe.key,
+                trend_timeframe=self.api.trend_timeframe.key,
+                max_symbols=None,
+            )
             self._strategy_params = report.strategy_params
             self._quality_gate_allows_push = bool(getattr(report, "push_allowed", report.status == "passed"))
             if not self._quality_gate_allows_push:
@@ -815,7 +872,7 @@ class LiveSignalMonitor:
             close = float(row.get("close", 0.0))
             if close <= 0:
                 return None
-            bias = str(row.get("bias_4h", "flat"))
+            bias = str(row.get("trend_bias", row.get("bias_4h", "flat")))
             if bias == "long":
                 level = float(row.get("breakout_high"))
                 return max(0.0, (level - close) / close)
@@ -846,7 +903,7 @@ class LiveSignalMonitor:
             "risk_reason": risk_reason,
             "would_push": would_push,
             "side": side,
-            "bias": str(row.get("bias_4h", "")) if row is not None else None,
+            "bias": str(row.get("trend_bias", row.get("bias_4h", ""))) if row is not None else None,
             "regime": regime,
             "raw_score": float(raw_score) if raw_score is not None else None,
             "final_score": float(final_score) if final_score is not None else None,
@@ -860,7 +917,11 @@ class LiveSignalMonitor:
             send_candidate_health_report(
                 items=items,
                 push_allowed=self._quality_gate_allows_push,
-                selected_params=asdict(self._strategy_params),
+                selected_params={
+                    **asdict(self._strategy_params),
+                    "signal_timeframe": self.api.timeframe.key,
+                    "trend_timeframe": self.api.trend_timeframe.key,
+                },
             )
             log.info("Candidate health report sent: %s symbols", len(items))
         except Exception as exc:
@@ -911,12 +972,14 @@ class LiveSignalMonitor:
                         continue
 
                     # 获取K线数据
-                    df = await self.api.get_candles(inst_id, bar="1h", limit=200)
+                    df = await self.api.get_candles(inst_id, bar=self.api.timeframe.key, limit=600)
+                    from okx_signal_system.data.loader import closed_bars
+                    df = closed_bars(df)
                     if len(df) < 50:
                         cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="history_too_short"))
                         continue
                     from okx_signal_system.training.startup_quality import is_latest_bar_fresh
-                    if not is_latest_bar_fresh(df, max_lag_hours=3.0):
+                    if not is_latest_bar_fresh(df, max_lag_hours=self.api.timeframe.fresh_lag_hours):
                         log.warning(f"{inst_id} latest candle is stale; waiting for live data")
                         cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="stale_data"))
                         continue
@@ -929,6 +992,8 @@ class LiveSignalMonitor:
                         slow_ema=strategy_params.slow_ema,
                         breakout_window=strategy_params.breakout_window,
                         atr_window=strategy_params.atr_window,
+                        signal_timeframe=self.api.timeframe.key,
+                        trend_timeframe=self.api.trend_timeframe.key,
                     )
 
                     # 更新市场环境；环境只降分/降杠杆，不覆盖历史训练参数
@@ -1042,6 +1107,8 @@ class LiveSignalMonitor:
                                     risk_reward_ratio=decision.risk_reward_ratio,
                                     max_loss_pct=getattr(decision, 'max_loss_pct', None),
                                     margin_loss_pct=getattr(decision, 'margin_loss_pct', None),
+                                    signal_timeframe=self.api.timeframe.key,
+                                    trend_timeframe=self.api.trend_timeframe.key,
                                 )
                                 log.info(f"飞书推送(fallback): {inst_id} {signal.side}")
                             except Exception as feishu_err:
@@ -1134,7 +1201,7 @@ class LiveSignalMonitor:
 
         # 计算持仓K线数（按小时）
         hours_held = (now - entry_time).total_seconds() / 3600
-        bars_held = int(hours_held)
+        bars_held = int(hours_held / self.api.timeframe.hours)
 
         if bars_held >= max_bars:
             log.warning(

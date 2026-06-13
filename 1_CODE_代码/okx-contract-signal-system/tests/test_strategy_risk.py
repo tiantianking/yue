@@ -33,9 +33,9 @@ def test_long_breakout_signal_has_required_protection() -> None:
     assert signal.entry_ref == 110.0
     assert signal.stop_loss is not None
     assert signal.take_profit is not None
-    assert signal.max_hold_bars == 24
+    assert signal.max_hold_bars == 96
     assert signal.signal_score is not None and signal.signal_score >= 6
-    assert signal.risk_reward_ratio == 3.5
+    assert signal.risk_reward_ratio == 4.0
 
 
 def test_rejects_without_breakout() -> None:

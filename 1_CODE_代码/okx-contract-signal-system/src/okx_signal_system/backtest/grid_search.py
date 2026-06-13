@@ -8,9 +8,29 @@ import pandas as pd
 from okx_signal_system.backtest.runner import run_backtest_from_features, summarize_trades
 from okx_signal_system.features.indicators import build_feature_frame
 from okx_signal_system.strategy.trend_breakout import StrategyParams
+from okx_signal_system.timeframe import normalize_timeframe
 
 
-def parameter_grid() -> list[StrategyParams]:
+def parameter_grid(timeframe: str = "1h") -> list[StrategyParams]:
+    tf = normalize_timeframe(timeframe)
+    if tf == "15m":
+        fast_values = [8, 12, 16]
+        slow_values = [34, 48, 64]
+        breakout_values = [24, 32, 48]
+        atr_values = [2.4, 2.8, 3.2]
+        hold_values = [48, 64, 96]
+    elif tf == "5m":
+        fast_values = [18, 24, 36]
+        slow_values = [72, 96, 144]
+        breakout_values = [48, 72, 96]
+        atr_values = [2.0, 2.4, 2.8]
+        hold_values = [96, 144, 192, 288]
+    else:
+        fast_values = [10, 20, 30]
+        slow_values = [50, 60, 80]
+        breakout_values = [20, 40, 60]
+        atr_values = [1.5, 2.0, 2.5, 3.0]
+        hold_values = [24, 48, 72]
     return [
         StrategyParams(
             fast_ema=fast,
@@ -21,20 +41,27 @@ def parameter_grid() -> list[StrategyParams]:
             max_hold_bars=max_hold,
         )
         for fast, slow, breakout, atr_mult, tp_mult, max_hold in product(
-            [10, 20, 30],
-            [50, 60, 80],
-            [20, 40, 60],
-            [1.5, 2.0, 2.5, 3.0],
+            fast_values,
+            slow_values,
+            breakout_values,
+            atr_values,
             [3.5, 4.0, 5.0, 6.0],
-            [24, 48, 72],
+            hold_values,
         )
     ]
 
 
-def run_grid_search(frame: pd.DataFrame, *, inst_id: str, params_grid: list[StrategyParams] | None = None) -> pd.DataFrame:
+def run_grid_search(
+    frame: pd.DataFrame,
+    *,
+    inst_id: str,
+    params_grid: list[StrategyParams] | None = None,
+    signal_timeframe: str = "1h",
+    trend_timeframe: str | None = None,
+) -> pd.DataFrame:
     rows = []
     feature_cache: dict[tuple[int, int, int, int], pd.DataFrame] = {}
-    for params in params_grid or parameter_grid():
+    for params in params_grid or parameter_grid(signal_timeframe):
         feature_key = (params.fast_ema, params.slow_ema, params.breakout_window, params.atr_window)
         if feature_key not in feature_cache:
             feature_cache[feature_key] = build_feature_frame(
@@ -43,6 +70,8 @@ def run_grid_search(frame: pd.DataFrame, *, inst_id: str, params_grid: list[Stra
                 slow_ema=params.slow_ema,
                 breakout_window=params.breakout_window,
                 atr_window=params.atr_window,
+                signal_timeframe=signal_timeframe,
+                trend_timeframe=trend_timeframe,
             )
         trades = run_backtest_from_features(feature_cache[feature_key], inst_id=inst_id, params=params)
         summary = summarize_trades(trades)

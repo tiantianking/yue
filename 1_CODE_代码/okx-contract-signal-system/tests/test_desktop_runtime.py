@@ -21,6 +21,18 @@ def test_gui_runtime_dependencies_import() -> None:
     assert gui.OKXSignalGUI._breakout_gap_pct(None) is None
 
 
+def test_websocket_client_uses_15m_candle_channel(monkeypatch) -> None:
+    from okx_signal_system.exchange.realtime import OKXWebSocketClient
+
+    monkeypatch.delenv("OKX_PUBLIC_WS_URL", raising=False)
+    client = OKXWebSocketClient(timeframe="15m")
+    assert client._candle_channel == "candle15m"
+    assert client._get_wss_url() == "wss://ws.okx.com:8443/ws/v5/public"
+
+    monkeypatch.setenv("OKX_PUBLIC_WS_URL", "wss://example.invalid/ws")
+    assert client._get_wss_url() == "wss://example.invalid/ws"
+
+
 def test_position_store_round_trip_and_validates_prices(tmp_path) -> None:
     store = PositionRecordStore(tmp_path)
     record = PositionRecord(

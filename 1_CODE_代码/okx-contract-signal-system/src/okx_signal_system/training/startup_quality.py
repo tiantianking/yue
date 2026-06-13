@@ -10,10 +10,11 @@ import numpy as np
 import pandas as pd
 
 from okx_signal_system.backtest.runner import run_backtest, split_train_valid, summarize_trades
-from okx_signal_system.config import project_paths
-from okx_signal_system.features.indicators import prior_breakout_levels, resample_4h
+from okx_signal_system.config import load_config, project_paths
+from okx_signal_system.features.indicators import prior_breakout_levels, resample_trend
 from okx_signal_system.risk.model import Ledger, RiskConfig, smart_leverage_for_signal, validate_signal
 from okx_signal_system.strategy.trend_breakout import StrategyParams, TradeSignal
+from okx_signal_system.timeframe import default_trend_timeframe, ratio_bars, timeframe_spec
 
 if TYPE_CHECKING:
     from okx_signal_system.data.loader import SymbolData
@@ -44,6 +45,9 @@ def push_blocking_reasons(reasons: Iterable[str]) -> list[str]:
 class StartupQualityReport:
     generated_at: str
     status: str
+    dataset: str
+    signal_timeframe: str
+    trend_timeframe: str
     selected_params: dict
     symbols_checked: int
     train_summary: dict
@@ -62,12 +66,12 @@ class StartupQualityReport:
 
 def params_from_dict(data: dict) -> StrategyParams:
     return StrategyParams(
-        fast_ema=int(data.get("fast_ema", 20)),
-        slow_ema=int(data.get("slow_ema", 60)),
-        breakout_window=int(data.get("breakout_window", 40)),
-        atr_stop_mult=float(data.get("atr_stop_mult", 2.0)),
-        take_profit_mult=max(float(data.get("take_profit_mult", 3.5)), 3.5),
-        max_hold_bars=int(data.get("max_hold_bars", 48)),
+        fast_ema=int(data.get("fast_ema", 12)),
+        slow_ema=int(data.get("slow_ema", 64)),
+        breakout_window=int(data.get("breakout_window", 32)),
+        atr_stop_mult=float(data.get("atr_stop_mult", 2.4)),
+        take_profit_mult=max(float(data.get("take_profit_mult", 4.0)), 3.5),
+        max_hold_bars=int(data.get("max_hold_bars", 96)),
         atr_window=int(data.get("atr_window", 14)),
     )
 
@@ -101,26 +105,40 @@ def is_latest_bar_fresh(
     return age is not None and age <= max_lag_hours
 
 
-def _anti_future_checks() -> dict[str, bool]:
+def _min_history_bars(params: StrategyParams, *, signal_timeframe: str, trend_timeframe: str | None) -> int:
+    trend_key = trend_timeframe or default_trend_timeframe(signal_timeframe)
+    trend_ratio = ratio_bars(trend_key, signal_timeframe)
+    return max(
+        params.slow_ema + params.breakout_window + 80,
+        params.slow_ema * trend_ratio + 100,
+        240,
+    )
+
+
+def _anti_future_checks(*, signal_timeframe: str = "1h", trend_timeframe: str | None = None) -> dict[str, bool]:
     levels = prior_breakout_levels(pd.DataFrame({"high": [10, 11, 12, 50], "low": [8, 7, 6, 1]}), 3)
     breakout_ok = bool(levels.loc[3, "breakout_high"] == 12 and levels.loc[3, "breakout_low"] == 6)
 
+    signal_spec = timeframe_spec(signal_timeframe)
+    trend_key = trend_timeframe or default_trend_timeframe(signal_spec.key)
+    trend_count = ratio_bars(trend_key, signal_spec.key)
+    periods = trend_count + 3
     probe = pd.DataFrame(
         {
-            "ts": pd.date_range("2026-01-01", periods=7, freq="1h", tz="UTC"),
-            "open": range(7),
-            "high": range(1, 8),
-            "low": range(7),
-            "close": range(1, 8),
-            "volume": [100.0] * 7,
+            "ts": pd.date_range("2026-01-01", periods=periods, freq=signal_spec.pandas_freq, tz="UTC"),
+            "open": range(periods),
+            "high": range(1, periods + 1),
+            "low": range(periods),
+            "close": range(1, periods + 1),
+            "volume": [100.0] * periods,
         }
     )
-    four_h = resample_4h(probe)
-    incomplete_marked = bool((~four_h["complete_4h"].astype(bool)).any())
+    trend_frame = resample_trend(probe, signal_timeframe=signal_spec.key, trend_timeframe=trend_key)
+    incomplete_marked = bool((~trend_frame["complete_trend"].astype(bool)).any())
 
     return {
         "prior_breakout_excludes_current_bar": breakout_ok,
-        "incomplete_4h_not_tradable": incomplete_marked,
+        "incomplete_trend_not_tradable": incomplete_marked,
     }
 
 
@@ -166,6 +184,10 @@ def _stress_checks(params: StrategyParams) -> dict[str, bool | float]:
     return {
         "smart_leverage_uses_signal_score": bool(high_lev > low_lev and high_lev <= 10),
         "risk_rejects_near_liquidation": bool(high_decision.accepted and not high_decision.near_liq_flag),
+        "min_reward_to_risk": float(cfg.min_reward_to_risk),
+        "target_reward_to_risk": float(params.take_profit_mult),
+        "margin_loss_cap_pct": float(cfg.single_position_loss_pct),
+        "high_score_margin_loss_pct": float(high_decision.margin_loss_pct or 0.0),
         "low_score_leverage": float(low_lev),
         "high_score_leverage": float(high_lev),
     }
@@ -185,11 +207,19 @@ def _select_symbols(symbols: list["SymbolData"], watched: list[str] | None, max_
 def run_startup_quality_gate(
     *,
     symbols: list[str] | None = None,
-    dataset: str = "okx_1h_extended",
+    dataset: str | None = None,
+    signal_timeframe: str | None = None,
+    trend_timeframe: str | None = None,
     output_dir: str | Path | None = None,
     max_symbols: int | None = 6,
     history_tail: int = 2500,
 ) -> StartupQualityReport:
+    config = load_config("base.yaml")
+    data_cfg = config.get("data", {})
+    dataset = dataset or data_cfg.get("historical_dataset", "okx_1h_extended")
+    signal_timeframe = timeframe_spec(signal_timeframe or data_cfg.get("timeframe", "1h")).key
+    trend_timeframe = trend_timeframe or data_cfg.get("trend_timeframe") or default_trend_timeframe(signal_timeframe)
+    trend_timeframe = timeframe_spec(trend_timeframe).key
     params = load_selected_strategy_params(output_dir)
     from okx_signal_system.data.loader import load_all_symbols
     all_symbols = _select_symbols(load_all_symbols(dataset), symbols, max_symbols)
@@ -202,19 +232,35 @@ def run_startup_quality_gate(
     for symbol_data in all_symbols:
         frame = symbol_data.frame.tail(history_tail).reset_index(drop=True)
         age = latest_bar_age_hours(frame)
-        if age is None or age > 3.0:
+        if age is None or age > timeframe_spec(signal_timeframe).fresh_lag_hours:
             stale_symbols.append(symbol_data.inst_id)
-        if len(frame) < max(params.slow_ema + params.breakout_window + 80, 240):
+        if len(frame) < _min_history_bars(params, signal_timeframe=signal_timeframe, trend_timeframe=trend_timeframe):
             reasons.append(f"{symbol_data.inst_id}:history_too_short")
             continue
         train_frame, valid_frame = split_train_valid(frame, valid_fraction=0.25)
-        train_trades.append(run_backtest(train_frame, inst_id=symbol_data.inst_id, params=params))
-        valid_trades.append(run_backtest(valid_frame, inst_id=symbol_data.inst_id, params=params))
+        train_trades.append(
+            run_backtest(
+                train_frame,
+                inst_id=symbol_data.inst_id,
+                params=params,
+                signal_timeframe=signal_timeframe,
+                trend_timeframe=trend_timeframe,
+            )
+        )
+        valid_trades.append(
+            run_backtest(
+                valid_frame,
+                inst_id=symbol_data.inst_id,
+                params=params,
+                signal_timeframe=signal_timeframe,
+                trend_timeframe=trend_timeframe,
+            )
+        )
 
     initial_equity = 10000.0 * max(1, len(all_symbols))
     train_summary = _combine_summaries(train_trades, initial_equity=initial_equity)
     valid_summary = _combine_summaries(valid_trades, initial_equity=initial_equity)
-    anti_future = _anti_future_checks()
+    anti_future = _anti_future_checks(signal_timeframe=signal_timeframe, trend_timeframe=trend_timeframe)
     stress = _stress_checks(params)
 
     if not all(anti_future.values()):
@@ -243,6 +289,9 @@ def run_startup_quality_gate(
     report = StartupQualityReport(
         generated_at=datetime.now(timezone.utc).isoformat(),
         status=status,
+        dataset=dataset,
+        signal_timeframe=signal_timeframe,
+        trend_timeframe=trend_timeframe,
         selected_params=asdict(params),
         symbols_checked=len(all_symbols),
         train_summary=train_summary,

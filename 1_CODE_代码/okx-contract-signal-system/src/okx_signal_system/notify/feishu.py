@@ -67,6 +67,8 @@ def send_signal_alert(
     max_loss_pct: float | None = None,
     margin_loss_pct: float | None = None,
     kline_time: str | None = None,
+    signal_timeframe: str | None = None,
+    trend_timeframe: str | None = None,
 ) -> bool:
     direction = "LONG" if side == "long" else "SHORT"
     stop_pct = abs(entry_ref - stop_loss) / entry_ref * 100 if entry_ref else 0.0
@@ -92,6 +94,10 @@ def send_signal_alert(
         lines.append(f"margin_loss_at_stop: {margin_loss_pct:.2%} (cap 27.00%)")
     if kline_time:
         lines.append(f"kline_time: {kline_time}")
+    if signal_timeframe:
+        lines.append(f"signal_timeframe: {signal_timeframe}")
+    if trend_timeframe:
+        lines.append(f"trend_timeframe: {trend_timeframe}")
     if stop_reason:
         lines.append(f"stop_reason: {stop_reason}")
     if tp_reason:
@@ -191,6 +197,12 @@ def send_candidate_health_report(
             f"ATR_stop={float(params.get('atr_stop_mult', 0)):.2f}x, "
             f"target_rr={float(params.get('take_profit_mult', 0)):.2f}R"
         )
+        if params.get("signal_timeframe") or params.get("trend_timeframe"):
+            lines.append(
+                "timeframes: "
+                f"signal={params.get('signal_timeframe', '-')}, "
+                f"trend={params.get('trend_timeframe', '-')}"
+            )
     if reasons:
         top_reasons = ", ".join(f"{reason}={count}" for reason, count in reasons.most_common(6))
         lines.append(f"blocked_reasons: {top_reasons}")

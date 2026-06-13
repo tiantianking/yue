@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
 
+from okx_signal_system.timeframe import timeframe_spec
+
 BASE_URL = "https://www.okx.com"
 PRIVATE_PATH_PREFIXES = ("/api/v5/account/", "/api/v5/trade/")
 DEFAULT_LOCAL_PROXY = "http://127.0.0.1:1088"
@@ -271,7 +273,7 @@ def get_candles(
     before: str | int | None = None,
     after: str | int | None = None,
 ) -> list[list[Any]]:
-    okx_bar = "1H" if bar == "1h" else bar
+    okx_bar = timeframe_spec(bar).okx_bar
     params = {"instId": inst_id, "bar": okx_bar, "limit": str(limit)}
     if before is not None:
         params["before"] = str(before)

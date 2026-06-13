@@ -9,6 +9,7 @@ LIQ_SAFETY_MARGIN = 1.5
 VOL_RATIO_MIN = 0.5
 COOL_OFF_BARS = 4
 EXTREME_VOLATILITY_THRESHOLD = 3.0
+RR_EPSILON = 1e-9
 
 
 @dataclass(frozen=True)
@@ -158,7 +159,7 @@ def smart_leverage_for_signal(signal: TradeSignal, ledger: Ledger, config: RiskC
         target = min(target, 2.0)
     elif stop_pct > 0.012:
         target = min(target, 5.0)
-    if rr < config.min_reward_to_risk:
+    if rr + RR_EPSILON < config.min_reward_to_risk:
         target = min(target, 1.0)
     elif rr < 2.0:
         target = min(target, 3.0)
@@ -246,7 +247,7 @@ def validate_signal(signal: TradeSignal, ledger: Ledger, config: RiskConfig = Ri
         return _reject("stop_too_close_after_costs", signal=signal, stop_distance_pct=stop_pct)
     if take_pct < min_take:
         return _reject("take_profit_too_close_after_costs", signal=signal, stop_distance_pct=stop_pct)
-    if rr < config.min_reward_to_risk:
+    if rr + RR_EPSILON < config.min_reward_to_risk:
         return _reject("risk_reward_too_low", signal=signal, stop_distance_pct=stop_pct)
 
     leverage_cap = leverage_cap_for_signal(signal, active_ledger, config)

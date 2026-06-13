@@ -68,7 +68,7 @@ class OKXSignalGUI:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("OKX 信号系统 v3.10")
+        self.root.title("OKX 信号系统 v3.11")
         self.root.geometry("1000x700")
         
         # 设置窗口图标（如果存在）
@@ -105,7 +105,7 @@ class OKXSignalGUI:
             close = float(row.get("close", 0.0))
             if close <= 0:
                 return None
-            bias = str(row.get("bias_4h", "flat"))
+            bias = str(row.get("trend_bias", row.get("bias_4h", "flat")))
             if bias == "long":
                 level = float(row.get("breakout_high"))
                 return max(0.0, (level - close) / close)
@@ -136,7 +136,7 @@ class OKXSignalGUI:
             "risk_reason": risk_reason,
             "would_push": would_push,
             "side": side,
-            "bias": str(row.get("bias_4h", "")) if row is not None else None,
+            "bias": str(row.get("trend_bias", row.get("bias_4h", ""))) if row is not None else None,
             "regime": regime,
             "raw_score": float(raw_score) if raw_score is not None else None,
             "final_score": float(final_score) if final_score is not None else None,
@@ -150,7 +150,11 @@ class OKXSignalGUI:
             ok = send_candidate_health_report(
                 items=items,
                 push_allowed=self._quality_gate_allows_push,
-                selected_params=asdict(params),
+                selected_params={
+                    **asdict(params),
+                    "signal_timeframe": self.api.timeframe.key if self.api else None,
+                    "trend_timeframe": self.api.trend_timeframe.key if self.api else None,
+                },
             )
             self._last_candidate_health_report_ts = asyncio.get_event_loop().time()
             if ok:
@@ -530,7 +534,11 @@ class OKXSignalGUI:
             self.message_queue.put(('log', ('正在检查数据缺口并回补...', "INFO")))
             try:
                 from okx_signal_system.data.gap_handler import sync_on_startup
-                sync_results = sync_on_startup(self._watched_symbols)
+                sync_results = sync_on_startup(
+                    self._watched_symbols,
+                    timeframe=self.api.timeframe.key,
+                    dataset=self.api.dataset,
+                )
                 total_bars = sum(r.bars_added for r in sync_results.values())
                 total_gaps = sum(r.gaps_filled for r in sync_results.values())
                 failed_syncs = [r for r in sync_results.values() if not r.success]
@@ -567,7 +575,13 @@ class OKXSignalGUI:
             try:
                 from okx_signal_system.training.startup_quality import run_startup_quality_gate
                 self.message_queue.put(('log', ("正在执行启动训练质量门...", "INFO")))
-                report = run_startup_quality_gate(symbols=self._watched_symbols, max_symbols=None)
+                report = run_startup_quality_gate(
+                    symbols=self._watched_symbols,
+                    dataset=self.api.dataset,
+                    signal_timeframe=self.api.timeframe.key,
+                    trend_timeframe=self.api.trend_timeframe.key,
+                    max_symbols=None,
+                )
                 self._startup_quality_report = report
                 self._trained_params = report.strategy_params
                 self._quality_gate_allows_push = bool(getattr(report, "push_allowed", report.status == "passed"))
@@ -616,7 +630,7 @@ class OKXSignalGUI:
             last_incremental_sync = asyncio.get_event_loop().time()
             health_interval = float(os.environ.get("SIGNAL_HEALTH_REPORT_INTERVAL_SECONDS", "3600"))
             from okx_signal_system.data.gap_handler import IncrementalSyncer
-            syncer = IncrementalSyncer()
+            syncer = IncrementalSyncer(timeframe=self.api.timeframe.key, dataset=self.api.dataset)
             checked_bars: dict[str, str] = {}
             
             while self.monitoring:
@@ -637,9 +651,13 @@ class OKXSignalGUI:
                     last_signal_check = current_time
                 
                 # 每1小时增量同步一次数据（防止WebSocket丢K线）
-                if current_time - last_incremental_sync >= 3600:
+                sync_interval_seconds = max(300, self.api.timeframe.hours * 3600)
+                if current_time - last_incremental_sync >= sync_interval_seconds:
                     try:
-                        results = syncer.sync_batch(self._watched_symbols, interval_hours=1)
+                        results = syncer.sync_batch(
+                            self._watched_symbols,
+                            interval_hours=max(0.25, self.api.timeframe.hours),
+                        )
                         if results:
                             total = sum(r.bars_added for r in results.values())
                             if total > 0:
@@ -705,8 +723,8 @@ class OKXSignalGUI:
             cycle_health: list[dict] = []
             
             for inst_id in self._watched_symbols:
-                # 从数据存储加载
-                df = self.api._data_store.load(inst_id)
+                # 通过统一行情入口读取；WebSocket 不稳时会自动走 REST 兜底刷新。
+                df = await self.api.get_candles(inst_id, bar=self.api.timeframe.key, limit=600)
                 
                 if len(df) < 80:
                     cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="history_too_short"))
@@ -721,8 +739,8 @@ class OKXSignalGUI:
                 if is_new_bar:
                     checked_bars[inst_id] = last_ts
 
-                if not is_latest_bar_fresh(df, max_lag_hours=3.0):
-                    self.message_queue.put(('log', (f"{inst_id} 最新K线超过3小时，等待实时数据后再发信号", "WARNING")))
+                if not is_latest_bar_fresh(df, max_lag_hours=self.api.timeframe.fresh_lag_hours):
+                    self.message_queue.put(('log', (f"{inst_id} 最新K线超过{self.api.timeframe.fresh_lag_hours:g}小时，等待实时数据后再发信号", "WARNING")))
                     cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="stale_data"))
                     continue
                 
@@ -735,6 +753,8 @@ class OKXSignalGUI:
                         slow_ema=params.slow_ema,
                         breakout_window=params.breakout_window,
                         atr_window=params.atr_window,
+                        signal_timeframe=self.api.timeframe.key,
+                        trend_timeframe=self.api.trend_timeframe.key,
                     )
                 except Exception as e:
                     self.message_queue.put(('log', (f"特征计算失败 {inst_id}: {e}", "WARNING")))
@@ -901,6 +921,8 @@ class OKXSignalGUI:
                                 max_loss_pct=decision.max_position_loss_pct,
                                 margin_loss_pct=decision.margin_loss_pct,
                                 kline_time=kline_time,
+                                signal_timeframe=self.api.timeframe.key,
+                                trend_timeframe=self.api.trend_timeframe.key,
                             )
                             self.message_queue.put(('log', (f"📤 飞书推送已发送 (评分{effective_score:.1f}≥6)", "INFO")))
                         except Exception as e:

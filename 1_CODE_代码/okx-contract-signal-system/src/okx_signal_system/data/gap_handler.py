@@ -14,13 +14,14 @@ import pandas as pd
 from okx_signal_system.exchange.candles import okx_candles_to_frame
 from okx_signal_system.exchange.okx import get_candles  # OKXInstrument
 from okx_signal_system.paths import find_lightweight_history
+from okx_signal_system.timeframe import timeframe_spec
 
 log = logging.getLogger(__name__)
 
 # 回补配置
-MAX_BACKFILL_GAPS = 500  # 最多回补500根K线（约21天1h数据）
-GAP_THRESHOLD_HOURS = 6  # 超过6小时视为数据断裂
+MAX_BACKFILL_GAPS = 3000  # 单轮最多回补K线；15m下约31天
 MAX_GAP_BARS = 200  # 单次最大回补量
+GAP_THRESHOLD_BARS = 3  # 超过3根周期视为数据断裂
 
 
 def _to_okx_ms(value: datetime | pd.Timestamp) -> str:
@@ -73,12 +74,14 @@ class DataGapHandler:
     4. 提供增量数据同步机制
     """
 
-    def __init__(self, data_dir: Path | str | None = None):
+    def __init__(self, data_dir: Path | str | None = None, *, timeframe: str = "1h", dataset: str | None = None):
+        self.timeframe = timeframe_spec(timeframe)
         if data_dir is None:
+            dataset = dataset or f"okx_{self.timeframe.file_suffix}_extended"
             # 尝试多个可能的路径
             possible_paths = [
-                Path(r"D:\JIAOYI-CX\历史数据_保留\lightweight_history\okx_1h_extended"),
-                Path(__file__).parent.parent.parent / "data" / "okx_1h_extended",
+                Path(r"D:\JIAOYI-CX\历史数据_保留\lightweight_history") / dataset,
+                Path(__file__).parent.parent.parent / "data" / dataset,
             ]
             for p in possible_paths:
                 if p.exists():
@@ -101,11 +104,12 @@ class DataGapHandler:
         path = self.data_dir / fname
 
         if not path.exists():
+            missing_bars = int(365 * 24 * 60 / self.timeframe.minutes)
             return [DataGap(
                 inst_id=inst_id,
                 start_time=datetime.now(timezone.utc) - timedelta(days=365),
                 end_time=datetime.now(timezone.utc),
-                missing_bars=365 * 24,
+                missing_bars=missing_bars,
                 severity="severe",
             )]
 
@@ -118,14 +122,15 @@ class DataGapHandler:
             gaps = []
             times = df["ts"].values
             for i in range(1, len(times)):
-                diff = (pd.Timestamp(times[i]) - pd.Timestamp(times[i-1])).total_seconds() / 3600
-                if diff > GAP_THRESHOLD_HOURS:
+                diff_seconds = (pd.Timestamp(times[i]) - pd.Timestamp(times[i-1])).total_seconds()
+                diff_bars = diff_seconds / (self.timeframe.minutes * 60)
+                if diff_bars > GAP_THRESHOLD_BARS:
                     gap = DataGap(
                         inst_id=inst_id,
                         start_time=pd.Timestamp(times[i-1]).to_pydatetime(),
                         end_time=pd.Timestamp(times[i]).to_pydatetime(),
-                        missing_bars=int(diff),
-                        severity="severe" if diff > 72 else "moderate" if diff > 24 else "minor",
+                        missing_bars=max(1, int(round(diff_bars)) - 1),
+                        severity="severe" if diff_bars > 72 else "moderate" if diff_bars > 24 else "minor",
                     )
                     gaps.append(gap)
 
@@ -133,14 +138,15 @@ class DataGapHandler:
             last_time = df["ts"].max()
             now = datetime.now(timezone.utc)
             gap_hours = (now - last_time.to_pydatetime()).total_seconds() / 3600
+            gap_bars = gap_hours * 60 / self.timeframe.minutes
 
-            if gap_hours > GAP_THRESHOLD_HOURS:
+            if gap_bars > GAP_THRESHOLD_BARS:
                 gaps.append(DataGap(
                     inst_id=inst_id,
                     start_time=last_time.to_pydatetime(),
                     end_time=now,
-                    missing_bars=int(gap_hours),
-                    severity="severe" if gap_hours > 72 else "moderate" if gap_hours > 24 else "minor",
+                    missing_bars=max(1, int(gap_bars)),
+                    severity="severe" if gap_bars > 72 else "moderate" if gap_bars > 24 else "minor",
                 ))
 
             log.info(f"Detected {len(gaps)} gaps for {inst_id}")
@@ -178,7 +184,7 @@ class DataGapHandler:
             while remaining > 0 and cursor_end > gap_start:
                 raw_bars = get_candles(
                     inst_id,
-                    bar="1h",
+                    bar=self.timeframe.key,
                     limit=min(MAX_GAP_BARS, remaining),
                     before=_to_okx_ms(gap_start),
                     after=_to_okx_ms(cursor_end),
@@ -260,9 +266,9 @@ class DataGapHandler:
             else:
                 df["symbol"] = df["symbol"].fillna(inst_id)
             if "timeframe" not in df.columns:
-                df["timeframe"] = "1h"
+                df["timeframe"] = self.timeframe.key
             else:
-                df["timeframe"] = df["timeframe"].fillna("1h")
+                df["timeframe"] = df["timeframe"].fillna(self.timeframe.key)
 
             # 保存
             df.to_parquet(path, index=False)
@@ -327,8 +333,8 @@ class DataGapHandler:
         if len(parts) >= 2:
             base = parts[0]
             quote = parts[1] if len(parts) > 1 else "USDT"
-            return f"{base}_{quote}_{quote}_1h.parquet"
-        return f"{normalized}_USDT_1h.parquet"
+            return f"{base}_{quote}_{quote}_{self.timeframe.file_suffix}.parquet"
+        return f"{normalized}_USDT_{self.timeframe.file_suffix}.parquet"
 
 
 class FeatureGapHandler:
@@ -407,12 +413,12 @@ class FeatureGapHandler:
         return df
 
 
-def sync_on_startup(symbols: list[str]) -> dict[str, SyncResult]:
+def sync_on_startup(symbols: list[str], *, timeframe: str = "1h", dataset: str | None = None) -> dict[str, SyncResult]:
     """
     启动时同步数据
     应该在系统启动时调用
     """
-    handler = DataGapHandler()
+    handler = DataGapHandler(timeframe=timeframe, dataset=dataset)
     return handler.sync_all_symbols(symbols)
 
 
@@ -425,8 +431,8 @@ class IncrementalSyncer:
     每次扫描周期结束时调用，保持数据最新
     """
 
-    def __init__(self, data_dir: Path | str | None = None):
-        self.handler = DataGapHandler(data_dir)
+    def __init__(self, data_dir: Path | str | None = None, *, timeframe: str = "1h", dataset: str | None = None):
+        self.handler = DataGapHandler(data_dir, timeframe=timeframe, dataset=dataset)
         self.last_sync: dict[str, datetime] = {}
 
     def sync_if_needed(self, inst_id: str, interval_hours: int = 1) -> SyncResult | None:

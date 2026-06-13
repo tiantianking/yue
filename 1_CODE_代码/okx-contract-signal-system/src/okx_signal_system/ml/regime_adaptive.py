@@ -31,39 +31,39 @@ RegimeType = Literal["high_vol_trend", "low_vol_trend", "high_vol_range", "low_v
 
 REGIME_PARAMS: dict[str, StrategyParams] = {
     "high_vol_trend": StrategyParams(
-        fast_ema=15,       # 快EMA缩短，快速跟趋势
-        slow_ema=50,       # 慢EMA缩短
-        breakout_window=30, # 突破窗口缩短，更快入场
-        atr_stop_mult=2.5,  # 宽止损，避免被高波动扫出
-        take_profit_mult=3.5, # 高波动趋势中让利润奔跑
-        max_hold_bars=60,   # 长持仓
+        fast_ema=12,       # 快EMA缩短，快速跟趋势
+        slow_ema=48,       # 慢EMA缩短
+        breakout_window=24, # 突破窗口缩短，更快入场
+        atr_stop_mult=3.2,  # 宽止损，避免被高波动扫出
+        take_profit_mult=4.0, # 高波动趋势中让利润奔跑
+        max_hold_bars=96,   # 15m下约24小时
         atr_window=14,
     ),
     "low_vol_trend": StrategyParams(
-        fast_ema=20,       # 标准参数
-        slow_ema=60,
-        breakout_window=40,
-        atr_stop_mult=2.0,
-        take_profit_mult=3.5,
-        max_hold_bars=48,
+        fast_ema=12,       # 标准15m参数
+        slow_ema=64,
+        breakout_window=32,
+        atr_stop_mult=2.4,
+        take_profit_mult=4.0,
+        max_hold_bars=96,   # 15m下约24小时
         atr_window=14,
     ),
     "high_vol_range": StrategyParams(
-        fast_ema=25,       # 慢EMA，减少假信号
-        slow_ema=70,
-        breakout_window=50, # 宽突破窗口，要求更强的突破确认
-        atr_stop_mult=1.5,  # 窄止损，震荡中快速认错
-        take_profit_mult=3.5, # 3.5R 止盈下限
-        max_hold_bars=24,   # 短持仓
+        fast_ema=16,       # 慢EMA，减少假信号
+        slow_ema=80,
+        breakout_window=48, # 宽突破窗口，要求更强的突破确认
+        atr_stop_mult=2.4,  # 15m下避免过紧止损
+        take_profit_mult=4.0,
+        max_hold_bars=32,   # 15m下约8小时
         atr_window=14,
     ),
     "low_vol_range": StrategyParams(
-        fast_ema=30,       # 超慢EMA，减少交易频率
-        slow_ema=80,
-        breakout_window=60, # 极宽突破窗口
-        atr_stop_mult=1.2,  # 极窄止损
-        take_profit_mult=3.5,
-        max_hold_bars=18,   # 极短持仓
+        fast_ema=20,       # 超慢EMA，减少交易频率
+        slow_ema=96,
+        breakout_window=64, # 极宽突破窗口
+        atr_stop_mult=2.0,  # 低波动也保留成本缓冲
+        take_profit_mult=4.0,
+        max_hold_bars=32,   # 15m下约8小时
         atr_window=14,
     ),
 }
@@ -168,7 +168,7 @@ class RegimeDetector:
             环境类型
         """
         is_high_vol = atr_avg_ratio > 1.2  # 波动率高于均值20%
-        is_strong_trend = abs(ema_spread) > 0.01  # EMA间距>1%
+        is_strong_trend = abs(ema_spread) > 0.005
 
         # 额外条件：成交量确认趋势
         has_volume = volume_ratio > 0.8

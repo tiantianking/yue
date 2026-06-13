@@ -48,3 +48,21 @@ def test_align_4h_uses_last_completed_value() -> None:
 def test_build_feature_frame_contains_required_features() -> None:
     features = build_feature_frame(sample_frame())
     assert {"ema_fast", "ema_slow", "atr", "breakout_high", "breakout_low", "bias_4h"}.issubset(features.columns)
+
+
+def test_build_feature_frame_supports_15m_signal_and_1h_trend() -> None:
+    periods = 420
+    frame = pd.DataFrame(
+        {
+            "ts": pd.date_range("2026-01-01", periods=periods, freq="15min", tz="UTC"),
+            "open": [100 + i * 0.02 for i in range(periods)],
+            "high": [101 + i * 0.02 for i in range(periods)],
+            "low": [99 + i * 0.02 for i in range(periods)],
+            "close": [100.5 + i * 0.02 for i in range(periods)],
+            "volume": [1000.0] * periods,
+        }
+    )
+    features = build_feature_frame(frame, signal_timeframe="15m", trend_timeframe="1h")
+    assert {"trend_bias", "trend_timeframe", "complete_trend", "signal_timeframe"}.issubset(features.columns)
+    assert features["signal_timeframe"].dropna().iloc[-1] == "15m"
+    assert features["trend_timeframe"].dropna().iloc[-1] == "1h"
