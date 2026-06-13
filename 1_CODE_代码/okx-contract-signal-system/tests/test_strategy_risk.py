@@ -1,6 +1,12 @@
 import pandas as pd
 
-from okx_signal_system.risk.model import Ledger, RiskConfig, apply_halt_policy, validate_signal
+from okx_signal_system.risk.model import (
+    Ledger,
+    RiskConfig,
+    apply_halt_policy,
+    smart_leverage_for_signal,
+    validate_signal,
+)
 from okx_signal_system.strategy.trend_breakout import StrategyParams, build_signal
 
 
@@ -27,6 +33,8 @@ def test_long_breakout_signal_has_required_protection() -> None:
     assert signal.stop_loss is not None
     assert signal.take_profit is not None
     assert signal.max_hold_bars == 48
+    assert signal.signal_score is not None and signal.signal_score >= 6
+    assert signal.risk_reward_ratio == 2.0
 
 
 def test_rejects_without_breakout() -> None:
@@ -48,6 +56,7 @@ def test_risk_accepts_protected_signal_and_caps_leverage() -> None:
     assert decision.margin_mode == "isolated"
     assert decision.position_mode == "one_way"
     assert decision.leverage_cap <= 10
+    assert decision.leverage_used and 1 <= decision.leverage_used <= 10
     assert decision.qty and decision.qty > 0
 
 
@@ -56,3 +65,21 @@ def test_risk_rejects_open_position() -> None:
     decision = validate_signal(signal, Ledger("BTC-USDT-SWAP", init_capital=10000, equity=10000, open_positions=1))
     assert not decision.accepted
     assert decision.reason == "position_open"
+
+
+def test_strategy_rejects_too_close_protection_after_costs() -> None:
+    signal = build_signal(base_row(atr=0.05, atr_pct=0.00045), inst_id="BTC-USDT-SWAP")
+    assert not signal.accepted
+    assert signal.reject_reason in {"atr_pct_too_low", "stop_distance_too_close"}
+
+
+def test_smart_leverage_uses_signal_score_not_default_ten() -> None:
+    weak = build_signal(base_row(atr=0.35, atr_pct=0.0032), inst_id="BTC-USDT-SWAP")
+    strong = build_signal(base_row(close=118.0, breakout_high=100.0, atr=0.35, atr_pct=0.0030, vol_ratio=2.0), inst_id="BTC-USDT-SWAP")
+    weak = weak.__class__(**{**weak.__dict__, "signal_score": 6.1})
+    strong = strong.__class__(**{**strong.__dict__, "signal_score": 9.4})
+    ledger = Ledger("BTC-USDT-SWAP", init_capital=10000, equity=10000)
+    weak_lev = smart_leverage_for_signal(weak, ledger, RiskConfig(max_leverage=10))
+    strong_lev = smart_leverage_for_signal(strong, ledger, RiskConfig(max_leverage=10))
+    assert weak_lev < strong_lev <= 10
+    assert weak_lev != 10

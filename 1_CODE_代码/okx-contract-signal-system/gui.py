@@ -64,7 +64,7 @@ class OKXSignalGUI:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("OKX 信号系统 v3")
+        self.root.title("OKX 信号系统 v3.1")
         self.root.geometry("1000x700")
         
         # 设置窗口图标（如果存在）
@@ -82,6 +82,9 @@ class OKXSignalGUI:
         self.log_text = None  # 初始化为 None，等待 create_log_frame 创建
         self.api = None  # API 实例
         self._watched_symbols = []  # 监控币种列表
+        self._trained_params = None
+        self._startup_quality_report = None
+        self._quality_gate_allows_push = False
         
         # 创建界面
         self.create_widgets()
@@ -480,6 +483,34 @@ class OKXSignalGUI:
                         self.message_queue.put(('log', (f"  {inst_id}: 同步 {count} 根 K线", "INFO")))
                     except Exception as e:
                         self.message_queue.put(('log', (f"  {inst_id}: 同步失败 {e}", "WARNING")))
+
+            # 启动训练质量门：加载历史训练参数，并用本地历史数据做一次训练/验证拆分检查
+            try:
+                from okx_signal_system.training.startup_quality import run_startup_quality_gate
+                self.message_queue.put(('log', ("正在执行启动训练质量门...", "INFO")))
+                report = run_startup_quality_gate(symbols=self._watched_symbols, max_symbols=min(6, len(self._watched_symbols)))
+                self._startup_quality_report = report
+                self._trained_params = report.strategy_params
+                self._quality_gate_allows_push = report.status == "passed"
+                summary = report.valid_summary
+                self.message_queue.put(('log', (
+                    f"启动训练质量门 {report.status}: 验证交易 {summary.get('total_trades', 0)} 笔，"
+                    f"PF={summary.get('profit_factor', 0):.2f}，参数={report.selected_params}",
+                    "INFO" if report.status == "passed" else "WARNING",
+                )))
+                if report.stale_symbols:
+                    self.message_queue.put(('log', (
+                        f"以下币种本地K线较旧，实时推送前会等待新K线: {', '.join(report.stale_symbols[:6])}",
+                        "WARNING",
+                    )))
+                if not self._quality_gate_allows_push:
+                    self.message_queue.put(('log', (
+                        f"质量门未通过，飞书推送暂停；原因: {', '.join(report.reasons) or 'unknown'}",
+                        "WARNING",
+                    )))
+            except Exception as e:
+                self._quality_gate_allows_push = False
+                self.message_queue.put(('log', (f"启动训练质量门异常，使用默认参数: {e}", "WARNING")))
             
             # 连接 WebSocket（接收实时更新）
             self.message_queue.put(('log', ('正在连接 WebSocket...', "INFO")))
@@ -541,11 +572,13 @@ class OKXSignalGUI:
     async def _check_signals(self, checked_bars: dict[str, str]):
         """检查各币种的 trading 信号"""
         try:
+            from dataclasses import replace
             import pandas as pd
             from okx_signal_system.features.indicators import build_feature_frame
             from okx_signal_system.strategy.trend_breakout import build_signal, StrategyParams
             from okx_signal_system.config import load_config
-            from okx_signal_system.ml.regime_adaptive import AdaptiveParamsManager, REGIME_SCORE_PENALTY, REGIME_LEVERAGE_FACTOR
+            from okx_signal_system.ml.regime_adaptive import AdaptiveParamsManager
+            from okx_signal_system.training.startup_quality import is_latest_bar_fresh
 
             # 加载策略参数
             config = load_config("base.yaml")
@@ -564,7 +597,10 @@ class OKXSignalGUI:
                 atr_stop_mult=float(_first_or_val(strategy_cfg.get('atr_stop_mult'), 2.0)),
                 take_profit_mult=float(_first_or_val(strategy_cfg.get('take_profit_mult'), 2.0)),
                 max_hold_bars=int(_first_or_val(strategy_cfg.get('max_hold_bars'), 48)),
+                atr_window=int(_first_or_val(strategy_cfg.get('atr_window'), 14)),
             )
+            trained_params = getattr(self, '_trained_params', None)
+            base_params = trained_params if trained_params is not None else base_params
 
             # 初始化自适应参数管理器（单例）
             if not hasattr(self, '_adaptive_manager'):
@@ -583,17 +619,27 @@ class OKXSignalGUI:
                     continue  # 没有新数据
                 
                 checked_bars[inst_id] = last_ts
+
+                if not is_latest_bar_fresh(df, max_lag_hours=3.0):
+                    self.message_queue.put(('log', (f"{inst_id} 最新K线超过3小时，等待实时数据后再发信号", "WARNING")))
+                    continue
                 
                 # 计算特征
                 try:
-                    features = build_feature_frame(df)
+                    params = base_params
+                    features = build_feature_frame(
+                        df,
+                        fast_ema=params.fast_ema,
+                        slow_ema=params.slow_ema,
+                        breakout_window=params.breakout_window,
+                        atr_window=params.atr_window,
+                    )
                 except Exception as e:
                     self.message_queue.put(('log', (f"特征计算失败 {inst_id}: {e}", "WARNING")))
                     continue
 
-                # P2: 环境自适应参数 - 根据市场环境自动切换参数组
-                regime, adaptive_params = self._adaptive_manager.update_regime(features)
-                params = adaptive_params  # 使用环境自适应参数替代固定参数
+                # 环境只用于降分/降杠杆；策略参数使用历史训练冻结参数
+                regime, _adaptive_params = self._adaptive_manager.update_regime(features)
                 score_penalty = self._adaptive_manager.get_score_penalty()
                 leverage_factor = self._adaptive_manager.get_leverage_factor()
                 
@@ -619,18 +665,9 @@ class OKXSignalGUI:
                     # P2: 环境自适应 - 应用杠杆调整
                     regime_cn = self._adaptive_manager.get_regime_name_cn()
 
-                    # 风控校验（先做风控，拿到 decision 后再投票）
-                    from okx_signal_system.risk.model import validate_signal, Ledger, RiskConfig
-                    max_lev = float(_first_or_val(config.get('risk', {}).get('max_leverage'), 10.0))
-                    # 根据市场环境调整最大杠杆
-                    max_lev_adjusted = max_lev * leverage_factor
-                    risk_config = RiskConfig(max_leverage=max_lev_adjusted)
-                    ledger = Ledger(inst_id=inst_id, init_capital=10000, equity=10000)
-                    decision = validate_signal(signal, ledger, risk_config)
-
-                    # P4: 多策略投票（用风控评分作为base_score）
+                    # P4: 多策略投票（用策略评分作为base_score）
                     from okx_signal_system.strategy.ensemble import ensemble_vote
-                    base_score_val = decision.signal_score if (decision.signal_score and not pd.isna(decision.signal_score)) else 5.0
+                    base_score_val = signal.signal_score if (signal.signal_score and not pd.isna(signal.signal_score)) else 5.0
                     ensemble_result = ensemble_vote(
                         last_row, params, features, len(features) - 1,
                         base_score=base_score_val,
@@ -658,8 +695,17 @@ class OKXSignalGUI:
                     if score_penalty < 0:
                         effective_score = max(1.0, effective_score + score_penalty)
 
+                    # 风控校验：使用投票+环境后的综合分决定建议杠杆
+                    from okx_signal_system.risk.model import validate_signal, Ledger, RiskConfig
+                    max_lev = float(_first_or_val(config.get('risk', {}).get('max_leverage'), 10.0))
+                    max_lev_adjusted = max(1.0, min(10.0, max_lev * leverage_factor))
+                    risk_config = RiskConfig(max_leverage=max_lev_adjusted)
+                    ledger = Ledger(inst_id=inst_id, init_capital=10000, equity=10000)
+                    signal = replace(signal, signal_score=effective_score)
+                    decision = validate_signal(signal, ledger, risk_config)
+
                     signal_type = f"{'多' if signal.side == 'long' else '空'}头突破"
-                    leverage_text = f"{decision.leverage_cap:.0f}x" if decision.accepted else "N/A"
+                    leverage_text = f"{decision.leverage_used:.1f}x" if decision.accepted and decision.leverage_used else "N/A"
                     rr_text = f"{decision.risk_reward_ratio:.1f}:1" if decision.risk_reward_ratio else ""
 
                     # 在信号类型中加入环境和投票信息
@@ -689,7 +735,7 @@ class OKXSignalGUI:
                     )))
                     
                     # 推送飞书（仅风控通过 + 综合评分≥6的高质量信号才推送，减少噪音）
-                    if decision.accepted and effective_score >= 6.0:
+                    if decision.accepted and effective_score >= 6.0 and getattr(self, '_quality_gate_allows_push', False):
                         try:
                             from okx_signal_system.notify.feishu import send_signal_alert
                             send_signal_alert(
@@ -713,6 +759,8 @@ class OKXSignalGUI:
                             self.message_queue.put(('log', (f"飞书推送失败: {e}", "WARNING")))
                     elif decision.accepted and effective_score < 6.0:
                         self.message_queue.put(('log', (f"🔕 低分信号不推送飞书 (评分{effective_score:.1f}<6)", "INFO")))
+                    elif decision.accepted and effective_score >= 6.0:
+                        self.message_queue.put(('log', ("质量门未通过，高分候选信号暂不推送飞书", "WARNING")))
         
         except Exception as e:
             self.message_queue.put(('log', (f"信号检测异常: {e}", "ERROR")))

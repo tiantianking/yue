@@ -1,11 +1,11 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-title OKX Signal System v3
+title OKX Signal System v3.1
 
 cd /d "%~dp0"
 
 echo ========================================
-echo  OKX Signal System v3
+echo  OKX Signal System v3.1
 echo ========================================
 echo.
 
@@ -13,11 +13,17 @@ set "PYTHON_EXE="
 set "LOCAL_PY=%~dp0..\..\LOCAL_DEPS\venv\Scripts\python.exe"
 
 if exist "%LOCAL_PY%" (
+    "%LOCAL_PY%" --version > nul 2>&1
+    if errorlevel 1 (
+        echo [WARN] Workspace Python exists but cannot run; trying system Python.
+        goto try_py_launcher
+    )
     set "PYTHON_EXE=%LOCAL_PY%"
     echo [INFO] Using workspace Python
     goto python_found
 )
 
+:try_py_launcher
 py -3 --version > nul 2>&1
 if not errorlevel 1 (
     set "PYTHON_EXE=py -3"

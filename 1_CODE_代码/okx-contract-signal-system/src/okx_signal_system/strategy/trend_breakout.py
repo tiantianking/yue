@@ -3,21 +3,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+import numpy as np
 import pandas as pd
 
 Side = Literal["long", "short", "flat"]
 
-# 成交量过滤阈值（vol_ratio < 0.5 时不开仓）
 VOL_RATIO_MIN = 0.5
-
-# ATR 过滤阈值（过低不开仓）
 ATR_PCT_MIN = 0.001
+TREND_STRENGTH_MIN = 0.005
+MOMENTUM_CONFIRM_BARS = 3
 
-# 趋势强度评分阈值（EMA间距百分比）
-TREND_STRENGTH_MIN = 0.005  # EMA间距至少0.5%才认为是强趋势
-
-# 动量确认阈值
-MOMENTUM_CONFIRM_BARS = 3  # 需要连续N根K线朝同一方向才确认动量
+# Conservative live-signal protection floors. They include room for OKX fees,
+# slippage, and normal 1h noise so alerts do not suggest tiny TP/SL bands.
+COST_BUFFER_RATE = 0.002
+MIN_STOP_DISTANCE_PCT = 0.004
+MIN_TAKE_PROFIT_DISTANCE_PCT = 0.008
+MIN_REWARD_TO_RISK = 1.5
 
 
 @dataclass(frozen=True)
@@ -42,199 +43,289 @@ class TradeSignal:
     max_hold_bars: int | None
     reason_codes: tuple[str, ...]
     reject_reason: str | None = None
+    signal_score: float | None = None
+    risk_reward_ratio: float | None = None
+    stop_reason: str | None = None
+    tp_reason: str | None = None
 
     @property
     def accepted(self) -> bool:
         return self.side in {"long", "short"} and self.reject_reason is None
 
 
+def _reject(
+    ts: pd.Timestamp,
+    inst_id: str,
+    code: str,
+    reason: str,
+    *,
+    score: float | None = None,
+) -> TradeSignal:
+    return TradeSignal(
+        ts=ts,
+        inst_id=inst_id,
+        side="flat",
+        entry_ref=None,
+        stop_loss=None,
+        take_profit=None,
+        max_hold_bars=None,
+        reason_codes=(code,),
+        reject_reason=reason,
+        signal_score=score,
+    )
+
+
+def _bounded_score(value: float) -> float:
+    if not np.isfinite(value):
+        return 1.0
+    return float(max(1.0, min(10.0, value)))
+
+
+def _num(row: pd.Series, name: str, default: float = np.nan) -> float:
+    value = row.get(name, default)
+    if pd.isna(value):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _calculate_trend_strength(row: pd.Series) -> float:
-    """
-    计算趋势强度：EMA快速线与慢速线的间距百分比
-
-    返回：
-    - 正值：多头趋势强度
-    - 负值：空头趋势强度
-    - 接近0：趋势弱
-    """
-    ema_fast = row.get("ema_fast")
-    ema_slow = row.get("ema_slow")
-    close = row.get("close")
-
-    if pd.isna(ema_fast) or pd.isna(ema_slow) or pd.isna(close) or close == 0:
+    ema_fast = _num(row, "ema_fast")
+    ema_slow = _num(row, "ema_slow")
+    close = _num(row, "close")
+    if not np.isfinite(ema_fast) or not np.isfinite(ema_slow) or close <= 0:
         return 0.0
-
-    # EMA间距百分比（相对于价格）
-    spread_pct = (ema_fast - ema_slow) / close
-    return float(spread_pct)
+    return float((ema_fast - ema_slow) / close)
 
 
 def _calculate_momentum(row: pd.Series, prev_rows: pd.DataFrame, side: str) -> int:
-    """
-    计算动量确认：连续朝同一方向的K线数量
-
-    参数：
-    - row: 当前K线
-    - prev_rows: 前N根K线
-    - side: 'long' 或 'short'
-
-    返回：连续同向K线数量
-    """
     if prev_rows.empty or len(prev_rows) < MOMENTUM_CONFIRM_BARS:
         return 0
 
     momentum = 0
     for _, prev_row in prev_rows.tail(MOMENTUM_CONFIRM_BARS).iterrows():
-        if side == "long":
-            if float(prev_row["close"]) > float(prev_row["open"]):
-                momentum += 1
-            else:
-                break
-        else:  # short
-            if float(prev_row["close"]) < float(prev_row["open"]):
-                momentum += 1
-            else:
-                break
+        if side == "long" and float(prev_row["close"]) > float(prev_row["open"]):
+            momentum += 1
+        elif side == "short" and float(prev_row["close"]) < float(prev_row["open"]):
+            momentum += 1
+        else:
+            break
     return momentum
 
 
-def _identify_market_regime(frame: pd.DataFrame, idx: int, lookback: int = 20) -> str:
-    """
-    识别市场环境：高波动/低波动/趋势/震荡
-
-    返回：
-    - 'high_vol_trend': 高波动趋势市场（最有利）
-    - 'low_vol_trend': 低波动趋势市场
-    - 'high_vol_range': 高波动震荡市场（需谨慎）
-    - 'low_vol_range': 低波动震荡市场
-    """
-    if idx < lookback:
-        return "unknown"
-
-    recent = frame.iloc[max(0, idx - lookback):idx + 1]
-    close = recent["close"]
-    high = recent["high"]
-    low = recent["low"]
-
-    # 计算波动率（ATR%）
-    atr_val = atr(recent, 14).iloc[-1] if "atr" in recent.columns else 0
-    atr_pct = atr_val / float(close.iloc[-1]) if close.iloc[-1] > 0 else 0
-
-    # 计算趋势强度
-    ema_fast = recent["ema_fast"].iloc[-1] if "ema_fast" in recent.columns else 0
-    ema_slow = recent["ema_slow"].iloc[-1] if "ema_slow" in recent.columns else 0
-    trend_strength = abs(ema_fast - ema_slow) / float(close.iloc[-1]) if close.iloc[-1] > 0 else 0
-
-    # 识别市场环境
-    avg_atr_pct = atr(frame.iloc[max(0, idx - 100):idx + 1], 14) / frame.iloc[max(0, idx - 100):idx + 1]["close"]
-    current_vs_avg = atr_pct / avg_atr_pct.mean() if avg_atr_pct.mean() > 0 else 1
-
-    is_high_vol = current_vs_avg > 1.5
-    is_strong_trend = trend_strength > TREND_STRENGTH_MIN
-
-    if is_high_vol and is_strong_trend:
-        return "high_vol_trend"
-    elif not is_high_vol and is_strong_trend:
-        return "low_vol_trend"
-    elif is_high_vol and not is_strong_trend:
-        return "high_vol_range"
-    else:
-        return "low_vol_range"
-
-
 def atr(frame: pd.DataFrame, window: int = 14) -> pd.Series:
-    """计算ATR（简化版）"""
     prev_close = frame["close"].shift(1)
-    tr = pd.concat([
-        frame["high"] - frame["low"],
-        (frame["high"] - prev_close).abs(),
-        (frame["low"] - prev_close).abs(),
-    ], axis=1).max(axis=1)
+    tr = pd.concat(
+        [
+            frame["high"] - frame["low"],
+            (frame["high"] - prev_close).abs(),
+            (frame["low"] - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
     return tr.rolling(window=window, min_periods=window).mean()
 
 
-def build_signal(row: pd.Series, *, inst_id: str, params: StrategyParams = StrategyParams(), frame: pd.DataFrame | None = None, idx: int = 0) -> TradeSignal:
+def _identify_market_regime(frame: pd.DataFrame, idx: int, lookback: int = 20) -> str:
+    if idx < lookback:
+        return "unknown"
+
+    recent = frame.iloc[max(0, idx - lookback) : idx + 1]
+    close = float(recent["close"].iloc[-1])
+    if close <= 0:
+        return "unknown"
+
+    atr_value = _num(recent.iloc[-1], "atr", 0.0)
+    if atr_value <= 0:
+        atr_value = float(atr(recent, 14).iloc[-1]) if len(recent) >= 14 else 0.0
+    atr_pct = atr_value / close if close > 0 else 0.0
+
+    ema_fast = _num(recent.iloc[-1], "ema_fast", 0.0)
+    ema_slow = _num(recent.iloc[-1], "ema_slow", 0.0)
+    trend_strength = abs(ema_fast - ema_slow) / close if close > 0 else 0.0
+
+    lookback_frame = frame.iloc[max(0, idx - 100) : idx + 1]
+    if "atr" in lookback_frame.columns:
+        avg_atr_pct = pd.to_numeric(lookback_frame["atr"], errors="coerce") / lookback_frame["close"].astype(float)
+    else:
+        avg_atr_pct = atr(lookback_frame, 14) / lookback_frame["close"].astype(float)
+    avg = float(avg_atr_pct.replace([np.inf, -np.inf], np.nan).dropna().mean() or 0.0)
+    current_vs_avg = atr_pct / avg if avg > 0 else 1.0
+
+    is_high_vol = current_vs_avg > 1.5
+    is_strong_trend = trend_strength > TREND_STRENGTH_MIN
+    if is_high_vol and is_strong_trend:
+        return "high_vol_trend"
+    if not is_high_vol and is_strong_trend:
+        return "low_vol_trend"
+    if is_high_vol and not is_strong_trend:
+        return "high_vol_range"
+    return "low_vol_range"
+
+
+def _score_breakout(
+    *,
+    side: str,
+    close: float,
+    breakout_level: float,
+    trend_strength: float,
+    atr_pct: float,
+    vol_ratio: float,
+    reward_to_risk: float,
+    market_regime: str,
+    frame: pd.DataFrame | None,
+    idx: int,
+) -> float:
+    signed_strength = trend_strength if side == "long" else -trend_strength
+    trend_bonus = min(2.0, max(0.0, signed_strength / 0.025 * 2.0))
+    breakout_pct = abs(close - breakout_level) / close if close > 0 else 0.0
+    breakout_bonus = min(1.2, breakout_pct / max(atr_pct, 0.0001) * 0.6)
+    volume_bonus = min(1.0, max(0.0, (vol_ratio - 0.8) / 1.2))
+    rr_bonus = min(1.0, max(0.0, (reward_to_risk - MIN_REWARD_TO_RISK) / 1.5))
+
+    regime_bonus = {
+        "high_vol_trend": 0.6,
+        "low_vol_trend": 0.2,
+        "high_vol_range": -0.8,
+        "low_vol_range": -1.2,
+        "unknown": -0.2,
+    }.get(market_regime, 0.0)
+
+    momentum_bonus = 0.0
+    if frame is not None and idx > 0:
+        momentum = _calculate_momentum(pd.Series(dtype=float), frame.iloc[max(0, idx - 5) : idx], side)
+        momentum_bonus = min(0.6, momentum * 0.2)
+
+    return _bounded_score(4.8 + trend_bonus + breakout_bonus + volume_bonus + rr_bonus + regime_bonus + momentum_bonus)
+
+
+def _protection_reject_reason(*, close: float, stop_dist: float, tp_dist: float) -> str | None:
+    if close <= 0 or stop_dist <= 0 or tp_dist <= 0:
+        return "invalid_trade_protection"
+
+    stop_pct = stop_dist / close
+    tp_pct = tp_dist / close
+    min_stop = max(MIN_STOP_DISTANCE_PCT, COST_BUFFER_RATE * 2.0)
+    min_tp = max(MIN_TAKE_PROFIT_DISTANCE_PCT, min_stop * MIN_REWARD_TO_RISK)
+    rr = tp_dist / stop_dist
+
+    if stop_pct < min_stop:
+        return "stop_distance_too_close"
+    if tp_pct < min_tp:
+        return "take_profit_too_close"
+    if rr < MIN_REWARD_TO_RISK:
+        return "risk_reward_too_low"
+    return None
+
+
+def build_signal(
+    row: pd.Series,
+    *,
+    inst_id: str,
+    params: StrategyParams = StrategyParams(),
+    frame: pd.DataFrame | None = None,
+    idx: int = 0,
+) -> TradeSignal:
     ts = pd.Timestamp(row["ts"])
-    close = float(row["close"])
-    atr = row.get("atr")
+    close = _num(row, "close")
+    atr_value = _num(row, "atr")
     bias = row.get("bias_4h", "flat")
-    high_level = row.get("breakout_high")
-    low_level = row.get("breakout_low")
-    atr_pct = row.get("atr_pct")
-    vol_ratio = row.get("vol_ratio")
+    high_level = _num(row, "breakout_high")
+    low_level = _num(row, "breakout_low")
+    atr_pct = _num(row, "atr_pct", atr_value / close if close > 0 else np.nan)
+    vol_ratio = _num(row, "vol_ratio", 1.0)
 
-    # 1. ATR 检查
-    if pd.isna(atr) or atr <= 0:
-        return TradeSignal(ts, inst_id, "flat", None, None, None, None, ("ATR_MISSING",), "atr_missing")
-
-    # 2. ATR% 过低检查
-    if not pd.isna(atr_pct) and atr_pct < ATR_PCT_MIN:
-        return TradeSignal(ts, inst_id, "flat", None, None, None, None, ("ATR_PCT_LOW",), "atr_pct_too_low")
-
-    # 3. 4h 方向检查
+    if not np.isfinite(close) or close <= 0:
+        return _reject(ts, inst_id, "PRICE_MISSING", "price_missing")
+    if not np.isfinite(atr_value) or atr_value <= 0:
+        return _reject(ts, inst_id, "ATR_MISSING", "atr_missing")
+    if np.isfinite(atr_pct) and atr_pct < ATR_PCT_MIN:
+        return _reject(ts, inst_id, "ATR_PCT_LOW", "atr_pct_too_low")
     if bias not in {"long", "short"}:
-        return TradeSignal(ts, inst_id, "flat", None, None, None, None, ("4H_FLAT",), "flat_4h_bias")
+        return _reject(ts, inst_id, "4H_FLAT", "flat_4h_bias")
+    if not np.isfinite(high_level) or not np.isfinite(low_level):
+        return _reject(ts, inst_id, "BREAKOUT_MISSING", "breakout_missing")
+    if np.isfinite(vol_ratio) and vol_ratio < VOL_RATIO_MIN:
+        return _reject(ts, inst_id, "VOL_LOW", "volume_too_low")
 
-    # 4. 突破位检查
-    if pd.isna(high_level) or pd.isna(low_level):
-        return TradeSignal(ts, inst_id, "flat", None, None, None, None, ("BREAKOUT_MISSING",), "breakout_missing")
-
-    # 5. 成交量过滤
-    if not pd.isna(vol_ratio) and vol_ratio < VOL_RATIO_MIN:
-        return TradeSignal(ts, inst_id, "flat", None, None, None, None, ("VOL_LOW",), "volume_too_low")
-
-    # 6. 趋势强度检查（新增）
     trend_strength = _calculate_trend_strength(row)
     if abs(trend_strength) < TREND_STRENGTH_MIN:
-        return TradeSignal(ts, inst_id, "flat", None, None, None, None, ("TREND_WEAK",), "trend_strength_too_weak")
+        return _reject(ts, inst_id, "TREND_WEAK", "trend_strength_too_weak")
 
-    # 7. 市场环境识别（新增）- 高波动趋势市场最有利
-    if frame is not None:
-        market_regime = _identify_market_regime(frame, idx)
-        # 在高波动震荡市场降低信号权重，但不拒绝
-        if market_regime == "high_vol_range":
-            # 可以在这里添加日志或调整参数
-            pass
+    market_regime = _identify_market_regime(frame, idx) if frame is not None else "unknown"
+    stop_dist = float(atr_value) * params.atr_stop_mult
+    tp_dist = stop_dist * params.take_profit_mult
+    protection_reason = _protection_reject_reason(close=close, stop_dist=stop_dist, tp_dist=tp_dist)
 
-    # 8. 多头突破信号
-    if bias == "long" and close > float(high_level):
-        stop_dist = float(atr) * params.atr_stop_mult
+    if bias == "long" and close > high_level:
+        rr = tp_dist / stop_dist if stop_dist > 0 else 0.0
+        score = _score_breakout(
+            side="long",
+            close=close,
+            breakout_level=high_level,
+            trend_strength=trend_strength,
+            atr_pct=float(atr_pct) if np.isfinite(atr_pct) else stop_dist / close,
+            vol_ratio=float(vol_ratio) if np.isfinite(vol_ratio) else 1.0,
+            reward_to_risk=rr,
+            market_regime=market_regime,
+            frame=frame,
+            idx=idx,
+        )
+        if protection_reason:
+            return _reject(ts, inst_id, "PROTECTION_TOO_CLOSE", protection_reason, score=score)
         return TradeSignal(
             ts=ts,
             inst_id=inst_id,
             side="long",
             entry_ref=close,
             stop_loss=close - stop_dist,
-            take_profit=close + stop_dist * params.take_profit_mult,
+            take_profit=close + tp_dist,
             max_hold_bars=params.max_hold_bars,
             reason_codes=("4H_TREND_LONG", "1H_BREAKOUT_UP", "ATR_OK", "VOL_OK", "TREND_STRONG"),
+            signal_score=score,
+            risk_reward_ratio=rr,
+            stop_reason=f"ATR {params.atr_stop_mult:g}x with fee/slippage floor",
+            tp_reason=f"RR {rr:.2f}:1 after protection floor",
         )
 
-    # 9. 空头突破信号
-    if bias == "short" and close < float(low_level):
-        stop_dist = float(atr) * params.atr_stop_mult
+    if bias == "short" and close < low_level:
+        rr = tp_dist / stop_dist if stop_dist > 0 else 0.0
+        score = _score_breakout(
+            side="short",
+            close=close,
+            breakout_level=low_level,
+            trend_strength=trend_strength,
+            atr_pct=float(atr_pct) if np.isfinite(atr_pct) else stop_dist / close,
+            vol_ratio=float(vol_ratio) if np.isfinite(vol_ratio) else 1.0,
+            reward_to_risk=rr,
+            market_regime=market_regime,
+            frame=frame,
+            idx=idx,
+        )
+        if protection_reason:
+            return _reject(ts, inst_id, "PROTECTION_TOO_CLOSE", protection_reason, score=score)
         return TradeSignal(
             ts=ts,
             inst_id=inst_id,
             side="short",
             entry_ref=close,
             stop_loss=close + stop_dist,
-            take_profit=close - stop_dist * params.take_profit_mult,
+            take_profit=close - tp_dist,
             max_hold_bars=params.max_hold_bars,
             reason_codes=("4H_TREND_SHORT", "1H_BREAKOUT_DOWN", "ATR_OK", "VOL_OK", "TREND_STRONG"),
+            signal_score=score,
+            risk_reward_ratio=rr,
+            stop_reason=f"ATR {params.atr_stop_mult:g}x with fee/slippage floor",
+            tp_reason=f"RR {rr:.2f}:1 after protection floor",
         )
 
-    return TradeSignal(ts, inst_id, "flat", None, None, None, None, ("NO_BREAKOUT",), "no_breakout")
+    return _reject(ts, inst_id, "NO_BREAKOUT", "no_breakout")
 
 
 def generate_signals(features: pd.DataFrame, *, inst_id: str, params: StrategyParams = StrategyParams()) -> list[TradeSignal]:
-    """
-    生成交易信号列表
-
-    改进：增加市场环境识别和趋势强度过滤
-    """
-    signals = []
-    for idx, (_, row) in enumerate(features.iterrows()):
-        signal = build_signal(row, inst_id=inst_id, params=params, frame=features, idx=idx)
-        signals.append(signal)
-    return signals
+    return [
+        build_signal(row, inst_id=inst_id, params=params, frame=features, idx=idx)
+        for idx, (_, row) in enumerate(features.iterrows())
+    ]

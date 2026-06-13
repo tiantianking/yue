@@ -51,8 +51,8 @@ def volume_features(frame: pd.DataFrame, sma_window: int = 20) -> pd.DataFrame:
 
 def detect_extreme_volatility(frame: pd.DataFrame, atr_window: int = 14, threshold_multiplier: float = 3.0) -> pd.Series:
     """检测连续极端波动：最近 N 根 bar 中有 >= M 根 ATR 异常放大"""
-    atr = atr(frame, atr_window)
-    atr_pct = atr / frame["close"]
+    atr_series = atr(frame, atr_window)
+    atr_pct = atr_series / frame["close"]
     rolling_extreme = atr_pct.rolling(window=3, min_periods=3).max()
     return rolling_extreme > threshold_multiplier * atr_pct.mean() if atr_pct.mean() > 0 else pd.Series(False, index=frame.index)
 

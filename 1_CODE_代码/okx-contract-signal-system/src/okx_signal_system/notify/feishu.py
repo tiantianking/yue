@@ -6,8 +6,6 @@ import os
 import time
 from datetime import datetime, timezone
 
-import requests
-
 log = logging.getLogger(__name__)
 
 FEISHU_WEBHOOK_URL = os.environ.get("FEISHU_WEBHOOK_URL", "")
@@ -19,6 +17,12 @@ def _now_utc() -> datetime:
 
 
 def send_text(text: str, webhook_url: str | None = None, max_retries: int = 3) -> bool:
+    try:
+        import requests
+    except ModuleNotFoundError as exc:
+        log.warning("requests is required for Feishu notifications: %s", exc)
+        return False
+
     webhook_url = webhook_url or FEISHU_WEBHOOK_URL
     if not webhook_url:
         log.info("Feishu webhook is not configured; notification skipped")

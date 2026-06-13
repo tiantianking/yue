@@ -2,6 +2,9 @@ LOCAL_DEPS/
 123codexnpm-cache/
 历史数据_保留/
 LOCAL_RUN/
+tmp/
+1_CODE_代码/okx-contract-signal-system/logs/
+1_CODE_代码/okx-contract-signal-system/okx_signal.lock
 *.pyc
 __pycache__/
 .pytest_cache/

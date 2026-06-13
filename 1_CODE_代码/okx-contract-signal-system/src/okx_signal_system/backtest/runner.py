@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 
 import numpy as np
 import pandas as pd
@@ -14,6 +14,7 @@ from okx_signal_system.risk.model import (
     RiskConfig,
     validate_signal,
 )
+from okx_signal_system.strategy.ensemble import ensemble_vote
 from okx_signal_system.strategy.trend_breakout import StrategyParams, build_signal
 
 
@@ -214,16 +215,31 @@ def run_backtest_from_features(
             )
             continue
 
-        side = "long" if long_mask[idx] else "short"
-        stop_dist = float(atr[idx]) * params.atr_stop_mult
-        stop_loss = float(close[idx] - stop_dist if side == "long" else close[idx] + stop_dist)
-        take_profit = float(close[idx] + stop_dist * params.take_profit_mult if side == "long" else close[idx] - stop_dist * params.take_profit_mult)
-        signal = build_signal(features.iloc[idx], inst_id=inst_id, params=params)
+        signal = build_signal(features.iloc[idx], inst_id=inst_id, params=params, frame=features, idx=idx)
+        entry_idx = idx + 1
+        entry_price = float(open_[entry_idx])
+        if not signal.accepted or signal.entry_ref is None or signal.stop_loss is None or signal.take_profit is None:
+            continue
+        vote = ensemble_vote(features.iloc[idx], params, features, idx, base_score=signal.signal_score or 5.0)
+        effective_score = signal.signal_score or 5.0
+        if vote.final_side == "flat":
+            effective_score = max(1.0, effective_score - 3.0)
+        elif vote.final_side != signal.side:
+            effective_score = max(1.0, effective_score - 1.5)
+        else:
+            effective_score = vote.final_score
+        side = signal.side
+        stop_dist = abs(float(signal.entry_ref) - float(signal.stop_loss))
+        if side == "long":
+            stop_loss = entry_price - stop_dist
+            take_profit = entry_price + stop_dist * params.take_profit_mult
+        else:
+            stop_loss = entry_price + stop_dist
+            take_profit = entry_price - stop_dist * params.take_profit_mult
+        signal = replace(signal, entry_ref=entry_price, stop_loss=stop_loss, take_profit=take_profit, signal_score=effective_score)
         decision = validate_signal(signal, ledger, risk_config)
         if not decision.accepted or decision.qty is None:
             continue
-        entry_idx = idx + 1
-        entry_price = float(open_[entry_idx])
         notional = abs(entry_price * decision.qty)
         try:
             slip_bps = slippage_bps_for_participation(
@@ -335,8 +351,8 @@ def summarize_trades(trades: pd.DataFrame, *, initial_equity: float = 10000.0) -
         max_loss_streak = max(max_loss_streak, loss_streak)
     entry = pd.to_datetime(trades["entry_time"], utc=True)
     exit_ = pd.to_datetime(trades["exit_time"], utc=True)
-    gt5_profit = trades[(trades["leverage_cap"] > 5) & (trades["net_pnl"] > 0)]["net_pnl"].sum()
-    gt5_trades = (trades["leverage_cap"] > 5).mean()
+    gt5_profit = trades[(trades["leverage_used"] > 5) & (trades["net_pnl"] > 0)]["net_pnl"].sum()
+    gt5_trades = (trades["leverage_used"] > 5).mean()
     return {
         "total_return": float(total / initial_equity),
         "profit_factor": float(wins / abs(losses)) if losses < 0 else float("inf"),

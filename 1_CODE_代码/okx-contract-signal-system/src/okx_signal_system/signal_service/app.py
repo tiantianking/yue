@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import streamlit as st
 
 from okx_signal_system.config import project_paths
 
@@ -120,6 +119,8 @@ def readable_trades(trades: pd.DataFrame) -> pd.DataFrame:
 
 
 def render_signal(payload: dict[str, Any]) -> None:
+    import streamlit as st
+
     view = signal_view_model(payload)
     if view["tone"] == "success":
         st.success(view["headline"])
@@ -150,6 +151,8 @@ def render_signal(payload: dict[str, Any]) -> None:
 
 
 def main() -> None:
+    import streamlit as st
+
     st.set_page_config(page_title="OKX 半自动信号面板", layout="wide")
     paths = project_paths()
     st.title("OKX 半自动信号面板")

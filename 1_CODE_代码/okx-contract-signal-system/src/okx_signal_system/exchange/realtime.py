@@ -10,15 +10,15 @@ import logging
 import os
 import time
 import threading
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, Callable
+from typing import Any, Literal, Callable
 import gzip
 
 import pandas as pd
-import websocket
 
+from okx_signal_system.exchange.candles import okx_candles_to_frame
 from okx_signal_system.exchange.okx import (
     get_ticker,
     get_candles,
@@ -245,7 +245,7 @@ class OKXWebSocketClient:
 
     def __init__(self, on_candle: Callable[[str, dict], None] | None = None,
                  on_ticker: Callable[[str, dict], None] | None = None):
-        self._ws: websocket.WebSocketApp | None = None
+        self._ws: Any | None = None
         self._thread: threading.Thread | None = None
         self._running = False
         self._subscriptions: set[str] = set()
@@ -288,6 +288,11 @@ class OKXWebSocketClient:
 
     def _start_websocket(self):
         """启动WebSocket连接"""
+        try:
+            import websocket
+        except ModuleNotFoundError as exc:
+            raise RuntimeError("websocket-client is required for OKX WebSocket") from exc
+
         url = self._get_wss_url()
 
         def on_message(ws, message):
@@ -597,17 +602,7 @@ class OKXRealtimeAPI:
             raw_bars = okx_get_candles(inst_id, bar=bar, limit=limit)
 
             if raw_bars:
-                # 解析并存储
-                df = pd.DataFrame(raw_bars, columns=[
-                    "ts", "open", "high", "low", "close", "vol",
-                    "quote_vol", "turnover", "confirm", "ignore"
-                ])
-                df["ts"] = pd.to_datetime(df["ts"], utc=True)
-                for col in ["open", "high", "low", "close", "vol"]:
-                    df[col] = pd.to_numeric(df[col], errors="coerce")
-
-                df = df[["ts", "open", "high", "low", "close", "vol"]].copy()
-                df.columns = ["ts", "open", "high", "low", "close", "volume"]
+                df = okx_candles_to_frame(raw_bars)
 
                 # 合并到本地
                 if len(local) > 0:
@@ -719,11 +714,7 @@ class OKXRealtimeAPI:
             if not raw_bars:
                 return 0
 
-            df = pd.DataFrame(raw_bars, columns=[
-                "ts", "open", "high", "low", "close", "vol",
-                "volCcy", "volCcyQuote", "confirm"
-            ])
-            df["ts"] = pd.to_datetime(df["ts"], utc=True, unit="ms")
+            df = okx_candles_to_frame(raw_bars)
 
             count = 0
             for _, row in df.iterrows():
@@ -733,7 +724,7 @@ class OKXRealtimeAPI:
                     "high": float(row["high"]),
                     "low": float(row["low"]),
                     "close": float(row["close"]),
-                    "volume": float(row["vol"]) if pd.notna(row["vol"]) else 0,
+                    "volume": float(row["volume"]) if pd.notna(row["volume"]) else 0,
                 }
                 self._data_store.append_candle(inst_id, candle)
                 count += 1
@@ -772,7 +763,10 @@ class LiveSignalMonitor:
 
         # --- 市场环境自适应（延迟导入避免循环依赖） ---
         from okx_signal_system.ml.regime_adaptive import AdaptiveParamsManager
+        from okx_signal_system.training.startup_quality import load_selected_strategy_params
         self._regime_mgr = AdaptiveParamsManager()
+        self._strategy_params = load_selected_strategy_params()
+        self._quality_gate_allows_push = False
 
         # --- 持仓追踪 (max_hold_bars) ---
         self._position_entries: dict[str, tuple[pd.Timestamp, StrategyParams]] = {}
@@ -785,6 +779,17 @@ class LiveSignalMonitor:
 
         self._running = True
         log.info("Live signal monitor started")
+
+        try:
+            from okx_signal_system.training.startup_quality import run_startup_quality_gate
+            report = run_startup_quality_gate(symbols=self.api._watched_symbols or None, max_symbols=6)
+            self._strategy_params = report.strategy_params
+            self._quality_gate_allows_push = report.status == "passed"
+            if not self._quality_gate_allows_push:
+                log.warning("Startup quality gate did not pass; Feishu push paused: %s", report.reasons)
+        except Exception as exc:
+            self._quality_gate_allows_push = False
+            log.warning("Startup quality gate failed; Feishu push paused: %s", exc)
 
         # 启动后台持久化任务
         self._monitor_task = asyncio.create_task(self._monitor_loop())
@@ -834,12 +839,23 @@ class LiveSignalMonitor:
                     df = await self.api.get_candles(inst_id, bar="1h", limit=200)
                     if len(df) < 50:
                         continue
+                    from okx_signal_system.training.startup_quality import is_latest_bar_fresh
+                    if not is_latest_bar_fresh(df, max_lag_hours=3.0):
+                        log.warning(f"{inst_id} latest candle is stale; waiting for live data")
+                        continue
 
                     # 构建特征帧
-                    features = build_feature_frame(df)
+                    strategy_params = self._strategy_params
+                    features = build_feature_frame(
+                        df,
+                        fast_ema=strategy_params.fast_ema,
+                        slow_ema=strategy_params.slow_ema,
+                        breakout_window=strategy_params.breakout_window,
+                        atr_window=strategy_params.atr_window,
+                    )
 
-                    # 更新市场环境 → 获取自适应参数
-                    regime, strategy_params = self._regime_mgr.update_regime(features)
+                    # 更新市场环境；环境只降分/降杠杆，不覆盖历史训练参数
+                    regime, _adaptive_params = self._regime_mgr.update_regime(features)
 
                     # 生成信号
                     latest_row = features.iloc[-1]
@@ -854,11 +870,33 @@ class LiveSignalMonitor:
                     if not signal.accepted:
                         continue
 
+                    from okx_signal_system.strategy.ensemble import ensemble_vote
+                    ensemble_result = ensemble_vote(
+                        latest_row,
+                        strategy_params,
+                        features,
+                        len(features) - 1,
+                        base_score=signal.signal_score or 5.0,
+                    )
+                    effective_score = ensemble_result.final_score
+                    if ensemble_result.final_side == "flat":
+                        effective_score = max(1.0, effective_score - 3.0)
+                    elif ensemble_result.final_side != signal.side:
+                        effective_score = max(1.0, effective_score - 1.5)
+                    penalty = self._regime_mgr.get_score_penalty()
+                    if penalty < 0:
+                        effective_score = max(1.0, effective_score + penalty)
+
                     # 风控校验
                     ledger = apply_halt_policy(self._ledger, self._risk_cfg)
-                    decision = validate_signal(signal, ledger, self._risk_cfg)
+                    risk_cfg = replace(
+                        self._risk_cfg,
+                        max_leverage=max(1.0, min(10.0, self._risk_cfg.max_leverage * self._regime_mgr.get_leverage_factor())),
+                    )
+                    signal = replace(signal, signal_score=effective_score)
+                    decision = validate_signal(signal, ledger, risk_cfg)
 
-                    if decision.accepted:
+                    if decision.accepted and effective_score >= 6.0 and self._quality_gate_allows_push:
                         _last_signal_time[inst_id] = time.time()
                         log.info(
                             f"✅ SIGNAL: {inst_id} {signal.side.upper()} "

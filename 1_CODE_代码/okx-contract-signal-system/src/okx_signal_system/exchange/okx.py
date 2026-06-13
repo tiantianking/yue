@@ -17,8 +17,6 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
 
-import requests
-
 BASE_URL = "https://www.okx.com"
 PRIVATE_PATH_PREFIXES = ("/api/v5/account/", "/api/v5/trade/")
 
@@ -69,6 +67,11 @@ def _headers(method: str, request_path: str) -> dict[str, str]:
 
 
 def _request(method: str, path: str, params: dict | None = None) -> dict[str, Any]:
+    try:
+        import requests
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("requests is required for OKX network calls") from exc
+
     method = method.upper()
     params = params or {}
     request_path = f"{path}?{urlencode(params)}" if method == "GET" and params else path

@@ -41,7 +41,7 @@ def safe_input(prompt=""):
         return ""
 
 # 添加 src/ 到 Python 路径
-APP_VERSION = "v3"
+APP_VERSION = "v3.1"
 _project_root = Path(__file__).parent
 _runtime_root = Path(sys.executable).parent if getattr(sys, "frozen", False) else _project_root
 _src_path = _project_root / "src"
@@ -57,7 +57,6 @@ def check_dependencies() -> bool:
         ("numpy", "numpy"),
         ("pandas", "pandas"),
         ("yaml", "pyyaml"),
-        ("requests", "requests"),
     ]
     missing = []
     for module_name, package_name in required:
