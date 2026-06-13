@@ -790,9 +790,14 @@ class LiveSignalMonitor:
             from okx_signal_system.training.startup_quality import run_startup_quality_gate
             report = run_startup_quality_gate(symbols=self.api._watched_symbols or None, max_symbols=None)
             self._strategy_params = report.strategy_params
-            self._quality_gate_allows_push = report.status == "passed"
+            self._quality_gate_allows_push = bool(getattr(report, "push_allowed", report.status == "passed"))
             if not self._quality_gate_allows_push:
-                log.warning("Startup quality gate did not pass; Feishu push paused: %s", report.reasons)
+                log.warning(
+                    "Startup quality gate blocked Feishu push: %s",
+                    getattr(report, "push_blocking_reasons", report.reasons),
+                )
+            elif report.reasons:
+                log.warning("Startup quality gate warnings do not block Feishu push: %s", report.reasons)
         except Exception as exc:
             self._quality_gate_allows_push = False
             log.warning("Startup quality gate failed; Feishu push paused: %s", exc)

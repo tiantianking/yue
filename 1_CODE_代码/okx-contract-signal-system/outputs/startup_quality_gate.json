@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-13T10:40:54.031558+00:00",
+  "generated_at": "2026-06-13T11:09:02.097508+00:00",
   "status": "warning",
   "selected_params": {
     "fast_ema": 10,
@@ -12,33 +12,33 @@
   },
   "symbols_checked": 15,
   "train_summary": {
-    "total_return": -0.08388564578369914,
-    "profit_factor": 0.3406534956368121,
-    "payoff_ratio": 1.3081094232453583,
-    "win_rate": 0.2066115702479339,
-    "total_trades": 242,
-    "max_drawdown": 0.08797691930914969,
-    "avg_hold_hours": 8.37190082644628,
+    "total_return": -0.0788620433444154,
+    "profit_factor": 0.37393223985616064,
+    "payoff_ratio": 1.2105264036021472,
+    "win_rate": 0.236,
+    "total_trades": 250,
+    "max_drawdown": 0.089192183933419,
+    "avg_hold_hours": 8.54,
     "max_loss_streak": 22,
     "hit_27pct_stop": 0,
-    "pnl_share_from_gt5x": 0.04205721785400153,
+    "pnl_share_from_gt5x": 0.057433878522347534,
     "near_liq_trades": 0,
-    "gt5x_trade_pct": 0.09917355371900827,
+    "gt5x_trade_pct": 0.1,
     "status": "passed"
   },
   "valid_summary": {
-    "total_return": 0.002478139293280239,
-    "profit_factor": 1.0702196032510602,
-    "payoff_ratio": 1.5619421236637094,
-    "win_rate": 0.4065934065934066,
-    "total_trades": 91,
-    "max_drawdown": 0.009173974786438678,
-    "avg_hold_hours": 6.604395604395604,
-    "max_loss_streak": 10,
+    "total_return": 0.0007618025973016337,
+    "profit_factor": 1.0197158691403798,
+    "payoff_ratio": 1.5165005233369755,
+    "win_rate": 0.4020618556701031,
+    "total_trades": 97,
+    "max_drawdown": 0.014192524976397012,
+    "avg_hold_hours": 6.88659793814433,
+    "max_loss_streak": 15,
     "hit_27pct_stop": 0,
-    "pnl_share_from_gt5x": 0.14465259901403363,
+    "pnl_share_from_gt5x": 0.11883314773234074,
     "near_liq_trades": 0,
-    "gt5x_trade_pct": 0.0989010989010989,
+    "gt5x_trade_pct": 0.08247422680412371,
     "status": "passed"
   },
   "anti_future_checks": {
@@ -51,26 +51,12 @@
     "low_score_leverage": 1.0,
     "high_score_leverage": 10.0
   },
-  "stale_symbols": [
-    "BTC-USDT-SWAP",
-    "ETH-USDT-SWAP",
-    "SOL-USDT-SWAP",
-    "DOGE-USDT-SWAP",
-    "XRP-USDT-SWAP",
-    "ADA-USDT-SWAP",
-    "LINK-USDT-SWAP",
-    "AVAX-USDT-SWAP",
-    "LTC-USDT-SWAP",
-    "DOT-USDT-SWAP",
-    "BCH-USDT-SWAP",
-    "TRX-USDT-SWAP",
-    "UNI-USDT-SWAP",
-    "ETC-USDT-SWAP",
-    "ATOM-USDT-SWAP"
-  ],
+  "stale_symbols": [],
   "reasons": [
     "training_return_not_positive",
     "training_profit_factor_below_1",
     "validation_edge_not_confirmed_by_training"
-  ]
+  ],
+  "push_allowed": true,
+  "push_blocking_reasons": []
 }

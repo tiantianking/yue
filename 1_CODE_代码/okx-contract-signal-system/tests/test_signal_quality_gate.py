@@ -8,6 +8,7 @@ from okx_signal_system.training.startup_quality import (
     _select_symbols,
     is_latest_bar_fresh,
     load_selected_strategy_params,
+    push_blocking_reasons,
 )
 
 
@@ -61,3 +62,16 @@ def test_select_symbols_preserves_config_order() -> None:
     ]
     selected = _select_symbols(available, ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "ADA-USDT-SWAP"], max_symbols=2)
     assert [item.inst_id for item in selected] == ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]
+
+
+def test_training_performance_warnings_do_not_block_push() -> None:
+    reasons = [
+        "training_return_not_positive",
+        "training_profit_factor_below_1",
+        "validation_edge_not_confirmed_by_training",
+    ]
+    assert push_blocking_reasons(reasons) == []
+
+
+def test_validation_loss_blocks_push() -> None:
+    assert push_blocking_reasons(["validation_profit_factor_below_1"]) == ["validation_profit_factor_below_1"]

@@ -19,6 +19,27 @@ if TYPE_CHECKING:
     from okx_signal_system.data.loader import SymbolData
 
 
+PUSH_BLOCKING_REASONS = frozenset(
+    {
+        "anti_future_check_failed",
+        "smart_leverage_check_failed",
+        "near_liq_in_train_or_validation",
+        "training_no_trades",
+        "validation_no_trades",
+        "validation_return_not_positive",
+        "validation_profit_factor_below_1",
+    }
+)
+
+
+def is_push_blocking_reason(reason: str) -> bool:
+    return reason in PUSH_BLOCKING_REASONS or reason.endswith(":history_too_short")
+
+
+def push_blocking_reasons(reasons: Iterable[str]) -> list[str]:
+    return [reason for reason in reasons if is_push_blocking_reason(reason)]
+
+
 @dataclass(frozen=True)
 class StartupQualityReport:
     generated_at: str
@@ -31,6 +52,8 @@ class StartupQualityReport:
     stress_checks: dict
     stale_symbols: list[str]
     reasons: list[str]
+    push_allowed: bool
+    push_blocking_reasons: list[str]
 
     @property
     def strategy_params(self) -> StrategyParams:
@@ -215,6 +238,7 @@ def run_startup_quality_gate(
     if train_summary.get("profit_factor", 0) < 1.0 <= valid_summary.get("profit_factor", 0):
         reasons.append("validation_edge_not_confirmed_by_training")
 
+    blocking_reasons = push_blocking_reasons(reasons)
     status = "passed" if not reasons else "warning"
     report = StartupQualityReport(
         generated_at=datetime.now(timezone.utc).isoformat(),
@@ -227,6 +251,8 @@ def run_startup_quality_gate(
         stress_checks=stress,
         stale_symbols=stale_symbols,
         reasons=reasons,
+        push_allowed=not blocking_reasons,
+        push_blocking_reasons=blocking_reasons,
     )
 
     out = Path(output_dir) if output_dir else project_paths().output_dir

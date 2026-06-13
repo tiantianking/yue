@@ -64,7 +64,7 @@ class OKXSignalGUI:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("OKX 信号系统 v3.4")
+        self.root.title("OKX 信号系统 v3.5")
         self.root.geometry("1000x700")
         
         # 设置窗口图标（如果存在）
@@ -498,12 +498,12 @@ class OKXSignalGUI:
                 report = run_startup_quality_gate(symbols=self._watched_symbols, max_symbols=None)
                 self._startup_quality_report = report
                 self._trained_params = report.strategy_params
-                self._quality_gate_allows_push = report.status == "passed"
+                self._quality_gate_allows_push = bool(getattr(report, "push_allowed", report.status == "passed"))
                 summary = report.valid_summary
                 self.message_queue.put(('log', (
                     f"启动训练质量门 {report.status}: 验证交易 {summary.get('total_trades', 0)} 笔，"
                     f"PF={summary.get('profit_factor', 0):.2f}，参数={report.selected_params}",
-                    "INFO" if report.status == "passed" else "WARNING",
+                    "INFO" if self._quality_gate_allows_push else "WARNING",
                 )))
                 if report.stale_symbols:
                     self.message_queue.put(('log', (
@@ -511,8 +511,14 @@ class OKXSignalGUI:
                         "WARNING",
                     )))
                 if not self._quality_gate_allows_push:
+                    blocking_reasons = getattr(report, "push_blocking_reasons", report.reasons)
                     self.message_queue.put(('log', (
-                        f"质量门未通过，飞书推送暂停；原因: {', '.join(report.reasons) or 'unknown'}",
+                        f"质量门阻断推送；原因: {', '.join(blocking_reasons) or 'unknown'}",
+                        "WARNING",
+                    )))
+                elif report.reasons:
+                    self.message_queue.put(('log', (
+                        f"质量门仅提示，不阻断推送；原因: {', '.join(report.reasons)}",
                         "WARNING",
                     )))
             except Exception as e:

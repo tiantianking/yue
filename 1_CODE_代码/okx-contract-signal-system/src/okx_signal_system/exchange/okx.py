@@ -10,7 +10,9 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import logging
 import os
+import socket
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -19,6 +21,9 @@ from urllib.parse import urlencode
 
 BASE_URL = "https://www.okx.com"
 PRIVATE_PATH_PREFIXES = ("/api/v5/account/", "/api/v5/trade/")
+DEFAULT_LOCAL_PROXY = "http://127.0.0.1:1088"
+
+log = logging.getLogger(__name__)
 
 OKX_API_KEY = os.environ.get("OKX_API_KEY", "")
 OKX_SECRET_KEY = os.environ.get("OKX_SECRET_KEY", "")
@@ -66,6 +71,31 @@ def _headers(method: str, request_path: str) -> dict[str, str]:
     return headers
 
 
+def _tcp_port_open(host: str, port: int, timeout: float = 0.25) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _okx_rest_proxy_url() -> str | None:
+    configured = os.environ.get("OKX_REST_PROXY", "").strip()
+    if configured.lower() in {"0", "false", "off", "none"}:
+        return None
+    if configured:
+        return configured
+    if _tcp_port_open("127.0.0.1", 1088):
+        return DEFAULT_LOCAL_PROXY
+    return None
+
+
+def _proxy_dict(proxy_url: str | None) -> dict[str, str] | None:
+    if not proxy_url:
+        return None
+    return {"http": proxy_url, "https": proxy_url}
+
+
 def _request(method: str, path: str, params: dict | None = None) -> dict[str, Any]:
     try:
         import requests
@@ -78,17 +108,29 @@ def _request(method: str, path: str, params: dict | None = None) -> dict[str, An
     url = BASE_URL + path
     headers = _headers(method, request_path)
 
-    try:
+    def send(proxies: dict[str, str] | None = None):
+        request_kwargs = {"headers": headers, "timeout": 15}
+        if proxies:
+            request_kwargs["proxies"] = proxies
         if method == "GET":
-            resp = requests.get(url, headers=headers, params=params or None, timeout=15)
-        elif method == "POST":
-            resp = requests.post(url, headers=headers, json=params, timeout=15)
-        elif method == "DELETE":
-            resp = requests.delete(url, headers=headers, json=params or None, timeout=15)
-        else:
-            raise ValueError(f"unsupported HTTP method: {method}")
+            return requests.get(url, params=params or None, **request_kwargs)
+        if method == "POST":
+            return requests.post(url, json=params, **request_kwargs)
+        if method == "DELETE":
+            return requests.delete(url, json=params or None, **request_kwargs)
+        raise ValueError(f"unsupported HTTP method: {method}")
+
+    try:
+        resp = send()
     except requests.RequestException as exc:
-        raise ConnectionError(f"OKX network error: {exc}") from exc
+        proxy_url = _okx_rest_proxy_url()
+        if not proxy_url:
+            raise ConnectionError(f"OKX network error: {exc}") from exc
+        try:
+            log.info("Retrying OKX REST via proxy %s after direct request failed", proxy_url)
+            resp = send(_proxy_dict(proxy_url))
+        except requests.RequestException as proxy_exc:
+            raise ConnectionError(f"OKX network error: {exc}; proxy retry failed: {proxy_exc}") from proxy_exc
 
     if resp.status_code != 200:
         raise ConnectionError(f"OKX API error: {resp.status_code} {resp.text}")
@@ -222,10 +264,11 @@ def get_ticker(inst_id: str) -> dict[str, Any]:
 
 
 def get_candles(inst_id: str, bar: str = "1h", limit: int = 100) -> list[list[Any]]:
+    okx_bar = "1H" if bar == "1h" else bar
     result = _request(
         "GET",
         "/api/v5/market/history-candles",
-        {"instId": inst_id, "bar": bar, "limit": str(limit)},
+        {"instId": inst_id, "bar": okx_bar, "limit": str(limit)},
     )
     return result.get("data", [])
 
