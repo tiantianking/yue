@@ -6,6 +6,7 @@ import { parse as parseYaml } from "yaml";
 import type {
   BackfillRow,
   ClosedBackfillStatus,
+  DailyLearningReviewStatus,
   DashboardPayload,
   JsonRecord,
   LatestSignal,
@@ -116,7 +117,7 @@ async function readActualHistory(symbols: string[]) {
 }
 
 export async function loadDashboardData(): Promise<DashboardPayload> {
-  const [quality, selectedParams, latestSignal, backfill, closedBackfill, baseConfig, riskConfig] =
+  const [quality, selectedParams, latestSignal, backfill, closedBackfill, learningReview, baseConfig, riskConfig] =
     await Promise.all([
       readJson<JsonRecord>(
         path.join(outputsDir, "startup_quality_gate.json"),
@@ -133,6 +134,10 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
       ),
       readJson<ClosedBackfillStatus | null>(
         path.join(outputsDir, "closed_kline_backfill_status.json"),
+        null,
+      ),
+      readJson<DailyLearningReviewStatus | null>(
+        path.join(outputsDir, "daily_learning_review.json"),
         null,
       ),
       readYaml<JsonRecord>(path.join(configDir, "base.yaml"), {}),
@@ -195,5 +200,6 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
     risk_config: asRecord(riskConfig.risk),
     latest_signal: latestSignal,
     closed_backfill: closedBackfill,
+    learning_review: learningReview,
   };
 }

@@ -68,6 +68,7 @@ const emptyData: DashboardPayload = {
   risk_config: {},
   latest_signal: null,
   closed_backfill: null,
+  learning_review: null,
 };
 
 function sideText(side?: string) {
@@ -347,6 +348,64 @@ function BackfillPanel({
   );
 }
 
+function LearningPanel({ data }: { data: DashboardPayload }) {
+  const review = data.learning_review;
+  const shadow = review?.shadow_summary ?? {};
+  const meta = review?.train_grid_meta ?? {};
+  const reasons = review?.reasons ?? [];
+  const candidatePf = review?.candidate_valid_summary?.profit_factor;
+  const currentPf = review?.current_valid_summary?.profit_factor;
+
+  return (
+    <div className="rounded-lg border border-[#9be7e3] bg-white/90 p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm font-bold text-zinc-900">
+          <ShieldCheck className="h-4 w-4 text-[#008f8a]" />
+          学习闭环
+        </div>
+        <Badge tone={review?.candidate_gate_passed ? "green" : "amber"}>
+          {review?.candidate_gate_passed ? "候选过门" : "审查中"}
+        </Badge>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <MetricTile
+          label="候选 PF"
+          value={numberText(candidatePf, 3)}
+          hint={`当前 ${numberText(currentPf, 3)}`}
+          tone={review?.candidate_gate_passed ? "green" : "amber"}
+        />
+        <MetricTile
+          label="候选组数"
+          value={integerText(Number(meta.candidate_count ?? 0))}
+          hint={String(meta.selected_params_source ?? "-")}
+        />
+        <MetricTile
+          label="影子闭合"
+          value={integerText(Number(shadow.closed ?? 0))}
+          hint={`质量 ${numberText(Number(shadow.avg_quality_score ?? 0), 1)}`}
+        />
+        <MetricTile
+          label="自动替换"
+          value={review?.auto_promote_enabled ? "开启" : "关闭"}
+          hint={review?.promotion_allowed ? "允许" : "只出候选"}
+          tone={review?.promotion_allowed ? "green" : "neutral"}
+        />
+      </div>
+
+      <div className="mt-4 rounded-lg border border-[#c4f1ef] bg-[#f0fffe] p-3 text-xs font-semibold text-zinc-600">
+        <div>最近审查：{dateTimeText(review?.generated_at)}</div>
+        <div className="mt-1">下次审查：{dateTimeText(review?.next_run_at)}</div>
+        {reasons.slice(0, 3).map((reason) => (
+          <div key={reason} className="mt-2 text-amber-800">
+            {reason}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function Dashboard() {
   const [data, setData] = useState<DashboardPayload>(emptyData);
   const [selected, setSelected] = useState("BTC-USDT-SWAP");
@@ -512,6 +571,7 @@ export function Dashboard() {
               selectedRow={selectedRow}
               candleMeta={candleMeta}
             />
+            <LearningPanel data={data} />
           </aside>
         </section>
       </div>

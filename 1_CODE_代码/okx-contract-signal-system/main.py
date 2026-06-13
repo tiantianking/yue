@@ -18,6 +18,8 @@ import logging
 from pathlib import Path
 from datetime import datetime, timezone
 
+import pandas as pd
+
 # ============================================================
 # PyInstaller console=False 兼容：防止 stdout/stderr 为 None 崩溃
 # ============================================================
@@ -41,7 +43,7 @@ def safe_input(prompt=""):
         return ""
 
 # 添加 src/ 到 Python 路径
-APP_VERSION = "v3.13"
+APP_VERSION = "v3.17"
 _project_root = Path(__file__).parent
 _runtime_root = Path(sys.executable).parent if getattr(sys, "frozen", False) else _project_root
 _src_path = _project_root / "src"
@@ -158,6 +160,13 @@ async def run_closed_kline_backfill_service(symbols: list[str]) -> None:
         raise
     except Exception as exc:
         logger.error("closed kline backfill service stopped: %s", exc)
+
+
+async def run_daily_learning_review_service(symbols: list[str]) -> None:
+    """Run the guarded learning review loop in the background."""
+    from okx_signal_system.training.daily_learning import run_daily_learning_review_service as run_service
+
+    await run_service(symbols)
 
 # ============================================================
 # PID 管理
@@ -308,6 +317,7 @@ async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -
 
     monitor = LiveSignalMonitor(api, signal_callback=on_signal, risk_config=None)
     backfill_task = asyncio.create_task(run_closed_kline_backfill_service(symbols))
+    learning_task = asyncio.create_task(run_daily_learning_review_service(symbols))
 
     logger.info("信号监控系统已启动")
     print("\n" + "=" * 50)
@@ -340,11 +350,12 @@ async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -
         logger.error(f"监控异常: {e}")
         print(f"\n[ERROR] 监控异常: {e}")
     finally:
-        backfill_task.cancel()
-        try:
-            await backfill_task
-        except asyncio.CancelledError:
-            pass
+        for task in (backfill_task, learning_task):
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
         monitor.stop()
         logger.info("监控已停止")
 

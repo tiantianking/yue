@@ -47,6 +47,20 @@ strategy:
 
 learning:
   live_param_updates_enabled: false
+  daily_review_enabled: true
+  review_interval_hours: 24
+  history_days: 1095
+  min_validation_trades: 30
+  min_validation_profit_factor: 1.05
+  min_profit_factor_delta: 0.05
+  min_profit_factor_ratio: 1.05
+  max_validation_drawdown: 0.20
+  max_drawdown_worsening: 0.02
+  max_param_distance: 0.35
+  max_train_valid_pf_ratio: 3.0
+  min_profitable_symbol_ratio: 0.35
+  max_candidate_params: 17
+  auto_promote_params: false
   shadow_score_min_closed_signals: 6
   shadow_min_closed_signals: 30
   shadow_min_quality_score: 70

@@ -91,6 +91,21 @@ export type ClosedBackfillStatus = {
   }>;
 };
 
+export type DailyLearningReviewStatus = {
+  generated_at?: string;
+  next_run_at?: string;
+  candidate_gate_passed?: boolean;
+  auto_promote_enabled?: boolean;
+  promotion_allowed?: boolean;
+  reasons?: string[];
+  train_grid_meta?: Record<string, unknown>;
+  shadow_summary?: Record<string, unknown>;
+  overfit_checks?: Record<string, unknown>;
+  current_valid_summary?: SummaryMetrics;
+  candidate_valid_summary?: SummaryMetrics;
+  candidate_params?: StrategyParams;
+};
+
 export type DashboardPayload = {
   generated_at: string;
   project_root: string;
@@ -112,6 +127,7 @@ export type DashboardPayload = {
   risk_config: Record<string, unknown>;
   latest_signal: LatestSignal | null;
   closed_backfill: ClosedBackfillStatus | null;
+  learning_review: DailyLearningReviewStatus | null;
 };
 
 export type Candle = {
