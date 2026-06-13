@@ -1,5 +1,6 @@
 import pandas as pd
 import pytest
+import inspect
 
 from okx_signal_system.exchange.position_monitor import (
     AutoStopMonitor,
@@ -15,6 +16,8 @@ def test_gui_runtime_dependencies_import() -> None:
     import gui  # noqa: F401
     import okx_signal_system.ml.pattern_recognition  # noqa: F401
     import okx_signal_system.ml.rolling_backtest  # noqa: F401
+
+    assert "auto_start" in inspect.signature(gui.start_gui).parameters
 
 
 def test_position_store_round_trip_and_validates_prices(tmp_path) -> None:

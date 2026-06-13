@@ -41,7 +41,7 @@ def safe_input(prompt=""):
         return ""
 
 # 添加 src/ 到 Python 路径
-APP_VERSION = "v3.2"
+APP_VERSION = "v3.3"
 _project_root = Path(__file__).parent
 _runtime_root = Path(sys.executable).parent if getattr(sys, "frozen", False) else _project_root
 _src_path = _project_root / "src"
@@ -379,30 +379,10 @@ def main_cli() -> None:
         cleanup_pid_file()
 
 
-# ============================================================
-# 入口：默认 GUI，--cli 走命令行
-# ============================================================
 def main() -> None:
-    """主函数 - 默认 GUI 模式"""
-    # 简单参数检查（不用 argparse 避免无控制台异常）
-    use_cli = '--cli' in sys.argv
-
-    if use_cli:
-        main_cli()
-    else:
-        try:
-            from gui import start_gui
-            start_gui()
-        except ImportError as e:
-            logger.warning(f"无法导入 GUI 模块: {e}，回退到命令行模式")
-            main_cli()
-        except Exception as e:
-            logger.error(f"启动 GUI 失败: {e}")
-            sys.exit(1)
-
-
-def main() -> None:
+    """入口：默认 GUI，--cli 走命令行。"""
     use_cli = "--cli" in sys.argv
+    auto_start = "--auto-start" in sys.argv
 
     if use_cli:
         main_cli()
@@ -418,7 +398,7 @@ def main() -> None:
     try:
         from gui import start_gui
 
-        start_gui()
+        start_gui(auto_start=auto_start)
     except ImportError as exc:
         logger.warning("GUI import failed: %s; falling back to CLI", exc)
         cleanup_pid_file()

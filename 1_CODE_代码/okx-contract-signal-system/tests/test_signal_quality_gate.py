@@ -17,10 +17,11 @@ def test_okx_candles_to_frame_accepts_nine_and_ten_field_rows() -> None:
         ["1760003600000", "105", "112", "101", "108", "9", "900", "900", "1", "extra"],
     ]
     frame = okx_candles_to_frame(raw)
-    assert list(frame.columns) == ["ts", "open", "high", "low", "close", "volume"]
+    assert list(frame.columns) == ["ts", "open", "high", "low", "close", "volume", "quote_volume"]
     assert len(frame) == 2
     assert str(frame["ts"].dt.tz) == "UTC"
     assert frame.iloc[0]["volume"] == 12
+    assert frame.iloc[0]["quote_volume"] == 1200
 
 
 def test_load_selected_strategy_params_reads_frozen_training_output(tmp_path) -> None:

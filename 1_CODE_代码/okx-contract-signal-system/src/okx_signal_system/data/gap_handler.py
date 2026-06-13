@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from okx_signal_system.exchange.candles import okx_candles_to_frame
 from okx_signal_system.exchange.okx import get_candles  # OKXInstrument
 from okx_signal_system.paths import find_lightweight_history
 
@@ -70,6 +71,7 @@ class DataGapHandler:
         if isinstance(data_dir, str):
             data_dir = Path(data_dir)
         self.data_dir = data_dir
+        self._api_unavailable_reason: str | None = None
 
     def detect_gaps(self, inst_id: str) -> list[DataGap]:
         """
@@ -179,24 +181,13 @@ class DataGapHandler:
             return result
 
         except Exception as e:
+            self._api_unavailable_reason = str(e)
             log.error(f"Backfill error for {inst_id}: {e}")
             return None
 
     def _parse_candles(self, raw_bars: list[list]) -> pd.DataFrame:
         """解析OKX K线数据"""
-        df = pd.DataFrame(raw_bars, columns=[
-            "ts", "open", "high", "low", "close", "vol", "quote_vol", "turnover", "confirm", "ignore"
-        ])
-
-        df["ts"] = pd.to_datetime(df["ts"], utc=True)
-        for col in ["open", "high", "low", "close", "vol"]:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-        # 只保留需要的列
-        df = df[["ts", "open", "high", "low", "close", "vol"]].copy()
-        df.columns = ["ts", "open", "high", "low", "close", "volume"]
-
-        return df
+        return okx_candles_to_frame(raw_bars)
 
     def merge_and_save(
         self,
@@ -262,6 +253,11 @@ class DataGapHandler:
             if gap.severity == "minor":
                 continue  # 小缺口忽略
 
+            if self._api_unavailable_reason:
+                result.success = False
+                result.errors.append(f"skip_backfill_api_unavailable: {self._api_unavailable_reason}")
+                break
+
             new_data = self.backfill_gap(gap)
             if new_data is not None and len(new_data) > 0:
                 self.merge_and_save(inst_id, new_data, mode="merge")
@@ -270,6 +266,11 @@ class DataGapHandler:
 
                 if result.last_bar_time < new_data["ts"].max():
                     result.last_bar_time = new_data["ts"].max()
+            else:
+                result.success = False
+                reason = self._api_unavailable_reason or "backfill returned no data"
+                result.errors.append(reason)
+                break
 
         return result
 

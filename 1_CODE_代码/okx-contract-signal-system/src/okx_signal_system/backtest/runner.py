@@ -15,7 +15,13 @@ from okx_signal_system.risk.model import (
     validate_signal,
 )
 from okx_signal_system.strategy.ensemble import ensemble_vote
-from okx_signal_system.strategy.trend_breakout import StrategyParams, build_signal
+from okx_signal_system.strategy.trend_breakout import (
+    ATR_PCT_MIN,
+    TREND_STRENGTH_MIN,
+    VOL_RATIO_MIN,
+    StrategyParams,
+    build_signal,
+)
 
 
 @dataclass(frozen=True)
@@ -48,6 +54,55 @@ def split_train_valid(frame: pd.DataFrame, *, valid_fraction: float = 0.25) -> t
         raise ValueError("valid_fraction must be between 0 and 1")
     split_at = int(len(frame) * (1 - valid_fraction))
     return frame.iloc[:split_at].reset_index(drop=True), frame.iloc[split_at:].reset_index(drop=True)
+
+
+def signal_candidate_indices(features: pd.DataFrame) -> np.ndarray:
+    if len(features) < 3:
+        return np.array([], dtype=int)
+
+    close = features["close"].to_numpy(dtype=float)
+    atr_value = features["atr"].to_numpy(dtype=float)
+    atr_pct = (
+        features["atr_pct"].to_numpy(dtype=float)
+        if "atr_pct" in features.columns
+        else np.divide(atr_value, close, out=np.full(len(features), np.nan), where=close > 0)
+    )
+    bias = features["bias_4h"].astype(str).to_numpy()
+    breakout_high = features["breakout_high"].to_numpy(dtype=float)
+    breakout_low = features["breakout_low"].to_numpy(dtype=float)
+    vol_ratio = (
+        features["vol_ratio"].to_numpy(dtype=float)
+        if "vol_ratio" in features.columns
+        else np.ones(len(features), dtype=float)
+    )
+    ema_fast = features["ema_fast"].to_numpy(dtype=float)
+    ema_slow = features["ema_slow"].to_numpy(dtype=float)
+    trend_strength = np.divide(
+        ema_fast - ema_slow,
+        close,
+        out=np.zeros(len(features), dtype=float),
+        where=close > 0,
+    )
+
+    long_breakout = (bias == "long") & (close > breakout_high)
+    short_breakout = (bias == "short") & (close < breakout_low)
+    indices = np.arange(len(features))
+    candidate_mask = (
+        (indices < len(features) - 2)
+        & np.isfinite(close)
+        & (close > 0)
+        & np.isfinite(atr_value)
+        & (atr_value > 0)
+        & np.isfinite(atr_pct)
+        & (atr_pct >= ATR_PCT_MIN)
+        & np.isfinite(breakout_high)
+        & np.isfinite(breakout_low)
+        & np.isfinite(vol_ratio)
+        & (vol_ratio >= VOL_RATIO_MIN)
+        & (np.abs(trend_strength) >= TREND_STRENGTH_MIN)
+        & (long_breakout | short_breakout)
+    )
+    return np.flatnonzero(candidate_mask)
 
 
 def detect_cool_off_condition(features: pd.DataFrame, idx: int, atr_window: int = 14) -> bool:
@@ -166,19 +221,15 @@ def run_backtest_from_features(
     open_ = features["open"].to_numpy(dtype=float)
     high = features["high"].to_numpy(dtype=float)
     low = features["low"].to_numpy(dtype=float)
-    close = features["close"].to_numpy(dtype=float)
     volume = features["volume"].to_numpy(dtype=float)
-    atr = features["atr"].to_numpy(dtype=float)
-    breakout_high = features["breakout_high"].to_numpy(dtype=float)
-    breakout_low = features["breakout_low"].to_numpy(dtype=float)
+    quote_volume = (
+        features["quote_volume"].to_numpy(dtype=float)
+        if "quote_volume" in features.columns
+        else np.full(len(features), np.nan)
+    )
     bias = features["bias_4h"].astype(str).to_numpy()
-    vol_ratio = features["vol_ratio"].to_numpy(dtype=float) if "vol_ratio" in features.columns else np.full(len(features), np.nan)
 
-    # 生成候选信号mask（添加vol_ratio过滤，阈值0.5）
-    vol_ok = np.isfinite(vol_ratio) & (vol_ratio >= 0.5)
-    long_mask = (bias == "long") & np.isfinite(atr) & (atr > 0) & np.isfinite(breakout_high) & (close > breakout_high) & vol_ok
-    short_mask = (bias == "short") & np.isfinite(atr) & (atr > 0) & np.isfinite(breakout_low) & (close < breakout_low) & vol_ok
-    candidate_indices = np.flatnonzero((long_mask | short_mask) & (np.arange(len(features)) < len(features) - 2))
+    candidate_indices = signal_candidate_indices(features)
 
     cursor = 0
     for idx in candidate_indices:
@@ -243,7 +294,12 @@ def run_backtest_from_features(
         notional = abs(entry_price * decision.qty)
         try:
             slip_bps = slippage_bps_for_participation(
-                participation_rate(notional=notional, close=entry_price, volume=float(volume[entry_idx]))
+                participation_rate(
+                    notional=notional,
+                    close=entry_price,
+                    volume=float(volume[entry_idx]),
+                    quote_volume=float(quote_volume[entry_idx]),
+                )
             )
         except ValueError:
             continue

@@ -1,10 +1,21 @@
-from okx_signal_system.backtest.runner import run_backtest, split_train_valid, summarize_trades
+from okx_signal_system.backtest.runner import (
+    run_backtest,
+    signal_candidate_indices,
+    split_train_valid,
+    summarize_trades,
+)
 from okx_signal_system.data.loader import load_symbol_file
+from okx_signal_system.features.indicators import build_feature_frame
 from okx_signal_system.paths import find_lightweight_history
+from okx_signal_system.strategy.trend_breakout import StrategyParams, build_signal
 
 
 def btc_frame():
     return load_symbol_file(find_lightweight_history("okx_1h_extended") / "BTC_USDT_USDT_1h.parquet").frame.head(1000)
+
+
+def ada_frame():
+    return load_symbol_file(find_lightweight_history("okx_1h_extended") / "ADA_USDT_USDT_1h.parquet").frame.tail(2500)
 
 
 def test_train_valid_split_preserves_order() -> None:
@@ -22,3 +33,29 @@ def test_summarize_trades_has_required_metrics() -> None:
     trades = run_backtest(btc_frame(), inst_id="BTC-USDT-SWAP")
     summary = summarize_trades(trades)
     assert {"total_return", "profit_factor", "payoff_ratio", "max_drawdown", "win_rate", "total_trades", "status"}.issubset(summary)
+
+
+def test_signal_candidate_prefilter_keeps_all_live_signals() -> None:
+    params = StrategyParams(
+        fast_ema=10,
+        slow_ema=80,
+        breakout_window=60,
+        atr_stop_mult=1.5,
+        take_profit_mult=2.0,
+        max_hold_bars=24,
+    )
+    features = build_feature_frame(
+        ada_frame(),
+        fast_ema=params.fast_ema,
+        slow_ema=params.slow_ema,
+        breakout_window=params.breakout_window,
+        atr_window=params.atr_window,
+    ).reset_index(drop=True)
+    candidates = set(signal_candidate_indices(features))
+    live_signals = {
+        idx
+        for idx, (_, row) in enumerate(features.iterrows())
+        if build_signal(row, inst_id="ADA-USDT-SWAP", params=params, frame=features, idx=idx).accepted
+    }
+    assert live_signals
+    assert live_signals <= candidates

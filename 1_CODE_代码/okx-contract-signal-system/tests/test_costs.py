@@ -12,6 +12,11 @@ def test_participation_tiers_reject_over_one_percent() -> None:
         slippage_bps_for_participation(rate)
 
 
+def test_participation_uses_quote_volume_when_available() -> None:
+    rate = participation_rate(notional=200, close=0.16, volume=1000, quote_volume=10000)
+    assert rate == 0.02
+
+
 def test_funding_events_crossed_uses_interval() -> None:
     events = funding_events_crossed(
         pd.Timestamp("2026-01-01T07:00:00Z"),

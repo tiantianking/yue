@@ -1,11 +1,11 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-title OKX Signal System v3.2
+title OKX Signal System v3.3
 
 cd /d "%~dp0"
 
 echo ========================================
-echo  OKX Signal System v3.2
+echo  OKX Signal System v3.3
 echo ========================================
 echo.
 
@@ -82,7 +82,7 @@ if not exist ".env" (
 
 echo [INFO] Starting desktop app...
 echo.
-%PYTHON_EXE% main.py
+%PYTHON_EXE% main.py --auto-start
 set "EXIT_CODE=%errorlevel%"
 
 echo.

@@ -152,7 +152,7 @@ class RealtimeDataStore:
             return df
 
         # 返回空DataFrame
-        return pd.DataFrame(columns=["ts", "open", "high", "low", "close", "volume"])
+        return pd.DataFrame(columns=["ts", "open", "high", "low", "close", "volume", "quote_volume"])
 
     def append_candle(self, inst_id: str, candle: dict) -> bool:
         """
@@ -161,6 +161,9 @@ class RealtimeDataStore:
         """
         df = self.load(inst_id)
 
+        quote_volume = candle.get("quote_volume")
+        if quote_volume is None:
+            quote_volume = candle.get("volCcyQuote")
         new_row = pd.DataFrame([{
             "ts": pd.to_datetime(candle["ts"], utc=True),
             "open": float(candle["open"]),
@@ -168,6 +171,7 @@ class RealtimeDataStore:
             "low": float(candle["low"]),
             "close": float(candle["close"]),
             "volume": float(candle["volume"]),
+            "quote_volume": float(quote_volume) if quote_volume not in (None, "") else float("nan"),
         }])
 
         # 去重 + 追加
@@ -371,7 +375,7 @@ class OKXWebSocketClient:
 
         if channel == "candle1H":
             for item in items:
-                # K线格式: [ts, open, high, low, close, vol, confirm]
+                # K线格式: [ts, open, high, low, close, vol, volCcy, volCcyQuote, confirm]
                 candle = {
                     "ts": item[0],
                     "open": float(item[1]),
@@ -379,6 +383,7 @@ class OKXWebSocketClient:
                     "low": float(item[3]),
                     "close": float(item[4]),
                     "volume": float(item[5]),
+                    "quote_volume": float(item[7]) if len(item) > 7 and item[7] not in (None, "") else None,
                 }
                 self._candle_cache[inst_id] = candle
 
@@ -725,6 +730,7 @@ class OKXRealtimeAPI:
                     "low": float(row["low"]),
                     "close": float(row["close"]),
                     "volume": float(row["volume"]) if pd.notna(row["volume"]) else 0,
+                    "quote_volume": float(row["quote_volume"]) if "quote_volume" in row and pd.notna(row["quote_volume"]) else None,
                 }
                 self._data_store.append_candle(inst_id, candle)
                 count += 1

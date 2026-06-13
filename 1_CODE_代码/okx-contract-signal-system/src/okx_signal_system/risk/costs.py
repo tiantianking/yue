@@ -27,8 +27,8 @@ class CostBreakdown:
         return self.entry_fee + self.exit_fee + self.slippage_cost + self.funding_fee
 
 
-def participation_rate(*, notional: float, close: float, volume: float) -> float:
-    denominator = close * volume
+def participation_rate(*, notional: float, close: float, volume: float, quote_volume: float | None = None) -> float:
+    denominator = quote_volume if quote_volume is not None and pd.notna(quote_volume) and quote_volume > 0 else close * volume
     if denominator <= 0:
         return float("inf")
     return notional / denominator

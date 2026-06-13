@@ -64,7 +64,7 @@ class OKXSignalGUI:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("OKX 信号系统 v3.2")
+        self.root.title("OKX 信号系统 v3.3")
         self.root.geometry("1000x700")
         
         # 设置窗口图标（如果存在）
@@ -461,7 +461,14 @@ class OKXSignalGUI:
                 sync_results = sync_on_startup(self._watched_symbols)
                 total_bars = sum(r.bars_added for r in sync_results.values())
                 total_gaps = sum(r.gaps_filled for r in sync_results.values())
+                failed_syncs = [r for r in sync_results.values() if not r.success]
                 self.message_queue.put(('log', (f"数据回补完成：{total_gaps} 个缺口，补充 {total_bars} 根 K线", "INFO")))
+                if failed_syncs:
+                    first_error = failed_syncs[0].errors[0] if failed_syncs[0].errors else "unknown"
+                    self.message_queue.put(('log', (
+                        f"数据回补降级：{len(failed_syncs)} 个币种未补齐，本地历史数据继续可用；原因: {first_error}",
+                        "WARNING",
+                    )))
             except Exception as e:
                 self.message_queue.put(('log', (f"数据回补异常: {e}", "WARNING")))
             
@@ -554,6 +561,13 @@ class OKXSignalGUI:
                             total = sum(r.bars_added for r in results.values())
                             if total > 0:
                                 self.message_queue.put(('log', (f"增量同步：补充 {total} 根 K线", "INFO")))
+                            failed = [r for r in results.values() if not r.success]
+                            if failed:
+                                first_error = failed[0].errors[0] if failed[0].errors else "unknown"
+                                self.message_queue.put(('log', (
+                                    f"增量同步降级：{len(failed)} 个币种未补齐；原因: {first_error}",
+                                    "WARNING",
+                                )))
                     except Exception as e:
                         self.message_queue.put(('log', (f"增量同步异常: {e}", "WARNING")))
                     last_incremental_sync = current_time
@@ -908,13 +922,16 @@ class OKXSignalGUI:
             self.root.destroy()
 
 
-def start_gui():
+def start_gui(auto_start: bool = False):
     """启动 GUI"""
     root = tk.Tk()
     app = OKXSignalGUI(root)
 
     # 绑定窗口关闭事件
     root.protocol("WM_DELETE_WINDOW", app.on_closing)
+
+    if auto_start:
+        root.after(500, app.start_monitoring)
 
     # 启动主循环
     root.mainloop()

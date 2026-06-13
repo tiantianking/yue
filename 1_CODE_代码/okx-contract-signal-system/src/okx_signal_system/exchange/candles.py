@@ -13,8 +13,9 @@ def okx_candles_to_frame(raw_bars: list[list]) -> pd.DataFrame:
         row = list(bar[: len(columns)])
         row.extend([None] * (len(columns) - len(row)))
         rows.append(row)
+    output_columns = ["ts", "open", "high", "low", "close", "volume", "quote_volume"]
     if not rows:
-        return pd.DataFrame(columns=["ts", "open", "high", "low", "close", "volume"])
+        return pd.DataFrame(columns=output_columns)
 
     df = pd.DataFrame(rows, columns=columns)
     ts_num = pd.to_numeric(df["ts"], errors="coerce")
@@ -22,7 +23,7 @@ def okx_candles_to_frame(raw_bars: list[list]) -> pd.DataFrame:
         df["ts"] = pd.to_datetime(ts_num, utc=True, unit="ms")
     else:
         df["ts"] = pd.to_datetime(df["ts"], utc=True)
-    for col in ["open", "high", "low", "close", "vol"]:
+    for col in ["open", "high", "low", "close", "vol", "volCcyQuote"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    out = df.rename(columns={"vol": "volume"})[["ts", "open", "high", "low", "close", "volume"]]
+    out = df.rename(columns={"vol": "volume", "volCcyQuote": "quote_volume"})[output_columns]
     return out.dropna(subset=["ts", "open", "high", "low", "close"]).sort_values("ts").reset_index(drop=True)
