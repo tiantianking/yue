@@ -7,7 +7,7 @@ const tones: Record<BadgeTone, string> = {
   green: "border-emerald-200 bg-emerald-50 text-emerald-700",
   amber: "border-amber-200 bg-amber-50 text-amber-800",
   red: "border-rose-200 bg-rose-50 text-rose-700",
-  cyan: "border-cyan-200 bg-cyan-50 text-cyan-800",
+  cyan: "border-[#81d8d0] bg-[#e6fbfa] text-[#006f6b]",
 };
 
 export function Badge({

@@ -138,6 +138,27 @@ def setup_logging() -> logging.Logger:
 
 logger = setup_logging()
 
+
+async def run_closed_kline_backfill_service(symbols: list[str]) -> None:
+    """Keep local closed K-line files fresh without touching unfinished candles."""
+    from okx_signal_system.config import load_config
+    from okx_signal_system.data.closed_backfill import ClosedCandleBackfillService
+
+    try:
+        cfg = load_config("base.yaml")
+        data_cfg = cfg.get("data", {})
+        service = ClosedCandleBackfillService(
+            symbols=symbols,
+            timeframe=data_cfg.get("timeframe", "15m"),
+            dataset=data_cfg.get("historical_dataset", "okx_15m_extended"),
+            settle_seconds=60,
+        )
+        await service.run_forever()
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.error("closed kline backfill service stopped: %s", exc)
+
 # ============================================================
 # PID 管理
 # ============================================================
@@ -286,6 +307,7 @@ async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -
             return False
 
     monitor = LiveSignalMonitor(api, signal_callback=on_signal, risk_config=None)
+    backfill_task = asyncio.create_task(run_closed_kline_backfill_service(symbols))
 
     logger.info("信号监控系统已启动")
     print("\n" + "=" * 50)
@@ -318,6 +340,11 @@ async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -
         logger.error(f"监控异常: {e}")
         print(f"\n[ERROR] 监控异常: {e}")
     finally:
+        backfill_task.cancel()
+        try:
+            await backfill_task
+        except asyncio.CancelledError:
+            pass
         monitor.stop()
         logger.info("监控已停止")
 

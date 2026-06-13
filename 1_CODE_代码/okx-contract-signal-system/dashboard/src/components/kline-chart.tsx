@@ -40,12 +40,12 @@ export function KlineChart({
     const chart: IChartApi = createChart(ref.current, {
       height: 430,
       layout: {
-        background: { type: "solid" as ColorType.Solid, color: "#111111" },
+        background: { type: "solid" as ColorType.Solid, color: "#101616" },
         textColor: "#d4d4d8",
       },
       grid: {
-        vertLines: { color: "#242424" },
-        horzLines: { color: "#242424" },
+        vertLines: { color: "#1d3332" },
+        horzLines: { color: "#1d3332" },
       },
       timeScale: {
         borderColor: "#3f3f46",
@@ -61,10 +61,10 @@ export function KlineChart({
     });
 
     const series: ISeriesApi<"Candlestick"> = chart.addSeries(CandlestickSeries, {
-      upColor: "#10b981",
+      upColor: "#0abab5",
       downColor: "#f43f5e",
       borderVisible: false,
-      wickUpColor: "#10b981",
+      wickUpColor: "#0abab5",
       wickDownColor: "#f43f5e",
     });
 

@@ -72,6 +72,25 @@ export type SymbolRow = {
   error: string;
 };
 
+export type ClosedBackfillStatus = {
+  generated_at?: string;
+  timeframe?: string;
+  dataset?: string;
+  expected_latest_closed?: string;
+  next_run_at?: string;
+  all_complete?: boolean;
+  symbols_checked?: number;
+  symbols?: Array<{
+    inst_id: string;
+    status: string;
+    last_ts?: string;
+    expected_latest_closed?: string;
+    missing_closed_bars?: number;
+    added_rows?: number;
+    error?: string;
+  }>;
+};
+
 export type DashboardPayload = {
   generated_at: string;
   project_root: string;
@@ -92,6 +111,7 @@ export type DashboardPayload = {
   selected_params: StrategyParams;
   risk_config: Record<string, unknown>;
   latest_signal: LatestSignal | null;
+  closed_backfill: ClosedBackfillStatus | null;
 };
 
 export type Candle = {

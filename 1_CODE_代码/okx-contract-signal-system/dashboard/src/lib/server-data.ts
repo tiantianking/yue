@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { parse as parseYaml } from "yaml";
 import type {
   BackfillRow,
+  ClosedBackfillStatus,
   DashboardPayload,
   JsonRecord,
   LatestSignal,
@@ -29,11 +30,14 @@ function pythonPath() {
   );
 }
 
-function historyDir() {
-  return (
-    process.env.OKX_HISTORY_DIR ??
-    "D:\\JIAOYI-CX\\历史数据_保留\\lightweight_history\\okx_15m_extended"
-  );
+function historyDir(timeframe = "15m") {
+  if (process.env.OKX_HISTORY_DIR) {
+    return process.env.OKX_HISTORY_DIR;
+  }
+  const base =
+    process.env.OKX_HISTORY_BASE ??
+    "D:\\JIAOYI-CX\\历史数据_保留\\lightweight_history";
+  return path.join(base, `okx_${timeframe}_extended`);
 }
 
 async function readJson<T>(filePath: string, fallback: T): Promise<T> {
@@ -93,7 +97,7 @@ async function readActualHistory(symbols: string[]) {
     const script = path.join(process.cwd(), "scripts", "read-history-summary.py");
     const { stdout } = await execFileAsync(
       pythonPath(),
-      [script, "--history-dir", historyDir(), ...symbols],
+      [script, "--history-dir", historyDir("15m"), "--timeframe", "15m", ...symbols],
       {
         maxBuffer: 1024 * 1024 * 8,
         windowsHide: true,
@@ -112,7 +116,7 @@ async function readActualHistory(symbols: string[]) {
 }
 
 export async function loadDashboardData(): Promise<DashboardPayload> {
-  const [quality, selectedParams, latestSignal, backfill, baseConfig, riskConfig] =
+  const [quality, selectedParams, latestSignal, backfill, closedBackfill, baseConfig, riskConfig] =
     await Promise.all([
       readJson<JsonRecord>(
         path.join(outputsDir, "startup_quality_gate.json"),
@@ -126,6 +130,10 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
       readJson<BackfillRow[]>(
         path.join(outputsDir, "15m_backfill_3y_report.json"),
         [],
+      ),
+      readJson<ClosedBackfillStatus | null>(
+        path.join(outputsDir, "closed_kline_backfill_status.json"),
+        null,
       ),
       readYaml<JsonRecord>(path.join(configDir, "base.yaml"), {}),
       readYaml<JsonRecord>(path.join(configDir, "risk.yaml"), {}),
@@ -186,5 +194,6 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
     },
     risk_config: asRecord(riskConfig.risk),
     latest_signal: latestSignal,
+    closed_backfill: closedBackfill,
   };
 }

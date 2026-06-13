@@ -12,12 +12,12 @@ export function MetricTile({
   tone?: "neutral" | "green" | "amber" | "red";
 }) {
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-3 shadow-sm">
+    <div className="rounded-lg border border-[#c4f1ef] bg-white p-3 shadow-sm">
       <div className="text-xs font-semibold text-zinc-500">{label}</div>
       <div
         className={cn(
           "mt-2 truncate font-mono text-xl font-bold text-zinc-900",
-          tone === "green" && "text-emerald-700",
+          tone === "green" && "text-[#008f8a]",
           tone === "amber" && "text-amber-700",
           tone === "red" && "text-rose-700",
         )}

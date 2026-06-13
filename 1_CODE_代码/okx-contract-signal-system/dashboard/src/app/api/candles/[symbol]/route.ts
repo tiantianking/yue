@@ -15,11 +15,14 @@ function pythonPath() {
   );
 }
 
-function historyDir() {
-  return (
-    process.env.OKX_HISTORY_DIR ??
-    "D:\\JIAOYI-CX\\历史数据_保留\\lightweight_history\\okx_15m_extended"
-  );
+function historyDir(timeframe: string) {
+  if (process.env.OKX_HISTORY_DIR) {
+    return process.env.OKX_HISTORY_DIR;
+  }
+  const base =
+    process.env.OKX_HISTORY_BASE ??
+    "D:\\JIAOYI-CX\\历史数据_保留\\lightweight_history";
+  return path.join(base, `okx_${timeframe}_extended`);
 }
 
 export async function GET(
@@ -28,12 +31,22 @@ export async function GET(
 ) {
   const { symbol } = await context.params;
   const limit = request.nextUrl.searchParams.get("limit") ?? "260";
+  const timeframe = request.nextUrl.searchParams.get("timeframe") ?? "15m";
   const script = path.join(process.cwd(), "scripts", "read-candles.py");
 
   try {
     const { stdout } = await execFileAsync(
       pythonPath(),
-      [script, decodeURIComponent(symbol), "--limit", limit, "--history-dir", historyDir()],
+      [
+        script,
+        decodeURIComponent(symbol),
+        "--limit",
+        limit,
+        "--timeframe",
+        timeframe,
+        "--history-dir",
+        historyDir(timeframe),
+      ],
       {
         maxBuffer: 1024 * 1024 * 8,
         windowsHide: true,

@@ -1,3 +1,4 @@
 .env
 .env.*
 !.env.example
+outputs/closed_kline_backfill_status.json

@@ -8,11 +8,11 @@ from typing import Any
 import pyarrow.parquet as pq
 
 
-def normalize_symbol(inst_id: str) -> str:
+def normalize_symbol(inst_id: str, timeframe: str) -> str:
     if not inst_id.endswith("-USDT-SWAP"):
         raise ValueError(f"unsupported instrument: {inst_id}")
     base, quote, _ = inst_id.split("-")
-    return f"{base}_{quote}_{quote}_15m.parquet"
+    return f"{base}_{quote}_{quote}_{timeframe}.parquet"
 
 
 def iso(value: Any) -> str:
@@ -21,8 +21,8 @@ def iso(value: Any) -> str:
     return str(value)
 
 
-def summarize_symbol(history_dir: Path, inst_id: str) -> dict[str, Any]:
-    path = history_dir / normalize_symbol(inst_id)
+def summarize_symbol(history_dir: Path, inst_id: str, timeframe: str) -> dict[str, Any]:
+    path = history_dir / normalize_symbol(inst_id, timeframe)
     if not path.exists():
         return {
             "inst_id": inst_id,
@@ -62,13 +62,15 @@ def summarize_symbol(history_dir: Path, inst_id: str) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("symbols", nargs="+")
+    parser.add_argument("--timeframe", default="15m")
     parser.add_argument("--history-dir", required=True)
     args = parser.parse_args()
 
     history_dir = Path(args.history_dir)
+    timeframe = args.timeframe.strip().lower()
     payload = {
         "symbols": [
-            summarize_symbol(history_dir, symbol)
+            summarize_symbol(history_dir, symbol, timeframe)
             for symbol in args.symbols
         ]
     }

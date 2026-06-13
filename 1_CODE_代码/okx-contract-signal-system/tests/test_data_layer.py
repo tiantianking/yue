@@ -1,6 +1,7 @@
 import pandas as pd
 from pathlib import Path
 
+from okx_signal_system.data.closed_backfill import latest_closed_candle_start, seconds_until_next_closed_run
 from okx_signal_system.data.gap_handler import DataGap, DataGapHandler, summarize_sync_error
 from okx_signal_system.data.loader import closed_bars, file_symbol_to_inst_id, file_timeframe, load_symbol_file
 from okx_signal_system.data.quality import audit_symbol
@@ -25,6 +26,12 @@ def test_timeframe_helpers_support_15m_signal_mode() -> None:
     assert default_trend_timeframe("15m") == "1h"
     assert bars_for_hours(24, "15m") == 96
     assert file_timeframe(Path("HYPE_USDT_USDT_15m.parquet")) == "15m"
+
+
+def test_closed_backfill_waits_for_confirmed_bar() -> None:
+    now = pd.Timestamp("2026-06-13T21:37:00Z")
+    assert latest_closed_candle_start("15m", now=now, settle_seconds=60) == pd.Timestamp("2026-06-13T21:15:00Z")
+    assert 7 * 60 < seconds_until_next_closed_run("15m", now=now, settle_seconds=60) < 10 * 60
 
 
 def test_load_symbol_file_normalizes_columns() -> None:
