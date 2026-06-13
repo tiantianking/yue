@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections import Counter
 from datetime import datetime, timezone
 
 log = logging.getLogger(__name__)
@@ -162,6 +163,56 @@ def send_status_report(
     ]
     if last_signal_count is not None:
         lines.append(f"last_signal_count: {last_signal_count}")
+    return send_text("\n".join(lines))
+
+
+def send_candidate_health_report(
+    *,
+    items: list[dict],
+    push_allowed: bool,
+    selected_params: dict | None = None,
+    max_items: int = 8,
+) -> bool:
+    total = len(items)
+    ready = [item for item in items if item.get("would_push")]
+    reasons = Counter(str(item.get("reason") or "unknown") for item in items if not item.get("would_push"))
+    params = selected_params or {}
+    lines = [
+        "OKX候选信号体检",
+        f"time: {_now_utc():%Y-%m-%d %H:%M:%S} UTC",
+        "not_trade_signal: true",
+        f"push_allowed: {'yes' if push_allowed else 'no'}",
+        f"symbols_checked: {total}",
+        f"ready_candidates: {len(ready)}",
+    ]
+    if params:
+        lines.append(
+            "params: "
+            f"ATR_stop={float(params.get('atr_stop_mult', 0)):.2f}x, "
+            f"target_rr={float(params.get('take_profit_mult', 0)):.2f}R"
+        )
+    if reasons:
+        top_reasons = ", ".join(f"{reason}={count}" for reason, count in reasons.most_common(6))
+        lines.append(f"blocked_reasons: {top_reasons}")
+
+    ranked = sorted(
+        items,
+        key=lambda item: (
+            0 if item.get("would_push") else 1,
+            float(item.get("breakout_gap_pct") if item.get("breakout_gap_pct") is not None else 99.0),
+            -float(item.get("final_score") or item.get("raw_score") or 0.0),
+        ),
+    )
+    if ranked:
+        lines.append("watchlist:")
+    for item in ranked[:max_items]:
+        gap = item.get("breakout_gap_pct")
+        gap_text = f", breakout_gap={float(gap):.2%}" if gap is not None else ""
+        score = item.get("final_score") if item.get("final_score") is not None else item.get("raw_score")
+        score_text = f", score={float(score):.1f}" if score is not None else ""
+        side = item.get("side") or item.get("bias") or "flat"
+        lines.append(f"- {item.get('symbol')}: {side}, {item.get('reason')}{score_text}{gap_text}")
+    lines.append("正式信号会单独推送；这条只看机会接近程度")
     return send_text("\n".join(lines))
 
 

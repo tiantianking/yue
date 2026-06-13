@@ -773,6 +773,7 @@ class LiveSignalMonitor:
         self._regime_mgr = AdaptiveParamsManager()
         self._strategy_params = load_selected_strategy_params()
         self._quality_gate_allows_push = False
+        self._last_candidate_health_report_ts = 0.0
 
         # --- 持仓追踪 (max_hold_bars) ---
         self._position_entries: dict[str, tuple[pd.Timestamp, StrategyParams]] = {}
@@ -806,13 +807,74 @@ class LiveSignalMonitor:
         self._monitor_task = asyncio.create_task(self._monitor_loop())
         return True
 
+    @staticmethod
+    def _breakout_gap_pct(row: pd.Series | None) -> float | None:
+        if row is None:
+            return None
+        try:
+            close = float(row.get("close", 0.0))
+            if close <= 0:
+                return None
+            bias = str(row.get("bias_4h", "flat"))
+            if bias == "long":
+                level = float(row.get("breakout_high"))
+                return max(0.0, (level - close) / close)
+            if bias == "short":
+                level = float(row.get("breakout_low"))
+                return max(0.0, (close - level) / close)
+        except (TypeError, ValueError):
+            return None
+        return None
+
+    def _candidate_health_item(
+        self,
+        *,
+        inst_id: str,
+        reason: str,
+        row: pd.Series | None = None,
+        signal: TradeSignal | None = None,
+        regime: str | None = None,
+        final_score: float | None = None,
+        risk_reason: str | None = None,
+        would_push: bool = False,
+    ) -> dict[str, Any]:
+        raw_score = signal.signal_score if signal and signal.signal_score is not None else None
+        side = signal.side if signal and signal.accepted else None
+        return {
+            "symbol": inst_id,
+            "reason": reason,
+            "risk_reason": risk_reason,
+            "would_push": would_push,
+            "side": side,
+            "bias": str(row.get("bias_4h", "")) if row is not None else None,
+            "regime": regime,
+            "raw_score": float(raw_score) if raw_score is not None else None,
+            "final_score": float(final_score) if final_score is not None else None,
+            "breakout_gap_pct": self._breakout_gap_pct(row),
+        }
+
+    def _send_candidate_health_report(self, items: list[dict[str, Any]]) -> None:
+        try:
+            from okx_signal_system.notify.feishu import send_candidate_health_report
+
+            send_candidate_health_report(
+                items=items,
+                push_allowed=self._quality_gate_allows_push,
+                selected_params=asdict(self._strategy_params),
+            )
+            log.info("Candidate health report sent: %s symbols", len(items))
+        except Exception as exc:
+            log.warning("Candidate health report failed: %s", exc)
+
     async def _monitor_loop(self):
         """监控循环 — 信号生成 + 风控 + 环境自适应 + 持仓超时"""
         PREV_SIGNAL_COOLDOWN = 300  # 同一币种信号冷却5分钟
         _last_signal_time: dict[str, float] = {}
+        health_interval = float(os.environ.get("SIGNAL_HEALTH_REPORT_INTERVAL_SECONDS", "3600"))
 
         while self._running:
             try:
+                cycle_health: list[dict[str, Any]] = []
                 # 获取持仓（模拟盘可能401，优雅降级）
                 positions = []
                 try:
@@ -840,19 +902,23 @@ class LiveSignalMonitor:
 
                     # 已有持仓则跳过
                     if inst_id in pos_inst_ids:
+                        cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="position_open"))
                         continue
 
                     # 冷却期
                     if inst_id in _last_signal_time and time.time() - _last_signal_time[inst_id] < PREV_SIGNAL_COOLDOWN:
+                        cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="cooldown"))
                         continue
 
                     # 获取K线数据
                     df = await self.api.get_candles(inst_id, bar="1h", limit=200)
                     if len(df) < 50:
+                        cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="history_too_short"))
                         continue
                     from okx_signal_system.training.startup_quality import is_latest_bar_fresh
                     if not is_latest_bar_fresh(df, max_lag_hours=3.0):
                         log.warning(f"{inst_id} latest candle is stale; waiting for live data")
+                        cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="stale_data"))
                         continue
 
                     # 构建特征帧
@@ -879,6 +945,15 @@ class LiveSignalMonitor:
                     )
 
                     if not signal.accepted:
+                        cycle_health.append(
+                            self._candidate_health_item(
+                                inst_id=inst_id,
+                                reason=signal.reject_reason or "signal_rejected",
+                                row=latest_row,
+                                signal=signal,
+                                regime=regime,
+                            )
+                        )
                         continue
 
                     from okx_signal_system.strategy.ensemble import ensemble_vote
@@ -906,8 +981,35 @@ class LiveSignalMonitor:
                     )
                     signal = replace(signal, signal_score=effective_score)
                     decision = validate_signal(signal, ledger, risk_cfg)
+                    would_push = bool(decision.accepted and effective_score >= 6.0 and self._quality_gate_allows_push)
+                    if would_push:
+                        health_reason = "ready"
+                    elif not self._quality_gate_allows_push:
+                        health_reason = "quality_gate_blocked"
+                    elif not decision.accepted:
+                        health_reason = f"risk_{decision.reason or 'rejected'}"
+                    elif effective_score < 6.0:
+                        health_reason = "score_below_6"
+                    elif ensemble_result.final_side == "flat":
+                        health_reason = "vote_flat"
+                    elif ensemble_result.final_side != signal.side:
+                        health_reason = "vote_side_mismatch"
+                    else:
+                        health_reason = "not_ready"
+                    cycle_health.append(
+                        self._candidate_health_item(
+                            inst_id=inst_id,
+                            reason=health_reason,
+                            row=latest_row,
+                            signal=signal,
+                            regime=regime,
+                            final_score=effective_score,
+                            risk_reason=decision.reason,
+                            would_push=would_push,
+                        )
+                    )
 
-                    if decision.accepted and effective_score >= 6.0 and self._quality_gate_allows_push:
+                    if would_push:
                         _last_signal_time[inst_id] = time.time()
                         log.info(
                             f"✅ SIGNAL: {inst_id} {signal.side.upper()} "
@@ -947,6 +1049,14 @@ class LiveSignalMonitor:
 
                 # 持久化
                 self.api.persist_data()
+                now_ts = time.time()
+                if (
+                    health_interval > 0
+                    and cycle_health
+                    and now_ts - self._last_candidate_health_report_ts >= health_interval
+                ):
+                    self._last_candidate_health_report_ts = now_ts
+                    self._send_candidate_health_report(cycle_health)
 
                 await asyncio.sleep(10)
 

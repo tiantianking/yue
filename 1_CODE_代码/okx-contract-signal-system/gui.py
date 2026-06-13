@@ -7,6 +7,7 @@ from tkinter import ttk, scrolledtext, messagebox
 import threading
 import queue
 import asyncio
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
@@ -64,7 +65,7 @@ class OKXSignalGUI:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("OKX 信号系统 v3.7")
+        self.root.title("OKX 信号系统 v3.8")
         self.root.geometry("1000x700")
         
         # 设置窗口图标（如果存在）
@@ -85,12 +86,72 @@ class OKXSignalGUI:
         self._trained_params = None
         self._startup_quality_report = None
         self._quality_gate_allows_push = False
+        self._last_candidate_health_report_ts = 0.0
         
         # 创建界面
         self.create_widgets()
         
         # 启动 GUI 更新循环
         self.update_gui()
+
+    @staticmethod
+    def _breakout_gap_pct(row) -> float | None:
+        try:
+            close = float(row.get("close", 0.0))
+            if close <= 0:
+                return None
+            bias = str(row.get("bias_4h", "flat"))
+            if bias == "long":
+                level = float(row.get("breakout_high"))
+                return max(0.0, (level - close) / close)
+            if bias == "short":
+                level = float(row.get("breakout_low"))
+                return max(0.0, (close - level) / close)
+        except (TypeError, ValueError):
+            return None
+        return None
+
+    def _candidate_health_item(
+        self,
+        *,
+        inst_id: str,
+        reason: str,
+        row=None,
+        signal=None,
+        regime: str | None = None,
+        final_score: float | None = None,
+        risk_reason: str | None = None,
+        would_push: bool = False,
+    ) -> dict:
+        raw_score = signal.signal_score if signal and signal.signal_score is not None else None
+        side = signal.side if signal and signal.accepted else None
+        return {
+            "symbol": inst_id,
+            "reason": reason,
+            "risk_reason": risk_reason,
+            "would_push": would_push,
+            "side": side,
+            "bias": str(row.get("bias_4h", "")) if row is not None else None,
+            "regime": regime,
+            "raw_score": float(raw_score) if raw_score is not None else None,
+            "final_score": float(final_score) if final_score is not None else None,
+            "breakout_gap_pct": self._breakout_gap_pct(row),
+        }
+
+    def _send_candidate_health_report(self, items: list[dict], params) -> None:
+        try:
+            from okx_signal_system.notify.feishu import send_candidate_health_report
+
+            send_candidate_health_report(
+                items=items,
+                push_allowed=self._quality_gate_allows_push,
+                selected_params=asdict(params),
+            )
+            self._last_candidate_health_report_ts = asyncio.get_event_loop().time()
+            self.message_queue.put(('log', (f"候选信号体检已推送：{len(items)} 个币种", "INFO")))
+        except Exception as e:
+            self._last_candidate_health_report_ts = asyncio.get_event_loop().time()
+            self.message_queue.put(('log', (f"候选信号体检推送失败: {e}", "WARNING")))
     
     def create_widgets(self):
         """创建所有界面组件"""
@@ -542,6 +603,7 @@ class OKXSignalGUI:
             last_heartbeat = 0
             last_signal_check = 0
             last_incremental_sync = asyncio.get_event_loop().time()
+            health_interval = float(os.environ.get("SIGNAL_HEALTH_REPORT_INTERVAL_SECONDS", "3600"))
             from okx_signal_system.data.gap_handler import IncrementalSyncer
             syncer = IncrementalSyncer()
             checked_bars: dict[str, str] = {}
@@ -554,9 +616,13 @@ class OKXSignalGUI:
                     self.message_queue.put(('log', ("系统运行中...", "INFO")))
                     last_heartbeat = current_time
                 
-                # 每30秒检查一次信号
-                if current_time - last_signal_check >= 30:
-                    await self._check_signals(checked_bars)
+                # 每30秒检查一次信号；每小时即使没有新K线也发一次候选体检
+                send_health_report = (
+                    health_interval > 0
+                    and current_time - self._last_candidate_health_report_ts >= health_interval
+                )
+                if current_time - last_signal_check >= 30 or send_health_report:
+                    await self._check_signals(checked_bars, send_health_report=send_health_report)
                     last_signal_check = current_time
                 
                 # 每1小时增量同步一次数据（防止WebSocket丢K线）
@@ -589,7 +655,7 @@ class OKXSignalGUI:
         except Exception as e:
             self.message_queue.put(('log', (f"监控循环异常: {e}", "ERROR")))
     
-    async def _check_signals(self, checked_bars: dict[str, str]):
+    async def _check_signals(self, checked_bars: dict[str, str], send_health_report: bool = False):
         """检查各币种的 trading 信号"""
         try:
             from dataclasses import replace
@@ -625,23 +691,28 @@ class OKXSignalGUI:
             # 初始化自适应参数管理器（单例）
             if not hasattr(self, '_adaptive_manager'):
                 self._adaptive_manager = AdaptiveParamsManager()
+            cycle_health: list[dict] = []
             
             for inst_id in self._watched_symbols:
                 # 从数据存储加载
                 df = self.api._data_store.load(inst_id)
                 
                 if len(df) < 80:
+                    cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="history_too_short"))
                     continue  # 数据不足（至少需要80根K线计算EMA60+突破位）
                 
                 # 检查是否有新K线
                 last_ts = str(df["ts"].iloc[-1]) if len(df) > 0 else ""
-                if checked_bars.get(inst_id) == last_ts:
+                is_new_bar = checked_bars.get(inst_id) != last_ts
+                if not is_new_bar and not send_health_report:
                     continue  # 没有新数据
                 
-                checked_bars[inst_id] = last_ts
+                if is_new_bar:
+                    checked_bars[inst_id] = last_ts
 
                 if not is_latest_bar_fresh(df, max_lag_hours=3.0):
                     self.message_queue.put(('log', (f"{inst_id} 最新K线超过3小时，等待实时数据后再发信号", "WARNING")))
+                    cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="stale_data"))
                     continue
                 
                 # 计算特征
@@ -656,6 +727,7 @@ class OKXSignalGUI:
                     )
                 except Exception as e:
                     self.message_queue.put(('log', (f"特征计算失败 {inst_id}: {e}", "WARNING")))
+                    cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="feature_error"))
                     continue
 
                 # 环境只用于降分/降杠杆；策略参数使用历史训练冻结参数
@@ -668,6 +740,7 @@ class OKXSignalGUI:
                 
                 # 检查关键列是否有效
                 if pd.isna(last_row.get("atr")) or pd.isna(last_row.get("breakout_high")):
+                    cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="invalid_features", row=last_row))
                     continue
                 
                 signal = build_signal(
@@ -675,6 +748,18 @@ class OKXSignalGUI:
                     frame=features, idx=len(features) - 1
                 )
                 
+                if not signal.accepted:
+                    cycle_health.append(
+                        self._candidate_health_item(
+                            inst_id=inst_id,
+                            reason=signal.reject_reason or "signal_rejected",
+                            row=last_row,
+                            signal=signal,
+                            regime=regime,
+                        )
+                    )
+                    continue
+
                 if signal.accepted:
                     # 时间格式：检测时间 + K线时间（解决历史数据时间偏移问题）
                     detect_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')
@@ -723,6 +808,37 @@ class OKXSignalGUI:
                     ledger = Ledger(inst_id=inst_id, init_capital=10000, equity=10000)
                     signal = replace(signal, signal_score=effective_score)
                     decision = validate_signal(signal, ledger, risk_config)
+                    would_push = bool(
+                        decision.accepted
+                        and effective_score >= 6.0
+                        and getattr(self, '_quality_gate_allows_push', False)
+                    )
+                    if would_push:
+                        health_reason = "ready"
+                    elif not getattr(self, '_quality_gate_allows_push', False):
+                        health_reason = "quality_gate_blocked"
+                    elif not decision.accepted:
+                        health_reason = f"risk_{decision.reason or 'rejected'}"
+                    elif effective_score < 6.0:
+                        health_reason = "score_below_6"
+                    elif ensemble_result.final_side == "flat":
+                        health_reason = "vote_flat"
+                    elif ensemble_result.final_side != signal.side:
+                        health_reason = "vote_side_mismatch"
+                    else:
+                        health_reason = "not_ready"
+                    cycle_health.append(
+                        self._candidate_health_item(
+                            inst_id=inst_id,
+                            reason=health_reason,
+                            row=last_row,
+                            signal=signal,
+                            regime=regime,
+                            final_score=effective_score,
+                            risk_reason=decision.reason,
+                            would_push=would_push,
+                        )
+                    )
 
                     signal_type = f"{'多' if signal.side == 'long' else '空'}头突破"
                     leverage_text = f"{decision.leverage_used:.1f}x" if decision.accepted and decision.leverage_used else "N/A"
@@ -755,7 +871,7 @@ class OKXSignalGUI:
                     )))
                     
                     # 推送飞书（仅风控通过 + 综合评分≥6的高质量信号才推送，减少噪音）
-                    if decision.accepted and effective_score >= 6.0 and getattr(self, '_quality_gate_allows_push', False):
+                    if is_new_bar and would_push:
                         try:
                             from okx_signal_system.notify.feishu import send_signal_alert
                             send_signal_alert(
@@ -782,6 +898,8 @@ class OKXSignalGUI:
                         self.message_queue.put(('log', (f"🔕 低分信号不推送飞书 (评分{effective_score:.1f}<6)", "INFO")))
                     elif decision.accepted and effective_score >= 6.0:
                         self.message_queue.put(('log', ("质量门未通过，高分候选信号暂不推送飞书", "WARNING")))
+            if send_health_report and cycle_health:
+                self._send_candidate_health_report(cycle_health, base_params)
         
         except Exception as e:
             self.message_queue.put(('log', (f"信号检测异常: {e}", "ERROR")))

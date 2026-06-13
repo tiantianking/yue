@@ -29,3 +29,44 @@ def test_signal_alert_includes_target_rr_and_risk_fields(monkeypatch) -> None:
     assert "target_rr: 3.50R" in text
     assert "account_risk_at_stop: 1.00%" in text
     assert "margin_loss_at_stop: 27.00% (cap 27.00%)" in text
+
+
+def test_candidate_health_report_is_not_a_trade_signal(monkeypatch) -> None:
+    sent: list[str] = []
+
+    def fake_send_text(text: str, *args, **kwargs) -> bool:
+        sent.append(text)
+        return True
+
+    monkeypatch.setattr(feishu, "send_text", fake_send_text)
+
+    ok = feishu.send_candidate_health_report(
+        items=[
+            {
+                "symbol": "BTC-USDT-SWAP",
+                "reason": "volume_too_low",
+                "bias": "short",
+                "breakout_gap_pct": 0.043,
+                "raw_score": None,
+                "would_push": False,
+            },
+            {
+                "symbol": "ETH-USDT-SWAP",
+                "reason": "ready",
+                "side": "long",
+                "final_score": 7.2,
+                "breakout_gap_pct": 0.0,
+                "would_push": True,
+            },
+        ],
+        push_allowed=True,
+        selected_params={"atr_stop_mult": 2.5, "take_profit_mult": 3.5},
+    )
+
+    assert ok
+    text = sent[0]
+    assert "not_trade_signal: true" in text
+    assert "ready_candidates: 1" in text
+    assert "blocked_reasons: volume_too_low=1" in text
+    assert "target_rr=3.50R" in text
+    assert "BTC-USDT-SWAP" in text
