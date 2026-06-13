@@ -39,7 +39,7 @@ from okx_signal_system.risk.model import (
     apply_halt_policy, COST_BUFFER_RATE
 )
 from okx_signal_system.features.indicators import build_feature_frame
-from okx_signal_system.timeframe import default_trend_timeframe, timeframe_spec
+from okx_signal_system.timeframe import default_trend_timeframe, ratio_bars, timeframe_spec
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +47,15 @@ log = logging.getLogger(__name__)
 CACHE_TTL_SECONDS = 5  # 缓存5秒
 RECONNECT_DELAY = 3  # 重连延迟3秒
 AI_PERSIST_INTERVAL = 60  # 每60秒写入磁盘
+
+
+def _live_signal_history_limit(params: StrategyParams, *, signal_timeframe: str, trend_timeframe: str) -> int:
+    trend_ratio = ratio_bars(trend_timeframe, signal_timeframe)
+    return max(
+        600,
+        params.slow_ema + params.breakout_window + 120,
+        params.slow_ema * trend_ratio + 160,
+    )
 
 
 def _read_parquet_with_retry(path: Path, attempts: int = 3) -> pd.DataFrame:
@@ -1003,7 +1012,13 @@ class LiveSignalMonitor:
                         continue
 
                     # 获取K线数据
-                    df = await self.api.get_candles(inst_id, bar=self.api.timeframe.key, limit=600)
+                    strategy_params = self._strategy_params
+                    history_limit = _live_signal_history_limit(
+                        strategy_params,
+                        signal_timeframe=self.api.timeframe.key,
+                        trend_timeframe=self.api.trend_timeframe.key,
+                    )
+                    df = await self.api.get_candles(inst_id, bar=self.api.timeframe.key, limit=history_limit)
                     from okx_signal_system.data.loader import closed_bars
                     df = closed_bars(df)
                     if len(df) < 50:
@@ -1017,7 +1032,6 @@ class LiveSignalMonitor:
                         continue
 
                     # 构建特征帧
-                    strategy_params = self._strategy_params
                     features = build_feature_frame(
                         df,
                         fast_ema=strategy_params.fast_ema,

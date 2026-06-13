@@ -5,6 +5,7 @@ import pandas as pd
 
 from okx_signal_system.exchange.candles import okx_candles_to_frame
 from okx_signal_system.training.startup_quality import (
+    _anti_future_checks,
     _select_symbols,
     is_latest_bar_fresh,
     load_selected_strategy_params,
@@ -76,3 +77,9 @@ def test_training_performance_warnings_do_not_block_push() -> None:
 
 def test_validation_loss_blocks_push() -> None:
     assert push_blocking_reasons(["validation_profit_factor_below_1"]) == ["validation_profit_factor_below_1"]
+
+
+def test_same_timeframe_trend_has_no_incomplete_higher_bar_failure() -> None:
+    checks = _anti_future_checks(signal_timeframe="15m", trend_timeframe="15m")
+    assert checks["prior_breakout_excludes_current_bar"]
+    assert checks["incomplete_trend_not_tradable"]

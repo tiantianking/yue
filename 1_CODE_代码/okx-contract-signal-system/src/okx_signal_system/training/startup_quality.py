@@ -122,19 +122,21 @@ def _anti_future_checks(*, signal_timeframe: str = "15m", trend_timeframe: str |
     signal_spec = timeframe_spec(signal_timeframe)
     trend_key = trend_timeframe or default_trend_timeframe(signal_spec.key)
     trend_count = ratio_bars(trend_key, signal_spec.key)
-    periods = trend_count + 3
-    probe = pd.DataFrame(
-        {
-            "ts": pd.date_range("2026-01-01", periods=periods, freq=signal_spec.pandas_freq, tz="UTC"),
-            "open": range(periods),
-            "high": range(1, periods + 1),
-            "low": range(periods),
-            "close": range(1, periods + 1),
-            "volume": [100.0] * periods,
-        }
-    )
-    trend_frame = resample_trend(probe, signal_timeframe=signal_spec.key, trend_timeframe=trend_key)
-    incomplete_marked = bool((~trend_frame["complete_trend"].astype(bool)).any())
+    incomplete_marked = True
+    if trend_count > 1:
+        periods = trend_count + 3
+        probe = pd.DataFrame(
+            {
+                "ts": pd.date_range("2026-01-01", periods=periods, freq=signal_spec.pandas_freq, tz="UTC"),
+                "open": range(periods),
+                "high": range(1, periods + 1),
+                "low": range(periods),
+                "close": range(1, periods + 1),
+                "volume": [100.0] * periods,
+            }
+        )
+        trend_frame = resample_trend(probe, signal_timeframe=signal_spec.key, trend_timeframe=trend_key)
+        incomplete_marked = bool((~trend_frame["complete_trend"].astype(bool)).any())
 
     return {
         "prior_breakout_excludes_current_bar": breakout_ok,
