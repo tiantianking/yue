@@ -41,6 +41,16 @@ def frame_to_candles(frame: pd.DataFrame) -> list[dict]:
     ]
 
 
+def timeframe_minutes(timeframe: str) -> int:
+    if timeframe.endswith("m"):
+        return int(timeframe[:-1])
+    if timeframe.endswith("h"):
+        return int(timeframe[:-1]) * 60
+    if timeframe.endswith("d"):
+        return int(timeframe[:-1]) * 1440
+    return 15
+
+
 def fetch_recent_from_okx(symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
     from okx_signal_system.exchange.candles import okx_candles_to_frame
     from okx_signal_system.exchange.okx import get_candles
@@ -56,6 +66,33 @@ def fetch_recent_from_okx(symbol: str, timeframe: str, limit: int) -> pd.DataFra
     return frame.sort_values("ts").drop_duplicates("ts", keep="last")
 
 
+def merge_recent_if_stale(path: Path, frame: pd.DataFrame, symbol: str, timeframe: str, limit: int) -> tuple[pd.DataFrame, str, str | None]:
+    if frame.empty or "ts" not in frame.columns:
+        try:
+            recent = fetch_recent_from_okx(symbol, timeframe, limit)
+            return recent, "okx_recent", None
+        except Exception as exc:
+            return frame, "local_stale", str(exc)
+
+    last_ts = pd.to_datetime(frame["ts"], utc=True).max()
+    stale_after = pd.Timedelta(minutes=timeframe_minutes(timeframe) * 3)
+    if pd.Timestamp.now(tz="UTC") - last_ts <= stale_after:
+        return frame, "local", None
+
+    try:
+        recent = fetch_recent_from_okx(symbol, timeframe, min(max(limit, 300), 300))
+        if recent.empty:
+            return frame, "local_stale", "okx_recent_empty"
+        merged = pd.concat([frame, recent], ignore_index=True)
+        merged["ts"] = pd.to_datetime(merged["ts"], utc=True)
+        merged = merged.sort_values("ts").drop_duplicates("ts", keep="last").reset_index(drop=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        merged.to_parquet(path, index=False)
+        return merged, "local_okx_merged", None
+    except Exception as exc:
+        return frame, "local_stale", str(exc)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("symbol")
@@ -68,11 +105,19 @@ def main() -> None:
     limit = max(20, min(args.limit, 60000))
     path = Path(args.history_dir) / normalize_symbol(args.symbol, timeframe)
     source = "local"
+    warning = None
     if path.exists():
-        frame = pd.read_parquet(path).tail(limit).copy()
+        frame = pd.read_parquet(path).copy()
+        frame, source, warning = merge_recent_if_stale(path, frame, args.symbol, timeframe, limit)
+        frame = frame.tail(limit).copy()
     else:
-        frame = fetch_recent_from_okx(args.symbol, timeframe, limit)
-        source = "okx_recent"
+        try:
+            frame = fetch_recent_from_okx(args.symbol, timeframe, limit)
+            source = "okx_recent"
+        except Exception as exc:
+            frame = pd.DataFrame()
+            source = "okx_recent_failed"
+            warning = str(exc)
 
     candles = frame_to_candles(frame)
 
@@ -83,6 +128,7 @@ def main() -> None:
         "path": str(path),
         "count": len(candles),
         "last_time": frame["ts"].max().isoformat() if not frame.empty else None,
+        "warning": warning,
         "candles": candles,
     }
     print(json.dumps(payload, ensure_ascii=False))

@@ -127,6 +127,7 @@ export type DashboardPayload = {
   risk_config: Record<string, unknown>;
   latest_signal: LatestSignal | null;
   closed_backfill: ClosedBackfillStatus | null;
+  closed_backfills?: Record<string, ClosedBackfillStatus | null>;
   learning_review: DailyLearningReviewStatus | null;
 };
 

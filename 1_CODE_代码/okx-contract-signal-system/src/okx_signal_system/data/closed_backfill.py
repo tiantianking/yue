@@ -127,12 +127,13 @@ def sync_latest_closed_symbol(
     *,
     timeframe: str = "15m",
     dataset: str | None = None,
+    data_dir: Path | None = None,
     expected_latest_closed: datetime | None = None,
     limit: int = 100,
 ) -> ClosedBackfillSymbolStatus:
     spec = timeframe_spec(timeframe)
     expected = expected_latest_closed or latest_closed_candle_start(spec.key)
-    handler = DataGapHandler(timeframe=spec.key, dataset=dataset)
+    handler = DataGapHandler(data_dir=data_dir, timeframe=spec.key, dataset=dataset)
     path = handler.data_dir / handler._inst_to_filename(inst_id)
     existing = _read_existing(path)
     rows_before = len(existing)
@@ -190,12 +191,18 @@ class ClosedCandleBackfillService:
         dataset: str | None = None,
         settle_seconds: int = 60,
         output_path: Path | None = None,
+        data_dir: Path | None = None,
+        fetch_limit: int = 100,
     ) -> None:
         self.symbols = symbols
         self.timeframe = timeframe_spec(timeframe).key
         self.dataset = dataset or f"okx_{timeframe_spec(timeframe).file_suffix}_extended"
         self.settle_seconds = settle_seconds
         self.output_path = output_path or project_paths().output_dir / "closed_kline_backfill_status.json"
+        self.data_dir = data_dir
+        self.fetch_limit = fetch_limit
+        if self.data_dir is not None:
+            self.data_dir.mkdir(parents=True, exist_ok=True)
 
     def next_run_at(self, *, now: datetime | None = None) -> datetime:
         base = pd.Timestamp(now or datetime.now(timezone.utc))
@@ -216,7 +223,9 @@ class ClosedCandleBackfillService:
                 inst_id,
                 timeframe=self.timeframe,
                 dataset=self.dataset,
+                data_dir=self.data_dir,
                 expected_latest_closed=expected,
+                limit=self.fetch_limit,
             )
             for inst_id in self.symbols
         ]

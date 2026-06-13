@@ -2,5 +2,6 @@
 .env.*
 !.env.example
 outputs/closed_kline_backfill_status.json
+outputs/closed_kline_backfill_status_5m.json
 outputs/daily_learning_review.json
 outputs/candidate_params.json

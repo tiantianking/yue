@@ -117,7 +117,17 @@ async function readActualHistory(symbols: string[]) {
 }
 
 export async function loadDashboardData(): Promise<DashboardPayload> {
-  const [quality, selectedParams, latestSignal, backfill, closedBackfill, learningReview, baseConfig, riskConfig] =
+  const [
+    quality,
+    selectedParams,
+    latestSignal,
+    backfill,
+    closedBackfill,
+    closedBackfill5m,
+    learningReview,
+    baseConfig,
+    riskConfig,
+  ] =
     await Promise.all([
       readJson<JsonRecord>(
         path.join(outputsDir, "startup_quality_gate.json"),
@@ -134,6 +144,10 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
       ),
       readJson<ClosedBackfillStatus | null>(
         path.join(outputsDir, "closed_kline_backfill_status.json"),
+        null,
+      ),
+      readJson<ClosedBackfillStatus | null>(
+        path.join(outputsDir, "closed_kline_backfill_status_5m.json"),
         null,
       ),
       readJson<DailyLearningReviewStatus | null>(
@@ -200,6 +214,10 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
     risk_config: asRecord(riskConfig.risk),
     latest_signal: latestSignal,
     closed_backfill: closedBackfill,
+    closed_backfills: {
+      "15m": closedBackfill,
+      "5m": closedBackfill5m,
+    },
     learning_review: learningReview,
   };
 }

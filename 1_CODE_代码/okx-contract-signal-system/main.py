@@ -168,6 +168,32 @@ async def run_daily_learning_review_service(symbols: list[str]) -> None:
 
     await run_service(symbols)
 
+
+async def run_dashboard_5m_backfill_service(symbols: list[str]) -> None:
+    """Keep dashboard 5m candles local and fresh for fast chart rendering."""
+    from okx_signal_system.config import load_config, project_paths
+    from okx_signal_system.data.closed_backfill import ClosedCandleBackfillService
+    from okx_signal_system.paths import find_lightweight_history
+
+    try:
+        cfg = load_config("base.yaml")
+        data_cfg = cfg.get("data", {})
+        history_parent = find_lightweight_history(data_cfg.get("historical_dataset", "okx_15m_extended")).parent
+        service = ClosedCandleBackfillService(
+            symbols=symbols,
+            timeframe="5m",
+            dataset="okx_5m_extended",
+            settle_seconds=20,
+            output_path=project_paths().output_dir / "closed_kline_backfill_status_5m.json",
+            data_dir=history_parent / "okx_5m_extended",
+            fetch_limit=300,
+        )
+        await service.run_forever()
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.error("dashboard 5m backfill service stopped: %s", exc)
+
 # ============================================================
 # PID 管理
 # ============================================================
@@ -318,6 +344,7 @@ async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -
     monitor = LiveSignalMonitor(api, signal_callback=on_signal, risk_config=None)
     backfill_task = asyncio.create_task(run_closed_kline_backfill_service(symbols))
     learning_task = asyncio.create_task(run_daily_learning_review_service(symbols))
+    dashboard_5m_task = asyncio.create_task(run_dashboard_5m_backfill_service(symbols))
 
     logger.info("信号监控系统已启动")
     print("\n" + "=" * 50)
@@ -350,7 +377,7 @@ async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -
         logger.error(f"监控异常: {e}")
         print(f"\n[ERROR] 监控异常: {e}")
     finally:
-        for task in (backfill_task, learning_task):
+        for task in (backfill_task, learning_task, dashboard_5m_task):
             task.cancel()
             try:
                 await task

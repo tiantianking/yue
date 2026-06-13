@@ -68,6 +68,7 @@ const emptyData: DashboardPayload = {
   risk_config: {},
   latest_signal: null,
   closed_backfill: null,
+  closed_backfills: {},
   learning_review: null,
 };
 
@@ -291,13 +292,15 @@ function BackfillPanel({
   selected,
   selectedRow,
   candleMeta,
+  timeframe,
 }: {
   data: DashboardPayload;
   selected: string;
   selectedRow?: SymbolRow;
   candleMeta: CandleMeta | null;
+  timeframe: string;
 }) {
-  const closed = data.closed_backfill;
+  const closed = data.closed_backfills?.[timeframe] ?? data.closed_backfill;
   const symbolStatus = closed?.symbols?.find((row) => row.inst_id === selected);
   const actualAge = minutesSince(candleMeta?.last_time);
   const freshTone =
@@ -485,7 +488,13 @@ export function Dashboard() {
     const timer = window.setTimeout(() => {
       void loadCandles(selected, timeframe, candleLimit);
     }, 0);
-    return () => window.clearTimeout(timer);
+    const interval = window.setInterval(() => {
+      void loadCandles(selected, timeframe, candleLimit);
+    }, 10000);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+    };
   }, [candleLimit, loadCandles, selected, timeframe]);
 
   return (
@@ -570,6 +579,7 @@ export function Dashboard() {
               selected={selected}
               selectedRow={selectedRow}
               candleMeta={candleMeta}
+              timeframe={timeframe}
             />
             <LearningPanel data={data} />
           </aside>
