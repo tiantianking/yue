@@ -59,6 +59,30 @@ def detect_extreme_volatility(frame: pd.DataFrame, atr_window: int = 14, thresho
     return rolling_extreme > threshold_multiplier * atr_pct.mean() if atr_pct.mean() > 0 else pd.Series(False, index=frame.index)
 
 
+def market_regime_features(frame: pd.DataFrame, lookback: int = 100) -> pd.Series:
+    close = pd.to_numeric(frame["close"], errors="coerce")
+    atr_pct = pd.to_numeric(frame.get("atr_pct"), errors="coerce") if "atr_pct" in frame else pd.Series(np.nan, index=frame.index)
+    ema_fast = pd.to_numeric(frame.get("ema_fast"), errors="coerce") if "ema_fast" in frame else pd.Series(np.nan, index=frame.index)
+    ema_slow = pd.to_numeric(frame.get("ema_slow"), errors="coerce") if "ema_slow" in frame else pd.Series(np.nan, index=frame.index)
+    avg_atr_pct = atr_pct.rolling(lookback, min_periods=20).mean()
+    atr_ratio = atr_pct / avg_atr_pct.replace(0, np.nan)
+    trend_strength = (ema_fast - ema_slow).abs() / close.replace(0, np.nan)
+    is_high_vol = atr_ratio > 1.5
+    is_strong_trend = trend_strength > 0.005
+    regime = np.select(
+        [
+            is_high_vol & is_strong_trend,
+            (~is_high_vol) & is_strong_trend,
+            is_high_vol & (~is_strong_trend),
+        ],
+        ["high_vol_trend", "low_vol_trend", "high_vol_range"],
+        default="low_vol_range",
+    )
+    regime = pd.Series(regime, index=frame.index)
+    regime.loc[atr_pct.isna() | close.isna() | ema_fast.isna() | ema_slow.isna()] = "unknown"
+    return regime
+
+
 def add_1h_features(
     frame: pd.DataFrame,
     *,
@@ -200,5 +224,6 @@ def build_feature_frame(
     # 添加成交量特征
     vol_feats = volume_features(aligned, sma_window=20)
     aligned = pd.concat([aligned, vol_feats], axis=1)
+    aligned["market_regime"] = market_regime_features(aligned)
 
     return aligned

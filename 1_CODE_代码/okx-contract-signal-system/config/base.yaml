@@ -45,5 +45,11 @@ strategy:
   max_hold_bars: 768
   atr_window: 14
 
+learning:
+  live_param_updates_enabled: false
+  shadow_score_min_closed_signals: 6
+  shadow_min_closed_signals: 30
+  shadow_min_quality_score: 70
+
 feishu:
   enabled: true

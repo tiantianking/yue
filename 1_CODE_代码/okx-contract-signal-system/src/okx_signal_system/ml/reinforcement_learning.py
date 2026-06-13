@@ -227,7 +227,7 @@ class RLParameterOptimizer:
 
         if action:
             new_params = self.apply_action_to_params(current_params, action)
-            log.info(f"RL: Applied action {action.param_to_change}={action.new_value}, epsilon={self.epsilon:.3f}")
+            log.info(f"RL: Suggested action {action.param_to_change}={action.new_value}, epsilon={self.epsilon:.3f}")
             return new_params
 
         return current_params

@@ -27,6 +27,34 @@ def base_row(**overrides):
     return pd.Series(row)
 
 
+def continuation_frame(*, close: float = 111.4) -> pd.DataFrame:
+    rows = []
+    for idx in range(10):
+        rows.append(
+            {
+                "ts": pd.Timestamp("2026-01-01T00:00:00Z") + pd.Timedelta(minutes=15 * idx),
+                "open": 106.0 + idx * 0.2,
+                "high": 108.0 + idx * 0.3,
+                "low": 107.0,
+                "close": 107.0 + idx * 0.2,
+                "atr": 2.0,
+                "atr_pct": 0.018,
+                "vol_ratio": 2.2,
+                "market_regime": "high_vol_trend",
+                "trend_bias": "long",
+                "breakout_high": 120.0,
+                "breakout_low": 90.0,
+                "ema_fast": 109.0,
+                "ema_slow": 104.0,
+                "signal_timeframe": "15m",
+                "trend_timeframe": "1h",
+            }
+        )
+    rows[-2]["close"] = 107.5
+    rows[-1].update({"open": 108.0, "high": max(close, 110.5), "low": 108.6, "close": close})
+    return pd.DataFrame(rows)
+
+
 def test_long_breakout_signal_has_required_protection() -> None:
     signal = build_signal(base_row(), inst_id="BTC-USDT-SWAP", params=StrategyParams())
     assert signal.accepted
@@ -36,6 +64,36 @@ def test_long_breakout_signal_has_required_protection() -> None:
     assert signal.max_hold_bars == 768
     assert signal.signal_score is not None and signal.signal_score >= 6
     assert signal.risk_reward_ratio == 6.0
+
+
+def test_long_pullback_continuation_signal_has_required_protection() -> None:
+    frame = continuation_frame()
+    signal = build_signal(
+        frame.iloc[-1],
+        inst_id="BTC-USDT-SWAP",
+        params=StrategyParams(),
+        frame=frame,
+        idx=len(frame) - 1,
+    )
+    assert signal.accepted
+    assert signal.side == "long"
+    assert "15M_PULLBACK_RECLAIM_UP" in signal.reason_codes
+    assert signal.risk_reward_ratio == 6.0
+    assert signal.stop_loss == signal.entry_ref - 8.0
+    assert signal.take_profit == signal.entry_ref + 48.0
+
+
+def test_pullback_continuation_rejects_overextended_entry() -> None:
+    frame = continuation_frame(close=116.0)
+    signal = build_signal(
+        frame.iloc[-1],
+        inst_id="BTC-USDT-SWAP",
+        params=StrategyParams(),
+        frame=frame,
+        idx=len(frame) - 1,
+    )
+    assert not signal.accepted
+    assert signal.reject_reason == "no_breakout"
 
 
 def test_rejects_without_breakout() -> None:

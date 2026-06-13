@@ -7,7 +7,7 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
-from okx_signal_system.strategy.trend_breakout import Side, StrategyParams, build_signal
+from okx_signal_system.strategy.trend_breakout import Side, StrategyParams, TradeSignal, build_signal
 
 
 @dataclass(frozen=True)
@@ -44,8 +44,14 @@ def _num(row: pd.Series, name: str, default: float = 0.0) -> float:
         return default
 
 
-def _vote_trend_breakout(row: pd.Series, params: StrategyParams, frame: pd.DataFrame, idx: int) -> StrategyVote:
-    signal = build_signal(row, inst_id="ENSEMBLE", params=params, frame=frame, idx=idx)
+def _vote_trend_breakout(
+    row: pd.Series,
+    params: StrategyParams,
+    frame: pd.DataFrame,
+    idx: int,
+    base_signal: TradeSignal | None = None,
+) -> StrategyVote:
+    signal = base_signal or build_signal(row, inst_id="ENSEMBLE", params=params, frame=frame, idx=idx)
     if signal.accepted and signal.side in {"long", "short"}:
         close = _num(row, "close")
         ema_fast = _num(row, "ema_fast")
@@ -125,9 +131,10 @@ def ensemble_vote(
     frame: pd.DataFrame,
     idx: int,
     base_score: float = 5.0,
+    base_signal: TradeSignal | None = None,
 ) -> EnsembleResult:
     votes = [
-        _vote_trend_breakout(row, params, frame, idx),
+        _vote_trend_breakout(row, params, frame, idx, base_signal),
         _vote_mean_reversion(row),
         _vote_momentum(row, frame, idx),
         _vote_volatility_breakout(row, frame, idx),

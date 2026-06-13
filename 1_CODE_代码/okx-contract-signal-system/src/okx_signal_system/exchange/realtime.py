@@ -49,6 +49,25 @@ RECONNECT_DELAY = 3  # 重连延迟3秒
 AI_PERSIST_INTERVAL = 60  # 每60秒写入磁盘
 
 
+def _read_parquet_with_retry(path: Path, attempts: int = 3) -> pd.DataFrame:
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return pd.read_parquet(path)
+        except Exception as exc:
+            last_error = exc
+            if attempt < attempts - 1:
+                time.sleep(0.2 * (attempt + 1))
+    assert last_error is not None
+    raise last_error
+
+
+def _write_parquet_atomic(frame: pd.DataFrame, path: Path) -> None:
+    tmp_path = path.with_name(f"{path.stem}.{os.getpid()}.tmp{path.suffix}")
+    frame.to_parquet(tmp_path, index=False)
+    tmp_path.replace(path)
+
+
 @dataclass
 class MarketData:
     """市场数据"""
@@ -154,7 +173,7 @@ class RealtimeDataStore:
 
         path = self._get_file_path(inst_id)
         if path.exists():
-            df = pd.read_parquet(path)
+            df = _read_parquet_with_retry(path)
             df["ts"] = pd.to_datetime(df["ts"], utc=True)
             self._cache[inst_id] = df
             return df
@@ -227,15 +246,15 @@ class RealtimeDataStore:
 
             # 读取现有数据合并
             if path.exists():
-                existing = pd.read_parquet(path)
+                existing = _read_parquet_with_retry(path)
                 existing["ts"] = pd.to_datetime(existing["ts"], utc=True)
                 df_combined = pd.concat([existing, df], ignore_index=True)
                 df_combined = df_combined.drop_duplicates(subset=["ts"], keep="last")
                 df_combined = df_combined.sort_values("ts").reset_index(drop=True)
-                df_combined.to_parquet(path, index=False)
+                _write_parquet_atomic(df_combined, path)
                 self._cache[inst_id] = df_combined
             else:
-                df.to_parquet(path, index=False)
+                _write_parquet_atomic(df, path)
 
             self._last_write[inst_id] = datetime.now(timezone.utc)
             log.debug(f"Saved {len(df)} bars for {inst_id}")
@@ -820,9 +839,13 @@ class LiveSignalMonitor:
 
         # --- 市场环境自适应（延迟导入避免循环依赖） ---
         from okx_signal_system.ml.regime_adaptive import AdaptiveParamsManager
+        from okx_signal_system.ml.shadow_trading import ShadowTradingLedger
         from okx_signal_system.training.startup_quality import load_selected_strategy_params
         self._regime_mgr = AdaptiveParamsManager()
         self._strategy_params = load_selected_strategy_params()
+        learning_cfg = self.api.config.get("learning", {}) if isinstance(self.api.config, dict) else {}
+        self._shadow_score_min_closed = int(learning_cfg.get("shadow_score_min_closed_signals", 6))
+        self._shadow_ledger = ShadowTradingLedger()
         self._quality_gate_allows_push = False
         self._last_candidate_health_report_ts = 0.0
 
@@ -893,6 +916,7 @@ class LiveSignalMonitor:
         regime: str | None = None,
         final_score: float | None = None,
         risk_reason: str | None = None,
+        shadow_adjustment: float | None = None,
         would_push: bool = False,
     ) -> dict[str, Any]:
         raw_score = signal.signal_score if signal and signal.signal_score is not None else None
@@ -907,12 +931,14 @@ class LiveSignalMonitor:
             "regime": regime,
             "raw_score": float(raw_score) if raw_score is not None else None,
             "final_score": float(final_score) if final_score is not None else None,
+            "shadow_adjustment": float(shadow_adjustment) if shadow_adjustment is not None else None,
             "breakout_gap_pct": self._breakout_gap_pct(row),
         }
 
     def _send_candidate_health_report(self, items: list[dict[str, Any]]) -> None:
         try:
             from okx_signal_system.notify.feishu import send_candidate_health_report
+            shadow_summary = self._shadow_ledger.summary()
 
             send_candidate_health_report(
                 items=items,
@@ -921,6 +947,11 @@ class LiveSignalMonitor:
                     **asdict(self._strategy_params),
                     "signal_timeframe": self.api.timeframe.key,
                     "trend_timeframe": self.api.trend_timeframe.key,
+                    "shadow_open": shadow_summary.get("open", 0),
+                    "shadow_closed": shadow_summary.get("closed", 0),
+                    "shadow_take_profit": shadow_summary.get("take_profit", 0),
+                    "shadow_stop_loss": shadow_summary.get("stop_loss", 0),
+                    "shadow_avg_quality_score": shadow_summary.get("avg_quality_score", 0.0),
                 },
             )
             log.info("Candidate health report sent: %s symbols", len(items))
@@ -978,6 +1009,7 @@ class LiveSignalMonitor:
                     if len(df) < 50:
                         cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="history_too_short"))
                         continue
+                    self._shadow_ledger.update_symbol(inst_id, df)
                     from okx_signal_system.training.startup_quality import is_latest_bar_fresh
                     if not is_latest_bar_fresh(df, max_lag_hours=self.api.timeframe.fresh_lag_hours):
                         log.warning(f"{inst_id} latest candle is stale; waiting for live data")
@@ -1028,6 +1060,7 @@ class LiveSignalMonitor:
                         features,
                         len(features) - 1,
                         base_score=signal.signal_score or 5.0,
+                        base_signal=signal,
                     )
                     effective_score = ensemble_result.final_score
                     if ensemble_result.final_side == "flat":
@@ -1037,6 +1070,13 @@ class LiveSignalMonitor:
                     penalty = self._regime_mgr.get_score_penalty()
                     if penalty < 0:
                         effective_score = max(1.0, effective_score + penalty)
+                    shadow_adjustment = self._shadow_ledger.score_adjustment(
+                        inst_id,
+                        signal.side,
+                        min_closed=self._shadow_score_min_closed,
+                    )
+                    if shadow_adjustment:
+                        effective_score = max(1.0, min(10.0, effective_score + shadow_adjustment))
 
                     # 风控校验
                     ledger = apply_halt_policy(self._ledger, self._risk_cfg)
@@ -1070,6 +1110,7 @@ class LiveSignalMonitor:
                             regime=regime,
                             final_score=effective_score,
                             risk_reason=decision.reason,
+                            shadow_adjustment=shadow_adjustment,
                             would_push=would_push,
                         )
                     )
@@ -1085,16 +1126,20 @@ class LiveSignalMonitor:
                             f"lev={decision.leverage_used:.1f}x"
                         )
                         # 回调通知
+                        signal_recorded = False
                         if self.signal_callback:
                             try:
-                                self.signal_callback(signal, decision)
+                                callback_result = self.signal_callback(signal, decision)
+                                signal_recorded = callback_result is not False
+                                if signal_recorded:
+                                    self._shadow_ledger.record_signal(signal, decision)
                             except Exception as cb_err:
                                 log.error(f"Signal callback error: {cb_err}")
                         # 内嵌飞书推送（callback 未设置时的 fallback）
                         else:
                             try:
                                 from okx_signal_system.notify.feishu import send_signal_alert
-                                send_signal_alert(
+                                signal_recorded = send_signal_alert(
                                     inst_id=signal.inst_id,
                                     side=signal.side,
                                     entry_ref=signal.entry_ref or 0,
@@ -1105,11 +1150,16 @@ class LiveSignalMonitor:
                                     reason=", ".join(signal.reason_codes) if signal.reason_codes else "",
                                     signal_score=decision.signal_score,
                                     risk_reward_ratio=decision.risk_reward_ratio,
+                                    stop_reason=decision.stop_reason or "",
+                                    tp_reason=decision.tp_reason or "",
                                     max_loss_pct=getattr(decision, 'max_loss_pct', None),
                                     margin_loss_pct=getattr(decision, 'margin_loss_pct', None),
+                                    kline_time=pd.Timestamp(signal.ts).isoformat(),
                                     signal_timeframe=self.api.timeframe.key,
                                     trend_timeframe=self.api.trend_timeframe.key,
                                 )
+                                if signal_recorded:
+                                    self._shadow_ledger.record_signal(signal, decision)
                                 log.info(f"飞书推送(fallback): {inst_id} {signal.side}")
                             except Exception as feishu_err:
                                 log.error(f"飞书推送失败: {feishu_err}")

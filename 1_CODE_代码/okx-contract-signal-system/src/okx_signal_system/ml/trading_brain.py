@@ -40,6 +40,7 @@ from okx_signal_system.notify.feishu import feishu_send_signal_card, send_text
 from okx_signal_system.data.gap_handler import IncrementalSyncer
 from okx_signal_system.paths import find_lightweight_history
 from okx_signal_system.strategy.trend_breakout import StrategyParams, generate_signals, build_signal
+from okx_signal_system.training.startup_quality import load_selected_strategy_params
 from okx_signal_system.timeframe import timeframe_spec
 
 log = logging.getLogger(__name__)
@@ -61,9 +62,12 @@ class TradingBrain:
 
         self.config = config or {}
         data_cfg = self.config.get("data", {}) if isinstance(self.config, dict) else {}
+        learning_cfg = self.config.get("learning", {}) if isinstance(self.config, dict) else {}
         self.dataset = data_cfg.get("historical_dataset", "okx_15m_extended")
         self.signal_timeframe = timeframe_spec(data_cfg.get("timeframe", "15m")).key
         self.trend_timeframe = timeframe_spec(data_cfg.get("trend_timeframe", "1h")).key
+        self.live_param_updates_enabled = bool(learning_cfg.get("live_param_updates_enabled", False))
+        self.param_suggestions: list[dict] = []
 
         # 初始化所有模块
         self.online_learning = create_learning_engine(self.data_dir / "online_learning")
@@ -89,7 +93,7 @@ class TradingBrain:
         self.syncer = IncrementalSyncer(timeframe=self.signal_timeframe, dataset=self.dataset)
 
         # 当前参数
-        self.current_params = StrategyParams()
+        self.current_params = load_selected_strategy_params()
 
         # 运行状态
         self._running = False
@@ -114,8 +118,14 @@ class TradingBrain:
         await self.api.connect()
 
         # 加载最佳参数
-        self.current_params = self.online_learning.get_current_params()
-        log.info(f"Loaded params: {self.current_params}")
+        learned_params = self.online_learning.get_current_params()
+        learned_params = self.online_learning.get_current_params()
+        if self.live_param_updates_enabled:
+            self.current_params = learned_params
+            log.info(f"Loaded live learning params: {self.current_params}")
+        else:
+            self._record_param_suggestion("online_learning_startup", learned_params, "learning_locked")
+            log.info(f"Learning locked; using validated params: {self.current_params}")
 
         self._running = True
 
@@ -229,6 +239,17 @@ class TradingBrain:
 
         return None
 
+    def _record_param_suggestion(self, source: str, params: StrategyParams, reason: str) -> None:
+        self.param_suggestions.append(
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "source": source,
+                "reason": reason,
+                "params": asdict(params),
+            }
+        )
+        self.param_suggestions = self.param_suggestions[-50:]
+
     async def evaluate_and_adapt(self):
         """评估表现并自适应调整"""
         log.info("Evaluating and adapting...")
@@ -237,8 +258,12 @@ class TradingBrain:
         if self.online_learning.should_adapt():
             result = self.online_learning.adapt_params()
             if result:
-                self.current_params = result.new_params
-                log.info(f"Online learning adapted: {result.new_params}")
+                self._record_param_suggestion("online_learning", result.new_params, result.reason)
+                if self.live_param_updates_enabled:
+                    self.current_params = result.new_params
+                    log.info(f"Online learning applied: {result.new_params}")
+                else:
+                    log.info(f"Online learning suggested params; live updates locked: {result.new_params}")
 
         # 强化学习
         from okx_signal_system.ml.reinforcement_learning import MarketRegimeDetector
@@ -258,8 +283,12 @@ class TradingBrain:
 
         new_params = self.rl_optimizer.optimize_params(self.current_params, state)
         if new_params != self.current_params:
-            self.current_params = new_params
-            log.info(f"RL optimized params: {new_params}")
+            self._record_param_suggestion("reinforcement_learning", new_params, "rl_suggestion")
+            if self.live_param_updates_enabled:
+                self.current_params = new_params
+                log.info(f"RL applied params: {new_params}")
+            else:
+                log.info(f"RL suggested params; live updates locked: {new_params}")
 
     async def rotate_symbols(self):
         """轮换币种"""
@@ -319,6 +348,8 @@ class TradingBrain:
             "cycle_count": self._cycle_count,
             "is_running": self._running,
             "current_params": asdict(self.current_params),
+            "live_param_updates_enabled": self.live_param_updates_enabled,
+            "param_suggestions": self.param_suggestions[-5:],
             "active_symbols": self.symbol_rotator.get_active_symbols(),
             "learning_stats": self.online_learning.get_performance_summary(),
             "rl_stats": self.rl_optimizer.get_learning_stats(),

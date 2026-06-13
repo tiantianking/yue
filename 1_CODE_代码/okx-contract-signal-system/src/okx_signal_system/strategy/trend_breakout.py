@@ -12,6 +12,14 @@ VOL_RATIO_MIN = 0.5
 ATR_PCT_MIN = 0.001
 TREND_STRENGTH_MIN = 0.005
 MOMENTUM_CONFIRM_BARS = 3
+PULLBACK_LOOKBACK_BARS = 8
+PULLBACK_ATR_BAND = 0.5
+PULLBACK_DEEP_ATR_LIMIT = 1.5
+PULLBACK_RECLAIM_MIN_ATR = 0.15
+MAX_EXTENSION_ATR = 1.35
+CONTINUATION_TREND_STRENGTH_MIN = 0.01
+CONTINUATION_VOL_RATIO_MIN = 0.9
+MIN_CONTINUATION_SCORE = 9.6
 
 # Conservative live-signal protection floors. They include room for OKX fees,
 # slippage, and normal intraday noise so alerts do not suggest tiny TP/SL bands.
@@ -129,6 +137,11 @@ def atr(frame: pd.DataFrame, window: int = 14) -> pd.Series:
 
 
 def _identify_market_regime(frame: pd.DataFrame, idx: int, lookback: int = 20) -> str:
+    if frame is not None and 0 <= idx < len(frame) and "market_regime" in frame.columns:
+        regime = str(frame.iloc[idx].get("market_regime", "unknown"))
+        if regime in {"high_vol_trend", "low_vol_trend", "high_vol_range", "low_vol_range", "unknown"}:
+            return regime
+
     if idx < lookback:
         return "unknown"
 
@@ -199,6 +212,80 @@ def _score_breakout(
         momentum_bonus = min(0.6, momentum * 0.2)
 
     return _bounded_score(4.8 + trend_bonus + breakout_bonus + volume_bonus + rr_bonus + regime_bonus + momentum_bonus)
+
+
+def _score_continuation(
+    *,
+    side: str,
+    close: float,
+    ema_fast: float,
+    trend_strength: float,
+    atr_pct: float,
+    vol_ratio: float,
+    reward_to_risk: float,
+    market_regime: str,
+    frame: pd.DataFrame | None,
+    idx: int,
+) -> float:
+    signed_strength = trend_strength if side == "long" else -trend_strength
+    trend_bonus = min(1.8, max(0.0, signed_strength / 0.025 * 1.8))
+    reclaim_pct = abs(close - ema_fast) / close if close > 0 else 0.0
+    reclaim_bonus = min(0.9, max(0.0, reclaim_pct / max(atr_pct, 0.0001) * 0.45))
+    volume_bonus = min(0.8, max(0.0, (vol_ratio - 0.8) / 1.5))
+    rr_bonus = min(1.0, max(0.0, (reward_to_risk - MIN_REWARD_TO_RISK) / 1.5))
+    regime_bonus = {
+        "high_vol_trend": 0.7,
+        "low_vol_trend": 0.4,
+        "high_vol_range": -0.7,
+        "low_vol_range": -1.4,
+        "unknown": -0.2,
+    }.get(market_regime, 0.0)
+    momentum_bonus = 0.0
+    if frame is not None and idx > 0:
+        momentum = _calculate_momentum(pd.Series(dtype=float), frame.iloc[max(0, idx - 5) : idx], side)
+        momentum_bonus = min(0.6, momentum * 0.2)
+    return _bounded_score(5.4 + trend_bonus + reclaim_bonus + volume_bonus + rr_bonus + regime_bonus + momentum_bonus)
+
+
+def _continuation_side(row: pd.Series, frame: pd.DataFrame | None, idx: int, *, bias: str, trend_strength: float) -> Side:
+    if frame is None or idx < 2 or bias not in {"long", "short"}:
+        return "flat"
+
+    close = _num(row, "close")
+    open_ = _num(row, "open")
+    ema_fast = _num(row, "ema_fast")
+    ema_slow = _num(row, "ema_slow")
+    atr_value = _num(row, "atr")
+    vol_ratio = _num(row, "vol_ratio", 1.0)
+    if not all(np.isfinite(value) for value in [close, open_, ema_fast, ema_slow, atr_value]) or atr_value <= 0:
+        return "flat"
+    if np.isfinite(vol_ratio) and vol_ratio < CONTINUATION_VOL_RATIO_MIN:
+        return "flat"
+
+    recent = frame.iloc[max(0, idx - PULLBACK_LOOKBACK_BARS) : idx + 1]
+    if len(recent) < 3:
+        return "flat"
+    prev_close = _num(frame.iloc[idx - 1], "close")
+
+    if bias == "long":
+        recent_low = float(recent["low"].astype(float).min())
+        extension = close - ema_fast
+        touched_fast = recent_low <= ema_fast + atr_value * PULLBACK_ATR_BAND
+        not_too_deep = recent_low >= ema_fast - atr_value * PULLBACK_DEEP_ATR_LIMIT
+        reclaimed = close > ema_fast and close > open_ and close > prev_close
+        not_extended = atr_value * PULLBACK_RECLAIM_MIN_ATR <= extension <= atr_value * MAX_EXTENSION_ATR
+        if trend_strength > CONTINUATION_TREND_STRENGTH_MIN and ema_fast > ema_slow and touched_fast and not_too_deep and reclaimed and not_extended:
+            return "long"
+    else:
+        recent_high = float(recent["high"].astype(float).max())
+        extension = ema_fast - close
+        touched_fast = recent_high >= ema_fast - atr_value * PULLBACK_ATR_BAND
+        not_too_deep = recent_high <= ema_fast + atr_value * PULLBACK_DEEP_ATR_LIMIT
+        reclaimed = close < ema_fast and close < open_ and close < prev_close
+        not_extended = atr_value * PULLBACK_RECLAIM_MIN_ATR <= extension <= atr_value * MAX_EXTENSION_ATR
+        if trend_strength < -CONTINUATION_TREND_STRENGTH_MIN and ema_fast < ema_slow and touched_fast and not_too_deep and reclaimed and not_extended:
+            return "short"
+    return "flat"
 
 
 def _protection_reject_reason(*, close: float, stop_dist: float, tp_dist: float) -> str | None:
@@ -321,6 +408,49 @@ def build_signal(
             risk_reward_ratio=rr,
             stop_reason=f"ATR {params.atr_stop_mult:g}x with fee/slippage floor",
             tp_reason=f"RR {rr:.2f}:1 after protection floor",
+        )
+
+    continuation = _continuation_side(row, frame, idx, bias=bias, trend_strength=trend_strength)
+    if continuation in {"long", "short"}:
+        rr = tp_dist / stop_dist if stop_dist > 0 else 0.0
+        ema_fast = _num(row, "ema_fast")
+        score = _score_continuation(
+            side=continuation,
+            close=close,
+            ema_fast=ema_fast,
+            trend_strength=trend_strength,
+            atr_pct=float(atr_pct) if np.isfinite(atr_pct) else stop_dist / close,
+            vol_ratio=float(vol_ratio) if np.isfinite(vol_ratio) else 1.0,
+            reward_to_risk=rr,
+            market_regime=market_regime,
+            frame=frame,
+            idx=idx,
+        )
+        if score < MIN_CONTINUATION_SCORE:
+            return _reject(ts, inst_id, "CONTINUATION_SCORE_LOW", "continuation_score_too_low", score=score)
+        if protection_reason:
+            return _reject(ts, inst_id, "PROTECTION_TOO_CLOSE", protection_reason, score=score)
+        if continuation == "long":
+            stop_loss = close - stop_dist
+            take_profit = close + tp_dist
+            reason_codes = (f"{trend_tf}_TREND_LONG", f"{signal_tf}_PULLBACK_RECLAIM_UP", "ATR_OK", "VOL_OK", "TREND_STRONG")
+        else:
+            stop_loss = close + stop_dist
+            take_profit = close - tp_dist
+            reason_codes = (f"{trend_tf}_TREND_SHORT", f"{signal_tf}_PULLBACK_RECLAIM_DOWN", "ATR_OK", "VOL_OK", "TREND_STRONG")
+        return TradeSignal(
+            ts=ts,
+            inst_id=inst_id,
+            side=continuation,
+            entry_ref=close,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            max_hold_bars=params.max_hold_bars,
+            reason_codes=reason_codes,
+            signal_score=score,
+            risk_reward_ratio=rr,
+            stop_reason=f"ATR {params.atr_stop_mult:g}x pullback continuation stop",
+            tp_reason=f"RR {rr:.2f}:1 continuation target",
         )
 
     return _reject(ts, inst_id, "NO_BREAKOUT", "no_breakout")

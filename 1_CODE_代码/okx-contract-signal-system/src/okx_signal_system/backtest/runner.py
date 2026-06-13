@@ -17,6 +17,13 @@ from okx_signal_system.risk.model import (
 from okx_signal_system.strategy.ensemble import ensemble_vote
 from okx_signal_system.strategy.trend_breakout import (
     ATR_PCT_MIN,
+    CONTINUATION_TREND_STRENGTH_MIN,
+    CONTINUATION_VOL_RATIO_MIN,
+    MAX_EXTENSION_ATR,
+    PULLBACK_ATR_BAND,
+    PULLBACK_DEEP_ATR_LIMIT,
+    PULLBACK_LOOKBACK_BARS,
+    PULLBACK_RECLAIM_MIN_ATR,
     TREND_STRENGTH_MIN,
     VOL_RATIO_MIN,
     StrategyParams,
@@ -92,6 +99,37 @@ def signal_candidate_indices(features: pd.DataFrame) -> np.ndarray:
 
     long_breakout = (bias == "long") & (close > breakout_high)
     short_breakout = (bias == "short") & (close < breakout_low)
+    open_ = features["open"].to_numpy(dtype=float)
+    pullback_window = PULLBACK_LOOKBACK_BARS + 1
+    recent_low = features["low"].rolling(pullback_window, min_periods=3).min().to_numpy(dtype=float)
+    recent_high = features["high"].rolling(pullback_window, min_periods=3).max().to_numpy(dtype=float)
+    prev_close = features["close"].shift(1).to_numpy(dtype=float)
+    long_continuation = (
+        (bias == "long")
+        & (trend_strength >= CONTINUATION_TREND_STRENGTH_MIN)
+        & (ema_fast > ema_slow)
+        & (vol_ratio >= CONTINUATION_VOL_RATIO_MIN)
+        & (close > ema_fast)
+        & (close > open_)
+        & (close > prev_close)
+        & (recent_low <= ema_fast + atr_value * PULLBACK_ATR_BAND)
+        & (recent_low >= ema_fast - atr_value * PULLBACK_DEEP_ATR_LIMIT)
+        & ((close - ema_fast) >= atr_value * PULLBACK_RECLAIM_MIN_ATR)
+        & ((close - ema_fast) <= atr_value * MAX_EXTENSION_ATR)
+    )
+    short_continuation = (
+        (bias == "short")
+        & (trend_strength <= -CONTINUATION_TREND_STRENGTH_MIN)
+        & (ema_fast < ema_slow)
+        & (vol_ratio >= CONTINUATION_VOL_RATIO_MIN)
+        & (close < ema_fast)
+        & (close < open_)
+        & (close < prev_close)
+        & (recent_high >= ema_fast - atr_value * PULLBACK_ATR_BAND)
+        & (recent_high <= ema_fast + atr_value * PULLBACK_DEEP_ATR_LIMIT)
+        & ((ema_fast - close) >= atr_value * PULLBACK_RECLAIM_MIN_ATR)
+        & ((ema_fast - close) <= atr_value * MAX_EXTENSION_ATR)
+    )
     indices = np.arange(len(features))
     candidate_mask = (
         (indices < len(features) - 2)
@@ -106,7 +144,7 @@ def signal_candidate_indices(features: pd.DataFrame) -> np.ndarray:
         & np.isfinite(vol_ratio)
         & (vol_ratio >= VOL_RATIO_MIN)
         & (np.abs(trend_strength) >= TREND_STRENGTH_MIN)
-        & (long_breakout | short_breakout)
+        & (long_breakout | short_breakout | long_continuation | short_continuation)
     )
     return np.flatnonzero(candidate_mask)
 
@@ -132,6 +170,19 @@ def detect_cool_off_condition(features: pd.DataFrame, idx: int, atr_window: int 
     cur_atr_pct = float(cur_atr) / float(recent_frame["close"].iloc[0]) if recent_frame["close"].iloc[0] > 0 else 0
     # 如果当前bar的ATR%超过历史均值 * EXTREME_VOLATILITY_THRESHOLD，触发冷静期
     return cur_atr_pct > EXTREME_VOLATILITY_THRESHOLD * mean_atr_pct
+
+
+def cool_off_condition_mask(features: pd.DataFrame, atr_window: int = 14) -> np.ndarray:
+    if len(features) == 0 or "atr" not in features.columns:
+        return np.zeros(len(features), dtype=bool)
+    close = pd.to_numeric(features["close"], errors="coerce")
+    atr_values = pd.to_numeric(features["atr"], errors="coerce")
+    mean_close = close.shift(1).rolling(atr_window, min_periods=atr_window).mean()
+    mean_atr = atr_values.shift(1).rolling(atr_window, min_periods=atr_window).mean()
+    mean_atr_pct = mean_atr / mean_close.replace(0, np.nan)
+    cur_atr_pct = atr_values / close.replace(0, np.nan)
+    mask = cur_atr_pct > EXTREME_VOLATILITY_THRESHOLD * mean_atr_pct
+    return mask.fillna(False).to_numpy(dtype=bool)
 
 
 def exit_trade(features: pd.DataFrame, entry_idx: int, signal, params: StrategyParams) -> tuple[int, float, str]:
@@ -240,6 +291,7 @@ def run_backtest_from_features(
     bias = _trend_bias_series(features).to_numpy()
 
     candidate_indices = signal_candidate_indices(features)
+    cool_off_mask = cool_off_condition_mask(features, params.atr_window)
 
     cursor = 0
     for idx in candidate_indices:
@@ -262,7 +314,7 @@ def run_backtest_from_features(
             continue
 
         # 检测冷静期条件：最近3根bar有连续极端波动
-        if detect_cool_off_condition(features, idx, atr_window=params.atr_window):
+        if bool(cool_off_mask[idx]):
             # 进入冷静期，跳过这个信号
             ledger = Ledger(
                 inst_id=inst_id,
@@ -281,7 +333,7 @@ def run_backtest_from_features(
         entry_price = float(open_[entry_idx])
         if not signal.accepted or signal.entry_ref is None or signal.stop_loss is None or signal.take_profit is None:
             continue
-        vote = ensemble_vote(features.iloc[idx], params, features, idx, base_score=signal.signal_score or 5.0)
+        vote = ensemble_vote(features.iloc[idx], params, features, idx, base_score=signal.signal_score or 5.0, base_signal=signal)
         effective_score = signal.signal_score or 5.0
         if vote.final_side == "flat":
             effective_score = max(1.0, effective_score - 3.0)

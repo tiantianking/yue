@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import time
 
 import pandas as pd
 
@@ -68,7 +69,19 @@ def normalize_ohlcv(frame: pd.DataFrame, *, inst_id: str, timeframe: str = "1h")
 
 def load_symbol_file(path: Path) -> SymbolData:
     inst_id = file_symbol_to_inst_id(path)
-    frame = normalize_ohlcv(pd.read_parquet(path), inst_id=inst_id, timeframe=file_timeframe(path))
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            raw = pd.read_parquet(path)
+            break
+        except Exception as exc:
+            last_error = exc
+            if attempt < 2:
+                time.sleep(0.2 * (attempt + 1))
+    else:
+        assert last_error is not None
+        raise last_error
+    frame = normalize_ohlcv(raw, inst_id=inst_id, timeframe=file_timeframe(path))
     return SymbolData(inst_id=inst_id, source_path=path, frame=frame)
 
 

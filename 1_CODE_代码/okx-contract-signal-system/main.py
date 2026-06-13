@@ -259,8 +259,8 @@ async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -
         """信号回调：推送到飞书"""
         try:
             if not feishu_enabled:
-                return
-            send_signal_alert(
+                return False
+            sent = send_signal_alert(
                 inst_id=signal.inst_id,
                 side=signal.side,
                 entry_ref=signal.entry_ref or 0,
@@ -271,12 +271,19 @@ async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -
                 reason=", ".join(signal.reason_codes) if signal.reason_codes else "",
                 signal_score=getattr(decision, 'signal_score', None),
                 risk_reward_ratio=getattr(decision, 'risk_reward_ratio', None),
+                stop_reason=getattr(decision, 'stop_reason', None) or "",
+                tp_reason=getattr(decision, 'tp_reason', None) or "",
                 max_loss_pct=getattr(decision, 'max_loss_pct', None),
                 margin_loss_pct=getattr(decision, 'margin_loss_pct', None),
+                kline_time=pd.Timestamp(signal.ts).isoformat(),
             )
+            logger.info("Feishu signal push handled: %s %s", signal.inst_id, signal.side)
+            return sent
             logger.info(f"飞书推送: {signal.inst_id} {signal.side}")
         except Exception as e:
             logger.error(f"飞书推送失败: {e}")
+
+            return False
 
     monitor = LiveSignalMonitor(api, signal_callback=on_signal, risk_config=None)
 

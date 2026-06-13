@@ -1,3 +1,5 @@
+import pandas as pd
+
 from okx_signal_system.backtest.runner import (
     run_backtest,
     signal_candidate_indices,
@@ -63,3 +65,34 @@ def test_signal_candidate_prefilter_keeps_all_live_signals() -> None:
     }
     assert live_signals
     assert live_signals <= candidates
+
+
+def test_signal_candidate_prefilter_includes_pullback_continuation() -> None:
+    rows = []
+    for idx in range(12):
+        rows.append(
+            {
+                "ts": f"2026-01-01T00:{idx:02d}:00Z",
+                "open": 106.0 + idx * 0.1,
+                "high": 108.0 + idx * 0.2,
+                "low": 107.0,
+                "close": 107.0 + idx * 0.1,
+                "atr": 2.0,
+                "atr_pct": 0.018,
+                "vol_ratio": 2.2,
+                "market_regime": "high_vol_trend",
+                "trend_bias": "long",
+                "breakout_high": 120.0,
+                "breakout_low": 90.0,
+                "ema_fast": 109.0,
+                "ema_slow": 104.0,
+            }
+        )
+    rows[8]["close"] = 107.5
+    rows[9].update({"open": 110.0, "high": 112.0, "low": 108.6, "close": 111.4})
+    features = pd.DataFrame(rows)
+
+    signal = build_signal(features.iloc[9], inst_id="BTC-USDT-SWAP", params=StrategyParams(), frame=features, idx=9)
+
+    assert signal.accepted
+    assert 9 in set(signal_candidate_indices(features))

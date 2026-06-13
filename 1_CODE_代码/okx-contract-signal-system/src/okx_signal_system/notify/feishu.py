@@ -17,6 +17,15 @@ def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _entry_type_from_reason(reason: str) -> str:
+    upper = reason.upper()
+    if "PULLBACK_RECLAIM" in upper:
+        return "pullback_reclaim"
+    if "BREAKOUT" in upper:
+        return "breakout"
+    return "strategy_signal"
+
+
 def send_text(text: str, webhook_url: str | None = None, max_retries: int = 3) -> bool:
     try:
         import requests
@@ -85,6 +94,7 @@ def send_signal_alert(
         f"qty: {qty:.8f}",
         f"leverage: {leverage:.2f}x",
         f"target_rr: {rr:.2f}R",
+        f"entry_type: {_entry_type_from_reason(reason)}",
     ]
     if signal_score is not None:
         lines.append(f"score: {signal_score:.1f}/10")
@@ -203,6 +213,15 @@ def send_candidate_health_report(
                 f"signal={params.get('signal_timeframe', '-')}, "
                 f"trend={params.get('trend_timeframe', '-')}"
             )
+        if params.get("shadow_closed") is not None:
+            lines.append(
+                "shadow_review: "
+                f"open={int(params.get('shadow_open', 0))}, "
+                f"closed={int(params.get('shadow_closed', 0))}, "
+                f"tp={int(params.get('shadow_take_profit', 0))}, "
+                f"sl={int(params.get('shadow_stop_loss', 0))}, "
+                f"avg_quality={float(params.get('shadow_avg_quality_score', 0.0)):.1f}"
+            )
     if reasons:
         top_reasons = ", ".join(f"{reason}={count}" for reason, count in reasons.most_common(6))
         lines.append(f"blocked_reasons: {top_reasons}")
@@ -226,8 +245,10 @@ def send_candidate_health_report(
         gap_text = f", breakout_gap={float(gap):.2%}" if gap is not None else ""
         score = item.get("final_score") if item.get("final_score") is not None else item.get("raw_score")
         score_text = f", score={float(score):.1f}" if score is not None else ""
+        shadow_adj = item.get("shadow_adjustment")
+        shadow_text = f", shadow_adj={float(shadow_adj):+.1f}" if shadow_adj not in (None, 0, 0.0) else ""
         side = item.get("side") or item.get("bias") or "flat"
-        lines.append(f"- {item.get('symbol')}: {side}, {item.get('reason')}{score_text}{gap_text}")
+        lines.append(f"- {item.get('symbol')}: {side}, {item.get('reason')}{score_text}{shadow_text}{gap_text}")
     lines.append("正式信号会单独推送；这条只看机会接近程度")
     return send_text("\n".join(lines))
 
