@@ -24,6 +24,21 @@ if str(_src_path) not in sys.path:
 log = logging.getLogger(__name__)
 
 
+COLORS = {
+    "bg": "#0f172a",
+    "panel": "#111827",
+    "panel_alt": "#162033",
+    "border": "#263244",
+    "text": "#e5e7eb",
+    "muted": "#94a3b8",
+    "accent": "#22c55e",
+    "accent_2": "#38bdf8",
+    "warning": "#f59e0b",
+    "danger": "#ef4444",
+    "input": "#0b1220",
+}
+
+
 def get_resource_path(relative_path):
     """获取资源的绝对路径，兼容开发环境和 PyInstaller 打包环境"""
     try:
@@ -68,8 +83,11 @@ class OKXSignalGUI:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("OKX 信号系统 v3.11")
-        self.root.geometry("1000x700")
+        self.root.title("OKX 信号系统 v3.13")
+        self.root.geometry("1120x760")
+        self.root.minsize(980, 680)
+        self.root.configure(bg=COLORS["bg"])
+        self.configure_style()
         
         # 设置窗口图标（如果存在）
         icon_path = get_resource_path("assets/icon.ico")
@@ -96,6 +114,40 @@ class OKXSignalGUI:
         
         # 启动 GUI 更新循环
         self.update_gui()
+
+    def configure_style(self):
+        """Apply a compact dark desktop theme."""
+        self.root.option_add("*Font", ("Microsoft YaHei UI", 10))
+        style = ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+
+        style.configure("App.TFrame", background=COLORS["bg"])
+        style.configure("Header.TFrame", background=COLORS["panel"])
+        style.configure("Toolbar.TFrame", background=COLORS["panel_alt"])
+        style.configure("Card.TFrame", background=COLORS["panel_alt"], relief="flat")
+        style.configure("TFrame", background=COLORS["bg"])
+        style.configure("TLabel", background=COLORS["bg"], foreground=COLORS["text"])
+        style.configure("HeaderTitle.TLabel", background=COLORS["panel"], foreground=COLORS["text"], font=("Microsoft YaHei UI", 18, "bold"))
+        style.configure("HeaderSub.TLabel", background=COLORS["panel"], foreground=COLORS["muted"], font=("Microsoft YaHei UI", 10))
+        style.configure("MetricTitle.TLabel", background=COLORS["panel_alt"], foreground=COLORS["muted"], font=("Microsoft YaHei UI", 9))
+        style.configure("MetricValue.TLabel", background=COLORS["panel_alt"], foreground=COLORS["text"], font=("Microsoft YaHei UI", 12, "bold"))
+        style.configure("Status.TLabel", background=COLORS["panel"], foreground=COLORS["muted"], padding=(10, 6))
+        style.configure("TLabelframe", background=COLORS["bg"], bordercolor=COLORS["border"], relief="solid")
+        style.configure("TLabelframe.Label", background=COLORS["bg"], foreground=COLORS["text"], font=("Microsoft YaHei UI", 10, "bold"))
+        style.configure("TButton", padding=(14, 7), font=("Microsoft YaHei UI", 10), background=COLORS["panel_alt"], foreground=COLORS["text"], bordercolor=COLORS["border"])
+        style.map("TButton", background=[("active", "#1f2a44"), ("disabled", "#1f2937")], foreground=[("disabled", "#64748b")])
+        style.configure("Primary.TButton", background=COLORS["accent"], foreground="#052e16", bordercolor=COLORS["accent"])
+        style.map("Primary.TButton", background=[("active", "#4ade80"), ("disabled", "#1f2937")], foreground=[("disabled", "#64748b")])
+        style.configure("Danger.TButton", background="#7f1d1d", foreground="#fee2e2", bordercolor="#991b1b")
+        style.map("Danger.TButton", background=[("active", "#991b1b"), ("disabled", "#1f2937")], foreground=[("disabled", "#64748b")])
+        style.configure("Treeview", background=COLORS["panel"], foreground=COLORS["text"], fieldbackground=COLORS["panel"], bordercolor=COLORS["border"], rowheight=28)
+        style.configure("Treeview.Heading", background=COLORS["panel_alt"], foreground=COLORS["text"], font=("Microsoft YaHei UI", 10, "bold"))
+        style.map("Treeview", background=[("selected", "#075985")], foreground=[("selected", "#ffffff")])
+        style.configure("TEntry", fieldbackground=COLORS["input"], foreground=COLORS["text"], insertcolor=COLORS["text"])
+        style.configure("TCombobox", fieldbackground=COLORS["input"], foreground=COLORS["text"], arrowcolor=COLORS["text"])
 
     @staticmethod
     def _breakout_gap_pct(row) -> float | None:
@@ -170,6 +222,11 @@ class OKXSignalGUI:
     
     def create_widgets(self):
         """创建所有界面组件"""
+        self.main_frame = ttk.Frame(self.root, padding=(12, 10), style="App.TFrame")
+        self.main_frame.pack(fill='both', expand=True)
+
+        self.create_header()
+
         # 1. 顶部工具栏
         self.create_toolbar()
         
@@ -187,36 +244,76 @@ class OKXSignalGUI:
 
         # 6. 状态栏
         self.create_status_bar()
+
+    def create_header(self):
+        """创建顶部品牌和运行摘要."""
+        header = ttk.Frame(self.main_frame, padding=(14, 12), style="Header.TFrame")
+        header.pack(fill='x', pady=(0, 10))
+
+        logo = tk.Canvas(header, width=56, height=56, highlightthickness=0, bg=COLORS["panel"])
+        logo.pack(side='left', padx=(0, 12))
+        logo.create_oval(5, 5, 51, 51, fill="#0ea5e9", outline="#67e8f9", width=2)
+        logo.create_oval(12, 12, 44, 44, fill="#22c55e", outline="")
+        logo.create_text(28, 29, text="OKX", fill="#052e16", font=("Segoe UI", 11, "bold"))
+
+        title_box = ttk.Frame(header, style="Header.TFrame")
+        title_box.pack(side='left', fill='x', expand=True)
+        ttk.Label(title_box, text="OKX 合约信号系统", style="HeaderTitle.TLabel").pack(anchor='w')
+        ttk.Label(title_box, text="15m 信号 / 1h 趋势过滤 / 手动确认下单", style="HeaderSub.TLabel").pack(anchor='w', pady=(3, 0))
+
+        metrics = ttk.Frame(header, style="Header.TFrame")
+        metrics.pack(side='right')
+        for label, value in [
+            ("版本", "v3.13"),
+            ("币种", "21"),
+            ("目标", "6R"),
+            ("最大亏损", "27%"),
+        ]:
+            card = ttk.Frame(metrics, padding=(12, 8), style="Card.TFrame")
+            card.pack(side='left', padx=4)
+            ttk.Label(card, text=label, style="MetricTitle.TLabel").pack(anchor='w')
+            ttk.Label(card, text=value, style="MetricValue.TLabel").pack(anchor='w')
     
     def create_toolbar(self):
         """创建顶部工具栏"""
-        toolbar = ttk.Frame(self.root)
-        toolbar.pack(fill='x', padx=5, pady=5)
+        toolbar = ttk.Frame(self.main_frame, padding=(10, 8), style="Toolbar.TFrame")
+        toolbar.pack(fill='x', pady=(0, 8))
         
         # 连接状态
-        self.status_label = ttk.Label(toolbar, text="● 未连接", foreground="red")
-        self.status_label.pack(side='left', padx=5)
+        self.status_label = ttk.Label(toolbar, text="● 未连接", foreground=COLORS["danger"], background=COLORS["panel_alt"])
+        self.status_label.pack(side='left', padx=(4, 12))
         
         # 按钮
-        self.start_btn = ttk.Button(toolbar, text="启动监控", command=self.start_monitoring)
-        self.start_btn.pack(side='left', padx=5)
+        self.start_btn = ttk.Button(toolbar, text="启动监控", command=self.start_monitoring, style="Primary.TButton")
+        self.start_btn.pack(side='left', padx=4)
         
-        self.stop_btn = ttk.Button(toolbar, text="停止监控", command=self.stop_monitoring, state='disabled')
-        self.stop_btn.pack(side='left', padx=5)
+        self.stop_btn = ttk.Button(toolbar, text="停止监控", command=self.stop_monitoring, state='disabled', style="Danger.TButton")
+        self.stop_btn.pack(side='left', padx=4)
         
         # 右侧信息
-        self.time_label = ttk.Label(toolbar, text="")
+        self.time_label = ttk.Label(toolbar, text="", foreground=COLORS["muted"], background=COLORS["panel_alt"])
         self.time_label.pack(side='right', padx=5)
         self.update_time()
     
     def create_symbol_frame(self):
         """创建监控币种列表"""
-        symbol_frame = ttk.LabelFrame(self.root, text="监控币种")
-        symbol_frame.pack(fill='x', padx=5, pady=5)
+        symbol_frame = ttk.LabelFrame(self.main_frame, text="监控币种", padding=(8, 6))
+        symbol_frame.pack(fill='x', pady=(0, 8))
         
         # 创建币种列表（使用 Listbox）
-        self.symbol_list = tk.Listbox(symbol_frame, height=3, selectmode='none')
-        self.symbol_list.pack(fill='x', padx=5, pady=5)
+        self.symbol_list = tk.Listbox(
+            symbol_frame,
+            height=3,
+            selectmode='none',
+            bg=COLORS["panel"],
+            fg=COLORS["text"],
+            relief='flat',
+            highlightthickness=1,
+            highlightbackground=COLORS["border"],
+            selectbackground="#075985",
+            font=("Cascadia Mono", 10),
+        )
+        self.symbol_list.pack(fill='x', padx=2, pady=2)
         
         # 添加滚动条
         scrollbar = ttk.Scrollbar(symbol_frame, command=self.symbol_list.yview)
@@ -228,8 +325,8 @@ class OKXSignalGUI:
     
     def create_position_frame(self):
         """创建持仓监控面板"""
-        pos_frame = ttk.LabelFrame(self.root, text="持仓监控（自动止盈止损）")
-        pos_frame.pack(fill='x', padx=5, pady=3)
+        pos_frame = ttk.LabelFrame(self.main_frame, text="持仓监控（自动止盈止损）", padding=(8, 6))
+        pos_frame.pack(fill='x', pady=(0, 8))
 
         # 上方：持仓表格
         columns = ('inst_id', 'side', 'entry', 'current', 'sl', 'tp', 'pnl', 'score')
@@ -367,8 +464,8 @@ class OKXSignalGUI:
 
     def create_signal_frame(self):
         """创建实时信号表格"""
-        signal_frame = ttk.LabelFrame(self.root, text="实时信号")
-        signal_frame.pack(fill='both', expand=True, padx=5, pady=5)
+        signal_frame = ttk.LabelFrame(self.main_frame, text="实时信号", padding=(8, 6))
+        signal_frame.pack(fill='both', expand=True, pady=(0, 8))
         
         # 创建表格
         columns = ('time', 'symbol', 'type', 'price', 'confidence')
@@ -398,22 +495,32 @@ class OKXSignalGUI:
     
     def create_log_frame(self):
         """创建系统日志文本框"""
-        log_frame = ttk.LabelFrame(self.root, text="系统日志")
-        log_frame.pack(fill='both', expand=True, padx=5, pady=5)
+        log_frame = ttk.LabelFrame(self.main_frame, text="系统日志", padding=(8, 6))
+        log_frame.pack(fill='both', expand=True, pady=(0, 8))
         
         # 创建文本框（带滚动条）
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=15, state='disabled')
-        self.log_text.pack(fill='both', expand=True, padx=5, pady=5)
+        self.log_text = scrolledtext.ScrolledText(
+            log_frame,
+            height=15,
+            state='disabled',
+            bg="#020617",
+            fg=COLORS["text"],
+            insertbackground=COLORS["text"],
+            relief='flat',
+            borderwidth=0,
+            font=("Cascadia Mono", 10),
+        )
+        self.log_text.pack(fill='both', expand=True, padx=2, pady=2)
         
         # 配置文本颜色
-        self.log_text.tag_config('INFO', foreground='black')
-        self.log_text.tag_config('WARNING', foreground='orange')
-        self.log_text.tag_config('ERROR', foreground='red')
+        self.log_text.tag_config('INFO', foreground="#d1d5db")
+        self.log_text.tag_config('WARNING', foreground=COLORS["warning"])
+        self.log_text.tag_config('ERROR', foreground=COLORS["danger"])
     
     def create_status_bar(self):
         """创建状态栏"""
-        self.status_bar = ttk.Label(self.root, text="就绪", relief='sunken', anchor='w')
-        self.status_bar.pack(fill='x', side='bottom', padx=5, pady=5)
+        self.status_bar = ttk.Label(self.root, text="就绪", anchor='w', style="Status.TLabel")
+        self.status_bar.pack(fill='x', side='bottom')
     
     def load_symbols(self):
         """加载监控币种列表"""

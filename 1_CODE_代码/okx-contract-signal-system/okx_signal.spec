@@ -68,6 +68,7 @@ a = Analysis(
     datas=[
         # 配置文件
         ('config', 'config'),
+        ('assets', 'assets'),
         # 历史数据（打包后使用）
         ('D:/JIAOYI-CX/历史数据_保留/lightweight_history', 'lightweight_history'),
     ],
@@ -106,6 +107,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='assets/icon.ico',
 )
 
 coll = COLLECT(
