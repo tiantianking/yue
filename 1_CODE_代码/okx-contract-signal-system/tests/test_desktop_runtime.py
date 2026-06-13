@@ -18,6 +18,7 @@ def test_gui_runtime_dependencies_import() -> None:
     import okx_signal_system.ml.rolling_backtest  # noqa: F401
 
     assert "auto_start" in inspect.signature(gui.start_gui).parameters
+    assert gui.OKXSignalGUI._breakout_gap_pct(None) is None
 
 
 def test_position_store_round_trip_and_validates_prices(tmp_path) -> None:

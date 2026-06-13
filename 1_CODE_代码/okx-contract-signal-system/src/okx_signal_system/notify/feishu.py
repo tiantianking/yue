@@ -194,6 +194,8 @@ def send_candidate_health_report(
     if reasons:
         top_reasons = ", ".join(f"{reason}={count}" for reason, count in reasons.most_common(6))
         lines.append(f"blocked_reasons: {top_reasons}")
+    elif total == 0:
+        lines.append("blocked_reasons: no_evaluable_candidates")
 
     ranked = sorted(
         items,
@@ -205,6 +207,8 @@ def send_candidate_health_report(
     )
     if ranked:
         lines.append("watchlist:")
+    else:
+        lines.append("watchlist: none")
     for item in ranked[:max_items]:
         gap = item.get("breakout_gap_pct")
         gap_text = f", breakout_gap={float(gap):.2%}" if gap is not None else ""

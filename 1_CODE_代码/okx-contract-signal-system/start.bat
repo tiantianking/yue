@@ -1,11 +1,11 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-title OKX Signal System v3.8
+title OKX Signal System v3.9
 
 cd /d "%~dp0"
 
 echo ========================================
-echo  OKX Signal System v3.8
+echo  OKX Signal System v3.9
 echo ========================================
 echo.
 

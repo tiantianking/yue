@@ -70,3 +70,26 @@ def test_candidate_health_report_is_not_a_trade_signal(monkeypatch) -> None:
     assert "blocked_reasons: volume_too_low=1" in text
     assert "target_rr=3.50R" in text
     assert "BTC-USDT-SWAP" in text
+
+
+def test_candidate_health_report_sends_even_without_candidates(monkeypatch) -> None:
+    sent: list[str] = []
+
+    def fake_send_text(text: str, *args, **kwargs) -> bool:
+        sent.append(text)
+        return True
+
+    monkeypatch.setattr(feishu, "send_text", fake_send_text)
+
+    ok = feishu.send_candidate_health_report(
+        items=[],
+        push_allowed=True,
+        selected_params={"atr_stop_mult": 2.5, "take_profit_mult": 3.5},
+    )
+
+    assert ok
+    text = sent[0]
+    assert "not_trade_signal: true" in text
+    assert "symbols_checked: 0" in text
+    assert "blocked_reasons: no_evaluable_candidates" in text
+    assert "watchlist: none" in text

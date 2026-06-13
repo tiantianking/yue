@@ -7,6 +7,7 @@ from tkinter import ttk, scrolledtext, messagebox
 import threading
 import queue
 import asyncio
+import logging
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +20,8 @@ _project_root = Path(__file__).parent
 _src_path = _project_root / "src"
 if str(_src_path) not in sys.path:
     sys.path.insert(0, str(_src_path))
+
+log = logging.getLogger(__name__)
 
 
 def get_resource_path(relative_path):
@@ -65,7 +68,7 @@ class OKXSignalGUI:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("OKX 信号系统 v3.8")
+        self.root.title("OKX 信号系统 v3.9")
         self.root.geometry("1000x700")
         
         # 设置窗口图标（如果存在）
@@ -96,6 +99,8 @@ class OKXSignalGUI:
 
     @staticmethod
     def _breakout_gap_pct(row) -> float | None:
+        if row is None:
+            return None
         try:
             close = float(row.get("close", 0.0))
             if close <= 0:
@@ -142,15 +147,21 @@ class OKXSignalGUI:
         try:
             from okx_signal_system.notify.feishu import send_candidate_health_report
 
-            send_candidate_health_report(
+            ok = send_candidate_health_report(
                 items=items,
                 push_allowed=self._quality_gate_allows_push,
                 selected_params=asdict(params),
             )
             self._last_candidate_health_report_ts = asyncio.get_event_loop().time()
-            self.message_queue.put(('log', (f"候选信号体检已推送：{len(items)} 个币种", "INFO")))
+            if ok:
+                log.info("Candidate health report sent: %s symbols", len(items))
+                self.message_queue.put(('log', (f"候选信号体检已推送：{len(items)} 个币种", "INFO")))
+            else:
+                log.warning("Candidate health report not sent: send_text returned false")
+                self.message_queue.put(('log', ("候选信号体检未送达：飞书返回失败", "WARNING")))
         except Exception as e:
             self._last_candidate_health_report_ts = asyncio.get_event_loop().time()
+            log.warning("Candidate health report failed: %s", e)
             self.message_queue.put(('log', (f"候选信号体检推送失败: {e}", "WARNING")))
     
     def create_widgets(self):
@@ -898,10 +909,11 @@ class OKXSignalGUI:
                         self.message_queue.put(('log', (f"🔕 低分信号不推送飞书 (评分{effective_score:.1f}<6)", "INFO")))
                     elif decision.accepted and effective_score >= 6.0:
                         self.message_queue.put(('log', ("质量门未通过，高分候选信号暂不推送飞书", "WARNING")))
-            if send_health_report and cycle_health:
+            if send_health_report:
                 self._send_candidate_health_report(cycle_health, base_params)
         
         except Exception as e:
+            log.exception("Signal check failed")
             self.message_queue.put(('log', (f"信号检测异常: {e}", "ERROR")))
     
     def update_gui(self):

@@ -1052,7 +1052,6 @@ class LiveSignalMonitor:
                 now_ts = time.time()
                 if (
                     health_interval > 0
-                    and cycle_health
                     and now_ts - self._last_candidate_health_report_ts >= health_interval
                 ):
                     self._last_candidate_health_report_ts = now_ts
