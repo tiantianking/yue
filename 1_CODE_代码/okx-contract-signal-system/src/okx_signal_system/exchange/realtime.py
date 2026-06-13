@@ -782,7 +782,7 @@ class LiveSignalMonitor:
 
         try:
             from okx_signal_system.training.startup_quality import run_startup_quality_gate
-            report = run_startup_quality_gate(symbols=self.api._watched_symbols or None, max_symbols=6)
+            report = run_startup_quality_gate(symbols=self.api._watched_symbols or None, max_symbols=None)
             self._strategy_params = report.strategy_params
             self._quality_gate_allows_push = report.status == "passed"
             if not self._quality_gate_allows_push:

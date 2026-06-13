@@ -1,9 +1,11 @@
 import json
+from types import SimpleNamespace
 
 import pandas as pd
 
 from okx_signal_system.exchange.candles import okx_candles_to_frame
 from okx_signal_system.training.startup_quality import (
+    _select_symbols,
     is_latest_bar_fresh,
     load_selected_strategy_params,
 )
@@ -48,3 +50,13 @@ def test_latest_bar_freshness_blocks_stale_history() -> None:
     stale = pd.DataFrame({"ts": [now - pd.Timedelta(hours=5)]})
     assert is_latest_bar_fresh(fresh, max_lag_hours=3.0, now=now)
     assert not is_latest_bar_fresh(stale, max_lag_hours=3.0, now=now)
+
+
+def test_select_symbols_preserves_config_order() -> None:
+    available = [
+        SimpleNamespace(inst_id="ADA-USDT-SWAP"),
+        SimpleNamespace(inst_id="BTC-USDT-SWAP"),
+        SimpleNamespace(inst_id="ETH-USDT-SWAP"),
+    ]
+    selected = _select_symbols(available, ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "ADA-USDT-SWAP"], max_symbols=2)
+    assert [item.inst_id for item in selected] == ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]

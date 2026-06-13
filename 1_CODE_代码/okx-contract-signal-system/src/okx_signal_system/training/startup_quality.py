@@ -150,8 +150,8 @@ def _stress_checks(params: StrategyParams) -> dict[str, bool | float]:
 
 def _select_symbols(symbols: list["SymbolData"], watched: list[str] | None, max_symbols: int | None) -> list["SymbolData"]:
     if watched:
-        watched_set = {item.upper() for item in watched}
-        selected = [item for item in symbols if item.inst_id.upper() in watched_set]
+        by_inst_id = {item.inst_id.upper(): item for item in symbols}
+        selected = [by_inst_id[item.upper()] for item in watched if item.upper() in by_inst_id]
         if selected:
             symbols = selected
     if max_symbols is not None:
@@ -198,12 +198,22 @@ def run_startup_quality_gate(
         reasons.append("anti_future_check_failed")
     if not bool(stress.get("smart_leverage_uses_signal_score")):
         reasons.append("smart_leverage_check_failed")
-    if valid_summary.get("near_liq_trades", 0) > 0:
-        reasons.append("near_liq_in_validation")
+    if train_summary.get("near_liq_trades", 0) > 0 or valid_summary.get("near_liq_trades", 0) > 0:
+        reasons.append("near_liq_in_train_or_validation")
+    if train_summary.get("total_trades", 0) <= 0:
+        reasons.append("training_no_trades")
+    if train_summary.get("total_return", 0) <= 0:
+        reasons.append("training_return_not_positive")
+    if train_summary.get("profit_factor", 0) < 1.0:
+        reasons.append("training_profit_factor_below_1")
     if valid_summary.get("total_trades", 0) <= 0:
         reasons.append("validation_no_trades")
+    if valid_summary.get("total_return", 0) <= 0:
+        reasons.append("validation_return_not_positive")
     if valid_summary.get("profit_factor", 0) < 1.0:
         reasons.append("validation_profit_factor_below_1")
+    if train_summary.get("profit_factor", 0) < 1.0 <= valid_summary.get("profit_factor", 0):
+        reasons.append("validation_edge_not_confirmed_by_training")
 
     status = "passed" if not reasons else "warning"
     report = StartupQualityReport(

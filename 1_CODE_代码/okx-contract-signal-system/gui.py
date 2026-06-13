@@ -64,7 +64,7 @@ class OKXSignalGUI:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("OKX 信号系统 v3.1")
+        self.root.title("OKX 信号系统 v3.2")
         self.root.geometry("1000x700")
         
         # 设置窗口图标（如果存在）
@@ -488,7 +488,7 @@ class OKXSignalGUI:
             try:
                 from okx_signal_system.training.startup_quality import run_startup_quality_gate
                 self.message_queue.put(('log', ("正在执行启动训练质量门...", "INFO")))
-                report = run_startup_quality_gate(symbols=self._watched_symbols, max_symbols=min(6, len(self._watched_symbols)))
+                report = run_startup_quality_gate(symbols=self._watched_symbols, max_symbols=None)
                 self._startup_quality_report = report
                 self._trained_params = report.strategy_params
                 self._quality_gate_allows_push = report.status == "passed"

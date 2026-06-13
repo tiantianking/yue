@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-13T06:33:33.409018+00:00",
+  "generated_at": "2026-06-13T06:55:48.282912+00:00",
   "status": "warning",
   "selected_params": {
     "fast_ema": 10,
@@ -10,35 +10,35 @@
     "max_hold_bars": 24,
     "atr_window": 14
   },
-  "symbols_checked": 6,
+  "symbols_checked": 15,
   "train_summary": {
-    "total_return": -0.054882447698078325,
-    "profit_factor": 0.25513174966608465,
-    "payoff_ratio": 1.1225796985307726,
-    "win_rate": 0.18518518518518517,
-    "total_trades": 54,
-    "max_drawdown": 0.054663045524310075,
-    "avg_hold_hours": 7.5,
-    "max_loss_streak": 15,
+    "total_return": -0.05993819870883344,
+    "profit_factor": 0.3338376628100888,
+    "payoff_ratio": 1.3451694060288872,
+    "win_rate": 0.19883040935672514,
+    "total_trades": 171,
+    "max_drawdown": 0.06401793848004693,
+    "avg_hold_hours": 8.812865497076023,
+    "max_loss_streak": 24,
     "hit_27pct_stop": 0,
-    "pnl_share_from_gt5x": 0.007171398359177839,
+    "pnl_share_from_gt5x": 0.030953720458330863,
     "near_liq_trades": 0,
-    "gt5x_trade_pct": 0.07407407407407407,
+    "gt5x_trade_pct": 0.08771929824561403,
     "status": "passed"
   },
   "valid_summary": {
-    "total_return": -0.008115638748125462,
-    "profit_factor": 0.6430356215776318,
-    "payoff_ratio": 1.6718926161018426,
-    "win_rate": 0.2777777777777778,
-    "total_trades": 18,
-    "max_drawdown": 0.009507449978300497,
-    "avg_hold_hours": 5.055555555555555,
+    "total_return": 0.005496568978553055,
+    "profit_factor": 1.2486822637296962,
+    "payoff_ratio": 1.5724147024744322,
+    "win_rate": 0.4426229508196721,
+    "total_trades": 61,
+    "max_drawdown": 0.0054374928817372305,
+    "avg_hold_hours": 7.032786885245901,
     "max_loss_streak": 6,
     "hit_27pct_stop": 0,
-    "pnl_share_from_gt5x": 0.0,
+    "pnl_share_from_gt5x": 0.14090224348806046,
     "near_liq_trades": 0,
-    "gt5x_trade_pct": 0.0,
+    "gt5x_trade_pct": 0.08196721311475409,
     "status": "passed"
   },
   "anti_future_checks": {
@@ -52,14 +52,25 @@
     "high_score_leverage": 10.0
   },
   "stale_symbols": [
+    "BTC-USDT-SWAP",
+    "ETH-USDT-SWAP",
+    "SOL-USDT-SWAP",
+    "DOGE-USDT-SWAP",
+    "XRP-USDT-SWAP",
     "ADA-USDT-SWAP",
-    "APT-USDT-SWAP",
-    "ARB-USDT-SWAP",
-    "ATOM-USDT-SWAP",
+    "LINK-USDT-SWAP",
     "AVAX-USDT-SWAP",
-    "BCH-USDT-SWAP"
+    "LTC-USDT-SWAP",
+    "DOT-USDT-SWAP",
+    "BCH-USDT-SWAP",
+    "TRX-USDT-SWAP",
+    "UNI-USDT-SWAP",
+    "ETC-USDT-SWAP",
+    "ATOM-USDT-SWAP"
   ],
   "reasons": [
-    "validation_profit_factor_below_1"
+    "training_return_not_positive",
+    "training_profit_factor_below_1",
+    "validation_edge_not_confirmed_by_training"
   ]
 }
