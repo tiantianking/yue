@@ -11,6 +11,7 @@ data:
     - BTC-USDT-SWAP
     - ETH-USDT-SWAP
     - SOL-USDT-SWAP
+    - HYPE-USDT-SWAP
     - DOGE-USDT-SWAP
     - XRP-USDT-SWAP
     - ADA-USDT-SWAP
@@ -23,6 +24,11 @@ data:
     - UNI-USDT-SWAP
     - ETC-USDT-SWAP
     - ATOM-USDT-SWAP
+    - APT-USDT-SWAP
+    - ARB-USDT-SWAP
+    - FIL-USDT-SWAP
+    - NEAR-USDT-SWAP
+    - OP-USDT-SWAP
 
 execution:
   live_order_enabled: false

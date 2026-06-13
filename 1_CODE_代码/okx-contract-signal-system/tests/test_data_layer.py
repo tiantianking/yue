@@ -85,6 +85,27 @@ def test_gap_sync_stops_batch_after_rest_unavailable(tmp_path, monkeypatch) -> N
     assert "dns unavailable" in results["ETH-USDT-SWAP"].errors[0]
 
 
+def test_gap_merge_fills_optional_metadata(tmp_path) -> None:
+    handler = DataGapHandler(tmp_path)
+    frame = pd.DataFrame(
+        {
+            "ts": [pd.Timestamp("2026-06-13T10:00:00Z")],
+            "open": [10.0],
+            "high": [11.0],
+            "low": [9.0],
+            "close": [10.5],
+            "volume": [100.0],
+            "quote_volume": [1000.0],
+        }
+    )
+
+    assert handler.merge_and_save("HYPE-USDT-SWAP", frame, mode="replace")
+    saved = pd.read_parquet(tmp_path / "HYPE_USDT_USDT_1h.parquet")
+    assert saved.iloc[0]["symbol"] == "HYPE-USDT-SWAP"
+    assert saved.iloc[0]["timeframe"] == "1h"
+    assert bool(saved.iloc[0]["is_closed"]) is True
+
+
 def test_backfill_uses_detected_gap_boundaries(tmp_path, monkeypatch) -> None:
     calls = []
 

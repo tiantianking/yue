@@ -253,10 +253,16 @@ class DataGapHandler:
             # 确保is_closed标记
             if "is_closed" not in df.columns:
                 df["is_closed"] = True
+            else:
+                df["is_closed"] = df["is_closed"].fillna(True)
             if "symbol" not in df.columns:
                 df["symbol"] = inst_id
+            else:
+                df["symbol"] = df["symbol"].fillna(inst_id)
             if "timeframe" not in df.columns:
                 df["timeframe"] = "1h"
+            else:
+                df["timeframe"] = df["timeframe"].fillna("1h")
 
             # 保存
             df.to_parquet(path, index=False)
