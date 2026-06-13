@@ -64,7 +64,7 @@ class OKXSignalGUI:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("OKX 信号系统 v3.3")
+        self.root.title("OKX 信号系统 v3.4")
         self.root.geometry("1000x700")
         
         # 设置窗口图标（如果存在）
@@ -535,7 +535,9 @@ class OKXSignalGUI:
             # 主循环
             last_heartbeat = 0
             last_signal_check = 0
-            last_incremental_sync = 0
+            last_incremental_sync = asyncio.get_event_loop().time()
+            from okx_signal_system.data.gap_handler import IncrementalSyncer
+            syncer = IncrementalSyncer()
             checked_bars: dict[str, str] = {}
             
             while self.monitoring:
@@ -554,8 +556,6 @@ class OKXSignalGUI:
                 # 每1小时增量同步一次数据（防止WebSocket丢K线）
                 if current_time - last_incremental_sync >= 3600:
                     try:
-                        from okx_signal_system.data.gap_handler import IncrementalSyncer
-                        syncer = IncrementalSyncer()
                         results = syncer.sync_batch(self._watched_symbols, interval_hours=1)
                         if results:
                             total = sum(r.bars_added for r in results.values())

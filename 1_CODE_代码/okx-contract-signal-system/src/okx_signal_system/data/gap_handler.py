@@ -23,6 +23,16 @@ GAP_THRESHOLD_HOURS = 6  # 超过6小时视为数据断裂
 MAX_GAP_BARS = 200  # 单次最大回补量
 
 
+def summarize_sync_error(error: str) -> str:
+    if any(token in error for token in ("NameResolutionError", "Failed to resolve", "getaddrinfo failed")):
+        return "OKX REST DNS解析失败：www.okx.com；已继续使用本地历史数据和WebSocket"
+    if "timed out" in error.lower() or "timeout" in error.lower():
+        return "OKX REST连接超时；已继续使用本地历史数据和WebSocket"
+    if "ProxyError" in error:
+        return "OKX REST代理连接失败；已继续使用本地历史数据和WebSocket"
+    return error.splitlines()[0][:240]
+
+
 @dataclass
 class DataGap:
     """数据缺口"""
@@ -181,8 +191,9 @@ class DataGapHandler:
             return result
 
         except Exception as e:
-            self._api_unavailable_reason = str(e)
-            log.error(f"Backfill error for {inst_id}: {e}")
+            self._api_unavailable_reason = summarize_sync_error(str(e))
+            log.warning(f"Backfill unavailable for {inst_id}: {self._api_unavailable_reason}")
+            log.debug("Raw backfill error for %s: %s", inst_id, e)
             return None
 
     def _parse_candles(self, raw_bars: list[list]) -> pd.DataFrame:
@@ -255,7 +266,7 @@ class DataGapHandler:
 
             if self._api_unavailable_reason:
                 result.success = False
-                result.errors.append(f"skip_backfill_api_unavailable: {self._api_unavailable_reason}")
+                result.errors.append(self._api_unavailable_reason)
                 break
 
             new_data = self.backfill_gap(gap)

@@ -1,6 +1,6 @@
 import pandas as pd
 
-from okx_signal_system.data.gap_handler import DataGapHandler
+from okx_signal_system.data.gap_handler import DataGapHandler, summarize_sync_error
 from okx_signal_system.data.loader import closed_bars, file_symbol_to_inst_id, load_symbol_file
 from okx_signal_system.data.quality import audit_symbol
 from okx_signal_system.exchange.realtime import RealtimeDataStore
@@ -83,3 +83,11 @@ def test_gap_sync_stops_batch_after_rest_unavailable(tmp_path, monkeypatch) -> N
     assert not results["BTC-USDT-SWAP"].success
     assert not results["ETH-USDT-SWAP"].success
     assert "dns unavailable" in results["ETH-USDT-SWAP"].errors[0]
+
+
+def test_sync_error_summary_shortens_dns_errors() -> None:
+    raw = (
+        "OKX network error: HTTPSConnectionPool(host='www.okx.com', port=443): "
+        "Caused by NameResolutionError(\"Failed to resolve 'www.okx.com'\")"
+    )
+    assert summarize_sync_error(raw) == "OKX REST DNS解析失败：www.okx.com；已继续使用本地历史数据和WebSocket"
