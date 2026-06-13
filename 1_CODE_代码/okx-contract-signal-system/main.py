@@ -43,7 +43,7 @@ def safe_input(prompt=""):
         return ""
 
 # 添加 src/ 到 Python 路径
-APP_VERSION = "v3.19"
+APP_VERSION = "v3.20"
 _project_root = Path(__file__).parent
 _runtime_root = Path(sys.executable).parent if getattr(sys, "frozen", False) else _project_root
 _src_path = _project_root / "src"
@@ -205,26 +205,42 @@ def check_pid_file() -> bool:
     global _lock_file
     lock_path = _runtime_root / "okx_signal.lock"
     try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path.touch(exist_ok=True)
         if sys.platform == 'win32':
             import msvcrt
-            _lock_file = open(lock_path, 'w')
+            _lock_file = open(lock_path, 'r+', encoding='utf-8')
             msvcrt.locking(_lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+            _lock_file.seek(0)
+            _lock_file.truncate()
             _lock_file.write(str(os.getpid()))
             _lock_file.flush()
             logger.info(f"获取锁成功 (PID: {os.getpid()})")
             return True
         else:
             import fcntl
-            _lock_file = open(lock_path, 'w')
+            _lock_file = open(lock_path, 'r+', encoding='utf-8')
             fcntl.flock(_lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _lock_file.seek(0)
+            _lock_file.truncate()
             _lock_file.write(str(os.getpid()))
             _lock_file.flush()
             return True
     except (OSError, IOError):
+        owner_pid = ""
+        try:
+            _lock_file.seek(0)
+            owner_pid = _lock_file.read().strip()
+        except Exception:
+            try:
+                owner_pid = lock_path.read_text(encoding='utf-8').strip()
+            except Exception:
+                owner_pid = ""
         if _lock_file:
             _lock_file.close()
             _lock_file = None
-        logger.error("系统已在运行（无法获取文件锁）")
+        suffix = f"，占用 PID: {owner_pid}" if owner_pid else ""
+        logger.error("系统已在运行（无法获取文件锁）%s", suffix)
         return False
 
 
