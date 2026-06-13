@@ -64,6 +64,7 @@ def send_signal_alert(
     stop_reason: str = "",
     tp_reason: str = "",
     max_loss_pct: float | None = None,
+    margin_loss_pct: float | None = None,
     kline_time: str | None = None,
 ) -> bool:
     direction = "LONG" if side == "long" else "SHORT"
@@ -80,12 +81,14 @@ def send_signal_alert(
         f"take_profit: {take_profit:.8f} ({tp_pct:.2f}%)",
         f"qty: {qty:.8f}",
         f"leverage: {leverage:.2f}x",
-        f"risk_reward: {rr:.2f}:1",
+        f"target_rr: {rr:.2f}R",
     ]
     if signal_score is not None:
         lines.append(f"score: {signal_score:.1f}/10")
     if max_loss_pct is not None:
-        lines.append(f"max_loss_pct: {max_loss_pct:.2%}")
+        lines.append(f"account_risk_at_stop: {max_loss_pct:.2%}")
+    if margin_loss_pct is not None:
+        lines.append(f"margin_loss_at_stop: {margin_loss_pct:.2%} (cap 27.00%)")
     if kline_time:
         lines.append(f"kline_time: {kline_time}")
     if stop_reason:

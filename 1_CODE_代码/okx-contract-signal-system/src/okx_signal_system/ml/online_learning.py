@@ -29,6 +29,14 @@ WEIGHT_WR = 0.2  # 胜率权重20%
 WEIGHT_RETURN = 0.2  # 收益率权重20%
 
 
+def _enforce_target_rr_floor(params: StrategyParams) -> StrategyParams:
+    if params.take_profit_mult >= 3.5:
+        return params
+    data = asdict(params)
+    data["take_profit_mult"] = 3.5
+    return StrategyParams(**data)
+
+
 @dataclass
 class TradeRecord:
     """交易记录"""
@@ -104,8 +112,8 @@ class OnlineLearningEngine:
         if path.exists():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
-                self.current_params = StrategyParams(**data.get("current_params", {}))
-                self.best_params = StrategyParams(**data.get("best_params", {}))
+                self.current_params = _enforce_target_rr_floor(StrategyParams(**data.get("current_params", {})))
+                self.best_params = _enforce_target_rr_floor(StrategyParams(**data.get("best_params", {})))
                 self.best_score = data.get("best_score", 0.0)
                 log.info("Loaded online learning state")
             except Exception as e:
@@ -229,7 +237,7 @@ class OnlineLearningEngine:
             if metrics.win_rate < 0.4:
                 # 胜率低，降低止损，提高盈亏比
                 new_params_dict["atr_stop_mult"] = min(old_params.atr_stop_mult * 1.1, 3.5)
-                new_params_dict["take_profit_mult"] = max(old_params.take_profit_mult * 0.95, 1.5)
+                new_params_dict["take_profit_mult"] = max(old_params.take_profit_mult * 0.95, 3.5)
             else:
                 # 盈亏比低，增加止盈
                 new_params_dict["take_profit_mult"] = min(old_params.take_profit_mult * 1.1, 5.0)
@@ -258,6 +266,7 @@ class OnlineLearningEngine:
                     diff = new_val - old_val
                     new_params_dict[key] = old_val + diff * ADAPTATION_LEARNING_RATE
 
+        new_params_dict["take_profit_mult"] = max(float(new_params_dict.get("take_profit_mult", 3.5)), 3.5)
         new_params = StrategyParams(**new_params_dict)
 
         # 更新最佳参数

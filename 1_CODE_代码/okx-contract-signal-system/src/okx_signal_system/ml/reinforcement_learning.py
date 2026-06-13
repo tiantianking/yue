@@ -30,7 +30,7 @@ FAST_EMA_VALUES = [10, 15, 20, 25, 30]
 SLOW_EMA_VALUES = [40, 50, 60, 70, 80]
 BREAKOUT_VALUES = [20, 30, 40, 50, 60]
 ATR_STOP_VALUES = [1.5, 2.0, 2.5, 3.0]
-TAKE_PROFIT_VALUES = [1.5, 2.0, 3.0, 4.0, 5.0]
+TAKE_PROFIT_VALUES = [3.5, 4.0, 5.0, 6.0]
 MAX_HOLD_VALUES = [24, 36, 48, 60, 72]
 
 
@@ -201,6 +201,7 @@ class RLParameterOptimizer:
         """将动作应用到参数"""
         params_dict = asdict(params)
         params_dict[action.param_to_change] = action.new_value
+        params_dict["take_profit_mult"] = max(float(params_dict.get("take_profit_mult", 3.5)), 3.5)
         return StrategyParams(**params_dict)
 
     def get_best_action(self, state: State) -> Action | None:

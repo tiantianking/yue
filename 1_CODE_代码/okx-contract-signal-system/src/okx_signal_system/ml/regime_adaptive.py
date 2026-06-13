@@ -12,7 +12,7 @@ OKX 合约信号系统 - 环境自适应参数
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -35,7 +35,7 @@ REGIME_PARAMS: dict[str, StrategyParams] = {
         slow_ema=50,       # 慢EMA缩短
         breakout_window=30, # 突破窗口缩短，更快入场
         atr_stop_mult=2.5,  # 宽止损，避免被高波动扫出
-        take_profit_mult=3.0, # 高波动趋势中让利润奔跑
+        take_profit_mult=3.5, # 高波动趋势中让利润奔跑
         max_hold_bars=60,   # 长持仓
         atr_window=14,
     ),
@@ -44,7 +44,7 @@ REGIME_PARAMS: dict[str, StrategyParams] = {
         slow_ema=60,
         breakout_window=40,
         atr_stop_mult=2.0,
-        take_profit_mult=2.0,
+        take_profit_mult=3.5,
         max_hold_bars=48,
         atr_window=14,
     ),
@@ -53,7 +53,7 @@ REGIME_PARAMS: dict[str, StrategyParams] = {
         slow_ema=70,
         breakout_window=50, # 宽突破窗口，要求更强的突破确认
         atr_stop_mult=1.5,  # 窄止损，震荡中快速认错
-        take_profit_mult=1.5, # 低止盈，震荡中快速锁利
+        take_profit_mult=3.5, # 3.5R 止盈下限
         max_hold_bars=24,   # 短持仓
         atr_window=14,
     ),
@@ -62,10 +62,15 @@ REGIME_PARAMS: dict[str, StrategyParams] = {
         slow_ema=80,
         breakout_window=60, # 极宽突破窗口
         atr_stop_mult=1.2,  # 极窄止损
-        take_profit_mult=1.2,
+        take_profit_mult=3.5,
         max_hold_bars=18,   # 极短持仓
         atr_window=14,
     ),
+}
+
+REGIME_PARAMS = {
+    name: replace(params, take_profit_mult=max(float(params.take_profit_mult), 3.5))
+    for name, params in REGIME_PARAMS.items()
 }
 
 # 低波动震荡环境下的信号评分惩罚

@@ -64,7 +64,7 @@ class OKXSignalGUI:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("OKX 信号系统 v3.6")
+        self.root.title("OKX 信号系统 v3.7")
         self.root.geometry("1000x700")
         
         # 设置窗口图标（如果存在）
@@ -614,9 +614,9 @@ class OKXSignalGUI:
                 fast_ema=int(_first_or_val(strategy_cfg.get('fast_ema'), 20)),
                 slow_ema=int(_first_or_val(strategy_cfg.get('slow_ema'), 60)),
                 breakout_window=int(_first_or_val(strategy_cfg.get('breakout_window'), 40)),
-                atr_stop_mult=float(_first_or_val(strategy_cfg.get('atr_stop_mult'), 2.0)),
-                take_profit_mult=float(_first_or_val(strategy_cfg.get('take_profit_mult'), 2.0)),
-                max_hold_bars=int(_first_or_val(strategy_cfg.get('max_hold_bars'), 48)),
+                atr_stop_mult=float(_first_or_val(strategy_cfg.get('atr_stop_mult'), 2.5)),
+                take_profit_mult=float(_first_or_val(strategy_cfg.get('take_profit_mult'), 3.5)),
+                max_hold_bars=int(_first_or_val(strategy_cfg.get('max_hold_bars'), 24)),
                 atr_window=int(_first_or_val(strategy_cfg.get('atr_window'), 14)),
             )
             trained_params = getattr(self, '_trained_params', None)
@@ -772,6 +772,7 @@ class OKXSignalGUI:
                                 stop_reason=decision.stop_reason,
                                 tp_reason=decision.tp_reason,
                                 max_loss_pct=decision.max_position_loss_pct,
+                                margin_loss_pct=decision.margin_loss_pct,
                                 kline_time=kline_time,
                             )
                             self.message_queue.put(('log', (f"📤 飞书推送已发送 (评分{effective_score:.1f}≥6)", "INFO")))

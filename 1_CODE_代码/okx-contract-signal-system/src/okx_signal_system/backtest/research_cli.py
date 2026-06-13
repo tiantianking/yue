@@ -9,9 +9,9 @@ from okx_signal_system.strategy.trend_breakout import StrategyParams
 
 def smoke_grid() -> list[StrategyParams]:
     return [
-        StrategyParams(fast_ema=10, slow_ema=50, breakout_window=20, atr_stop_mult=1.5, take_profit_mult=1.5, max_hold_bars=24),
-        StrategyParams(fast_ema=20, slow_ema=60, breakout_window=40, atr_stop_mult=2.0, take_profit_mult=2.0, max_hold_bars=48),
-        StrategyParams(fast_ema=30, slow_ema=80, breakout_window=60, atr_stop_mult=3.0, take_profit_mult=4.0, max_hold_bars=72),
+        StrategyParams(fast_ema=10, slow_ema=50, breakout_window=20, atr_stop_mult=1.5, take_profit_mult=3.5, max_hold_bars=24),
+        StrategyParams(fast_ema=20, slow_ema=60, breakout_window=40, atr_stop_mult=2.0, take_profit_mult=4.0, max_hold_bars=48),
+        StrategyParams(fast_ema=30, slow_ema=80, breakout_window=60, atr_stop_mult=3.0, take_profit_mult=5.0, max_hold_bars=72),
     ]
 
 

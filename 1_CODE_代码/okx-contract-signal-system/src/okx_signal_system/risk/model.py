@@ -24,7 +24,7 @@ class RiskConfig:
     liquidation_cost_buffer_pct: float = 0.002
     min_stop_distance_pct: float = 0.004
     min_take_profit_distance_pct: float = 0.008
-    min_reward_to_risk: float = 1.5
+    min_reward_to_risk: float = 3.5
     min_signal_score: float = 6.0
 
 
@@ -64,10 +64,15 @@ class RiskDecision:
     stop_reason: str | None = None
     tp_reason: str | None = None
     max_position_loss_pct: float | None = None
+    position_margin_loss_pct: float | None = None
 
     @property
     def max_loss_pct(self) -> float | None:
         return self.max_position_loss_pct
+
+    @property
+    def margin_loss_pct(self) -> float | None:
+        return self.position_margin_loss_pct
 
 
 def apply_halt_policy(ledger: Ledger, config: RiskConfig) -> Ledger:
@@ -108,6 +113,9 @@ def leverage_cap_for_signal(signal: TradeSignal, ledger: Ledger, config: RiskCon
         cap = min(cap, 2.0)
     elif stop_pct > 0.012:
         cap = min(cap, 5.0)
+    cost_buffered_stop_pct = stop_pct + COST_BUFFER_RATE
+    if cost_buffered_stop_pct > 0:
+        cap = min(cap, config.single_position_loss_pct / cost_buffered_stop_pct)
 
     score = _signal_score(signal)
     if score < 6.0:
@@ -120,6 +128,8 @@ def leverage_cap_for_signal(signal: TradeSignal, ledger: Ledger, config: RiskCon
     if ledger.max_drawdown > 0.08:
         cap = min(cap, 5.0)
 
+    if cap < 1.0:
+        return 0.0
     return float(max(1.0, min(cap, max_leverage)))
 
 
@@ -173,6 +183,7 @@ def _reject(
     leverage_used: float | None = None,
     est_liq_buffer_pct: float | None = None,
     near_liq_flag: bool = False,
+    position_margin_loss_pct: float | None = None,
 ) -> RiskDecision:
     return RiskDecision(
         accepted=False,
@@ -190,6 +201,7 @@ def _reject(
         stop_reason=signal.stop_reason if signal else None,
         tp_reason=signal.tp_reason if signal else None,
         max_position_loss_pct=None,
+        position_margin_loss_pct=position_margin_loss_pct,
     )
 
 
@@ -264,6 +276,17 @@ def validate_signal(signal: TradeSignal, ledger: Ledger, config: RiskConfig = Ri
 
     max_position_loss_pct = risk_amount / active_ledger.equity if active_ledger.equity > 0 else None
     liq_buffer_pct = estimated_liquidation_buffer_pct(leverage_used, config)
+    position_margin_loss_pct = (stop_pct + COST_BUFFER_RATE) * leverage_used
+    if position_margin_loss_pct > config.single_position_loss_pct + 1e-12:
+        return _reject(
+            "position_margin_loss_above_27pct",
+            leverage_cap=leverage_cap,
+            signal=signal,
+            stop_distance_pct=stop_pct,
+            notional=notional,
+            leverage_used=leverage_used,
+            position_margin_loss_pct=position_margin_loss_pct,
+        )
     if liq_buffer_pct < stop_pct * LIQ_SAFETY_MARGIN:
         return _reject(
             "near_liquidation_before_stop",
@@ -274,6 +297,7 @@ def validate_signal(signal: TradeSignal, ledger: Ledger, config: RiskConfig = Ri
             leverage_used=leverage_used,
             est_liq_buffer_pct=liq_buffer_pct,
             near_liq_flag=True,
+            position_margin_loss_pct=position_margin_loss_pct,
         )
 
     return RiskDecision(
@@ -293,4 +317,5 @@ def validate_signal(signal: TradeSignal, ledger: Ledger, config: RiskConfig = Ri
         stop_reason=signal.stop_reason,
         tp_reason=signal.tp_reason,
         max_position_loss_pct=max_position_loss_pct,
+        position_margin_loss_pct=position_margin_loss_pct,
     )

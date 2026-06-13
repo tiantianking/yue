@@ -18,17 +18,17 @@ MOMENTUM_CONFIRM_BARS = 3
 COST_BUFFER_RATE = 0.002
 MIN_STOP_DISTANCE_PCT = 0.004
 MIN_TAKE_PROFIT_DISTANCE_PCT = 0.008
-MIN_REWARD_TO_RISK = 1.5
+MIN_REWARD_TO_RISK = 3.5
 
 
 @dataclass(frozen=True)
 class StrategyParams:
-    fast_ema: int = 20
-    slow_ema: int = 60
-    breakout_window: int = 40
-    atr_stop_mult: float = 2.0
-    take_profit_mult: float = 2.0
-    max_hold_bars: int = 48
+    fast_ema: int = 10
+    slow_ema: int = 80
+    breakout_window: int = 60
+    atr_stop_mult: float = 2.5
+    take_profit_mult: float = 3.5
+    max_hold_bars: int = 24
     atr_window: int = 14
 
 

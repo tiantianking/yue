@@ -13,6 +13,6 @@ strategy:
   fast_ema: [10, 20, 30]
   slow_ema: [50, 60, 80]
   breakout_window: [20, 40, 60]
-  atr_stop_mult: [1.5, 2.0, 2.5, 3.0]
-  take_profit_mult: [1.5, 2.0, 3.0, 4.0]
+  atr_stop_mult: [2.5, 1.5, 2.0, 3.0]
+  take_profit_mult: [3.5, 4.0, 5.0, 6.0]
   max_hold_bars: [24, 48, 72]

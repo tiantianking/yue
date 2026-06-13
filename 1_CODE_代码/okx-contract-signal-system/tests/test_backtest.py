@@ -41,7 +41,7 @@ def test_signal_candidate_prefilter_keeps_all_live_signals() -> None:
         slow_ema=80,
         breakout_window=60,
         atr_stop_mult=1.5,
-        take_profit_mult=2.0,
+        take_profit_mult=3.5,
         max_hold_bars=24,
     )
     features = build_feature_frame(

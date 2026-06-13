@@ -41,7 +41,7 @@ def safe_input(prompt=""):
         return ""
 
 # 添加 src/ 到 Python 路径
-APP_VERSION = "v3.6"
+APP_VERSION = "v3.7"
 _project_root = Path(__file__).parent
 _runtime_root = Path(sys.executable).parent if getattr(sys, "frozen", False) else _project_root
 _src_path = _project_root / "src"
@@ -266,12 +266,13 @@ async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -
                 entry_ref=signal.entry_ref or 0,
                 stop_loss=signal.stop_loss or 0,
                 take_profit=signal.take_profit or 0,
-                qty=0.01,
-                leverage=decision.leverage_used if hasattr(decision, 'leverage_used') else 5.0,
+                qty=getattr(decision, 'qty', None) or 0,
+                leverage=getattr(decision, 'leverage_used', None) or getattr(decision, 'leverage_cap', 0),
                 reason=", ".join(signal.reason_codes) if signal.reason_codes else "",
                 signal_score=getattr(decision, 'signal_score', None),
                 risk_reward_ratio=getattr(decision, 'risk_reward_ratio', None),
                 max_loss_pct=getattr(decision, 'max_loss_pct', None),
+                margin_loss_pct=getattr(decision, 'margin_loss_pct', None),
             )
             logger.info(f"飞书推送: {signal.inst_id} {signal.side}")
         except Exception as e:

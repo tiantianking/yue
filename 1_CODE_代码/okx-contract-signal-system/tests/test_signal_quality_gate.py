@@ -44,6 +44,7 @@ def test_load_selected_strategy_params_reads_frozen_training_output(tmp_path) ->
     assert params.fast_ema == 10
     assert params.slow_ema == 80
     assert params.breakout_window == 60
+    assert params.take_profit_mult == 3.5
 
 
 def test_latest_bar_freshness_blocks_stale_history() -> None:

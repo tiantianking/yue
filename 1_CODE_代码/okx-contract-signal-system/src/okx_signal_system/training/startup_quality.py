@@ -66,7 +66,7 @@ def params_from_dict(data: dict) -> StrategyParams:
         slow_ema=int(data.get("slow_ema", 60)),
         breakout_window=int(data.get("breakout_window", 40)),
         atr_stop_mult=float(data.get("atr_stop_mult", 2.0)),
-        take_profit_mult=float(data.get("take_profit_mult", 2.0)),
+        take_profit_mult=max(float(data.get("take_profit_mult", 3.5)), 3.5),
         max_hold_bars=int(data.get("max_hold_bars", 48)),
         atr_window=int(data.get("atr_window", 14)),
     )
@@ -139,11 +139,11 @@ def _stress_checks(params: StrategyParams) -> dict[str, bool | float]:
         side="long",
         entry_ref=100.0,
         stop_loss=99.2,
-        take_profit=101.8,
+        take_profit=102.8,
         max_hold_bars=params.max_hold_bars,
         reason_codes=("TEST",),
         signal_score=5.5,
-        risk_reward_ratio=2.25,
+        risk_reward_ratio=3.5,
     )
     high = TradeSignal(
         ts=low.ts,
@@ -151,11 +151,11 @@ def _stress_checks(params: StrategyParams) -> dict[str, bool | float]:
         side="long",
         entry_ref=100.0,
         stop_loss=99.2,
-        take_profit=101.8,
+        take_profit=102.8,
         max_hold_bars=params.max_hold_bars,
         reason_codes=("TEST",),
         signal_score=9.4,
-        risk_reward_ratio=2.25,
+        risk_reward_ratio=3.5,
     )
     ledger = Ledger("TEST-USDT-SWAP", init_capital=10000, equity=10000)
     cfg = RiskConfig(max_leverage=10)

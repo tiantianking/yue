@@ -933,12 +933,13 @@ class LiveSignalMonitor:
                                     entry_ref=signal.entry_ref or 0,
                                     stop_loss=signal.stop_loss or 0,
                                     take_profit=signal.take_profit or 0,
-                                    qty=0.01,
+                                    qty=decision.qty or 0,
                                     leverage=decision.leverage_used,
                                     reason=", ".join(signal.reason_codes) if signal.reason_codes else "",
                                     signal_score=decision.signal_score,
                                     risk_reward_ratio=decision.risk_reward_ratio,
                                     max_loss_pct=getattr(decision, 'max_loss_pct', None),
+                                    margin_loss_pct=getattr(decision, 'margin_loss_pct', None),
                                 )
                                 log.info(f"飞书推送(fallback): {inst_id} {signal.side}")
                             except Exception as feishu_err:
