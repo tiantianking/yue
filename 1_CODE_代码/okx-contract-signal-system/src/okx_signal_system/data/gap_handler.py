@@ -23,6 +23,15 @@ GAP_THRESHOLD_HOURS = 6  # 超过6小时视为数据断裂
 MAX_GAP_BARS = 200  # 单次最大回补量
 
 
+def _to_okx_ms(value: datetime | pd.Timestamp) -> str:
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    else:
+        ts = ts.tz_convert("UTC")
+    return str(int(ts.timestamp() * 1000))
+
+
 def summarize_sync_error(error: str) -> str:
     if any(token in error for token in ("NameResolutionError", "Failed to resolve", "getaddrinfo failed")):
         return "OKX REST DNS解析失败：www.okx.com；已继续使用本地历史数据和WebSocket"
@@ -148,36 +157,48 @@ class DataGapHandler:
         """
         inst_id = gap.inst_id
 
-        # 转换时间格式
-        start_iso = gap.start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
-        after_iso = gap.end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
-
         log.info(f"Backfilling {inst_id}: {gap.start_time} -> {gap.end_time}")
 
         try:
-            # OKX API每次最多获取300根K线，分批回补
             all_bars = []
-            current_end = gap.end_time
-            lookback = min(gap.missing_bars, MAX_BACKFILL_GAPS)
+            gap_start = pd.Timestamp(gap.start_time)
+            gap_end = pd.Timestamp(gap.end_time)
+            if gap_start.tzinfo is None:
+                gap_start = gap_start.tz_localize("UTC")
+            else:
+                gap_start = gap_start.tz_convert("UTC")
+            if gap_end.tzinfo is None:
+                gap_end = gap_end.tz_localize("UTC")
+            else:
+                gap_end = gap_end.tz_convert("UTC")
 
-            while lookback > 0:
-                # 计算这批回补的时间范围
-                batch_end = current_end
-                batch_start = current_end - timedelta(hours=min(lookback, MAX_GAP_BARS))
+            cursor_end = gap_end
+            remaining = min(max(gap.missing_bars, 1), MAX_BACKFILL_GAPS)
 
-                # 获取K线数据
-                raw_bars = get_candles(inst_id, bar="1h", limit=MAX_GAP_BARS)
+            while remaining > 0 and cursor_end > gap_start:
+                raw_bars = get_candles(
+                    inst_id,
+                    bar="1h",
+                    limit=min(MAX_GAP_BARS, remaining),
+                    before=_to_okx_ms(gap_start),
+                    after=_to_okx_ms(cursor_end),
+                )
 
                 if not raw_bars:
                     break
 
-                # 转换为DataFrame
                 df = self._parse_candles(raw_bars)
+                df["ts"] = pd.to_datetime(df["ts"], utc=True)
+                df = df[(df["ts"] > gap_start) & (df["ts"] < gap_end)]
+                if df.empty:
+                    break
                 all_bars.append(df)
 
-                # 更新继续回补
-                lookback -= MAX_GAP_BARS
-                current_end = batch_start
+                earliest = df["ts"].min()
+                if earliest >= cursor_end:
+                    break
+                cursor_end = earliest
+                remaining -= len(df)
 
             if not all_bars:
                 return None

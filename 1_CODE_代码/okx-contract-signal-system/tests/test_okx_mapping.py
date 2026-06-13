@@ -43,5 +43,7 @@ def test_get_candles_normalizes_one_hour_bar(monkeypatch) -> None:
         return {"code": "0", "data": []}
 
     monkeypatch.setattr(okx, "_request", fake_request)
-    okx.get_candles("BTC-USDT-SWAP", bar="1h")
+    okx.get_candles("BTC-USDT-SWAP", bar="1h", before="1000", after="2000")
     assert captured["bar"] == "1H"
+    assert captured["before"] == "1000"
+    assert captured["after"] == "2000"

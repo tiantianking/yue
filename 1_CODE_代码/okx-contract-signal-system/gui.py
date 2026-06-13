@@ -64,7 +64,7 @@ class OKXSignalGUI:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("OKX 信号系统 v3.5")
+        self.root.title("OKX 信号系统 v3.6")
         self.root.geometry("1000x700")
         
         # 设置窗口图标（如果存在）

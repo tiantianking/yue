@@ -1,6 +1,6 @@
 import pandas as pd
 
-from okx_signal_system.data.gap_handler import DataGapHandler, summarize_sync_error
+from okx_signal_system.data.gap_handler import DataGap, DataGapHandler, summarize_sync_error
 from okx_signal_system.data.loader import closed_bars, file_symbol_to_inst_id, load_symbol_file
 from okx_signal_system.data.quality import audit_symbol
 from okx_signal_system.exchange.realtime import RealtimeDataStore
@@ -83,6 +83,34 @@ def test_gap_sync_stops_batch_after_rest_unavailable(tmp_path, monkeypatch) -> N
     assert not results["BTC-USDT-SWAP"].success
     assert not results["ETH-USDT-SWAP"].success
     assert "dns unavailable" in results["ETH-USDT-SWAP"].errors[0]
+
+
+def test_backfill_uses_detected_gap_boundaries(tmp_path, monkeypatch) -> None:
+    calls = []
+
+    def fake_get_candles(inst_id, bar, limit, *, before=None, after=None):
+        calls.append({"inst_id": inst_id, "bar": bar, "limit": limit, "before": before, "after": after})
+        return [
+            ["1769907600000", "10", "11", "9", "10.5", "1", "10", "10", "1"],
+            ["1769911200000", "11", "12", "10", "11.5", "1", "11", "11", "1"],
+        ]
+
+    monkeypatch.setattr("okx_signal_system.data.gap_handler.get_candles", fake_get_candles)
+    handler = DataGapHandler(tmp_path)
+    gap = DataGap(
+        inst_id="ETC-USDT-SWAP",
+        start_time=pd.Timestamp("2026-02-01T00:00:00Z").to_pydatetime(),
+        end_time=pd.Timestamp("2026-02-01T03:00:00Z").to_pydatetime(),
+        missing_bars=3,
+        severity="moderate",
+    )
+
+    frame = handler.backfill_gap(gap)
+
+    assert frame is not None
+    assert calls[0]["before"] == "1769904000000"
+    assert calls[0]["after"] == "1769914800000"
+    assert list(frame["ts"].dt.hour) == [1, 2]
 
 
 def test_sync_error_summary_shortens_dns_errors() -> None:

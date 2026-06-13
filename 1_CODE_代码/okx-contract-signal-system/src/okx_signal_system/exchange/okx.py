@@ -263,12 +263,24 @@ def get_ticker(inst_id: str) -> dict[str, Any]:
     }
 
 
-def get_candles(inst_id: str, bar: str = "1h", limit: int = 100) -> list[list[Any]]:
+def get_candles(
+    inst_id: str,
+    bar: str = "1h",
+    limit: int = 100,
+    *,
+    before: str | int | None = None,
+    after: str | int | None = None,
+) -> list[list[Any]]:
     okx_bar = "1H" if bar == "1h" else bar
+    params = {"instId": inst_id, "bar": okx_bar, "limit": str(limit)}
+    if before is not None:
+        params["before"] = str(before)
+    if after is not None:
+        params["after"] = str(after)
     result = _request(
         "GET",
         "/api/v5/market/history-candles",
-        {"instId": inst_id, "bar": okx_bar, "limit": str(limit)},
+        params,
     )
     return result.get("data", [])
 
