@@ -18,25 +18,8 @@ def ada_frame():
     return load_symbol_file(find_lightweight_history("okx_1h_extended") / "ADA_USDT_USDT_1h.parquet").frame.tail(2500)
 
 
-def test_train_valid_split_preserves_order() -> None:
-    train, valid = split_train_valid(btc_frame(), valid_fraction=0.25)
-    assert len(train) > len(valid)
-    assert train["ts"].max() < valid["ts"].min()
-
-
-def test_run_backtest_returns_trade_table() -> None:
-    trades = run_backtest(btc_frame(), inst_id="BTC-USDT-SWAP")
-    assert {"entry_time", "exit_time", "side", "net_pnl", "costs", "exit_reason"}.issubset(trades.columns)
-
-
-def test_summarize_trades_has_required_metrics() -> None:
-    trades = run_backtest(btc_frame(), inst_id="BTC-USDT-SWAP")
-    summary = summarize_trades(trades)
-    assert {"total_return", "profit_factor", "payoff_ratio", "max_drawdown", "win_rate", "total_trades", "status"}.issubset(summary)
-
-
-def test_signal_candidate_prefilter_keeps_all_live_signals() -> None:
-    params = StrategyParams(
+def sample_params() -> StrategyParams:
+    return StrategyParams(
         fast_ema=10,
         slow_ema=80,
         breakout_window=60,
@@ -44,6 +27,27 @@ def test_signal_candidate_prefilter_keeps_all_live_signals() -> None:
         take_profit_mult=3.5,
         max_hold_bars=24,
     )
+
+
+def test_train_valid_split_preserves_order() -> None:
+    train, valid = split_train_valid(btc_frame(), valid_fraction=0.25)
+    assert len(train) > len(valid)
+    assert train["ts"].max() < valid["ts"].min()
+
+
+def test_run_backtest_returns_trade_table() -> None:
+    trades = run_backtest(btc_frame(), inst_id="BTC-USDT-SWAP", params=sample_params())
+    assert {"entry_time", "exit_time", "side", "net_pnl", "costs", "exit_reason"}.issubset(trades.columns)
+
+
+def test_summarize_trades_has_required_metrics() -> None:
+    trades = run_backtest(btc_frame(), inst_id="BTC-USDT-SWAP", params=sample_params())
+    summary = summarize_trades(trades)
+    assert {"total_return", "profit_factor", "payoff_ratio", "max_drawdown", "win_rate", "total_trades", "status"}.issubset(summary)
+
+
+def test_signal_candidate_prefilter_keeps_all_live_signals() -> None:
+    params = sample_params()
     features = build_feature_frame(
         ada_frame(),
         fast_ema=params.fast_ema,

@@ -37,7 +37,7 @@ def file_timeframe(path: Path, default: str = "1h") -> str:
     return normalize_timeframe(default)
 
 
-def list_parquet_files(dataset: str = "okx_1h_extended") -> list[Path]:
+def list_parquet_files(dataset: str = "okx_15m_extended") -> list[Path]:
     root = find_lightweight_history(dataset)
     return sorted(root.glob("*.parquet"))
 
@@ -72,7 +72,7 @@ def load_symbol_file(path: Path) -> SymbolData:
     return SymbolData(inst_id=inst_id, source_path=path, frame=frame)
 
 
-def load_all_symbols(dataset: str = "okx_1h_extended") -> list[SymbolData]:
+def load_all_symbols(dataset: str = "okx_15m_extended") -> list[SymbolData]:
     return [load_symbol_file(path) for path in list_parquet_files(dataset)]
 
 

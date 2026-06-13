@@ -83,12 +83,12 @@ def audit_symbol(data: SymbolData, *, expected_freq: str = "1h") -> QualityResul
     )
 
 
-def audit_dataset(dataset: str = "okx_1h_extended", *, expected_freq: str = "auto") -> pd.DataFrame:
+def audit_dataset(dataset: str = "okx_15m_extended", *, expected_freq: str = "auto") -> pd.DataFrame:
     results = [asdict(audit_symbol(symbol_data, expected_freq=expected_freq)) for symbol_data in load_all_symbols(dataset)]
     return pd.DataFrame(results).sort_values("inst_id").reset_index(drop=True)
 
 
-def write_quality_report(output_path: str | Path, dataset: str = "okx_1h_extended", *, expected_freq: str = "auto") -> Path:
+def write_quality_report(output_path: str | Path, dataset: str = "okx_15m_extended", *, expected_freq: str = "auto") -> Path:
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     report = audit_dataset(dataset, expected_freq=expected_freq)

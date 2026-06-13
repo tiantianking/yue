@@ -27,13 +27,17 @@ PERFORMANCE_WINDOW = 50  # 评估窗口
 WEIGHT_PF = 0.6  # 盈亏比权重60%
 WEIGHT_WR = 0.2  # 胜率权重20%
 WEIGHT_RETURN = 0.2  # 收益率权重20%
+TARGET_RR_FLOOR = 6.0
+MIN_FAST_EMA = 120
+MIN_SLOW_EMA = 720
+MAX_HOLD_BARS_CAP = 768
 
 
 def _enforce_target_rr_floor(params: StrategyParams) -> StrategyParams:
-    if params.take_profit_mult >= 3.5:
+    if params.take_profit_mult >= TARGET_RR_FLOOR:
         return params
     data = asdict(params)
-    data["take_profit_mult"] = 3.5
+    data["take_profit_mult"] = TARGET_RR_FLOOR
     return StrategyParams(**data)
 
 
@@ -236,15 +240,15 @@ class OnlineLearningEngine:
         if metrics.profit_factor < 1.0:
             if metrics.win_rate < 0.4:
                 # 胜率低，降低止损，提高盈亏比
-                new_params_dict["atr_stop_mult"] = min(old_params.atr_stop_mult * 1.1, 3.5)
-                new_params_dict["take_profit_mult"] = max(old_params.take_profit_mult * 0.95, 3.5)
+                new_params_dict["atr_stop_mult"] = min(old_params.atr_stop_mult * 1.1, 4.5)
+                new_params_dict["take_profit_mult"] = max(old_params.take_profit_mult * 0.95, TARGET_RR_FLOOR)
             else:
                 # 盈亏比低，增加止盈
-                new_params_dict["take_profit_mult"] = min(old_params.take_profit_mult * 1.1, 5.0)
+                new_params_dict["take_profit_mult"] = min(old_params.take_profit_mult * 1.1, 7.0)
 
         # PF太高但交易数少 -> 增加持仓时间
         if metrics.profit_factor > 1.5 and metrics.total_trades < 15:
-            new_params_dict["max_hold_bars"] = min(old_params.max_hold_bars + 12, 96)
+            new_params_dict["max_hold_bars"] = min(old_params.max_hold_bars + 96, MAX_HOLD_BARS_CAP)
 
         # 回撤太大 -> 收紧止损
         if metrics.max_drawdown > 0.15:
@@ -253,8 +257,8 @@ class OnlineLearningEngine:
         # 趋势跟随 -> 调整EMA周期
         if metrics.win_rate < 0.35 and metrics.profit_factor > 1.2:
             # 低胜率高盈亏比 -> 趋势策略，缩短EMA周期
-            new_params_dict["fast_ema"] = max(old_params.fast_ema - 5, 10)
-            new_params_dict["slow_ema"] = max(old_params.slow_ema - 10, 40)
+            new_params_dict["fast_ema"] = max(old_params.fast_ema - 5, MIN_FAST_EMA)
+            new_params_dict["slow_ema"] = max(old_params.slow_ema - 10, MIN_SLOW_EMA)
 
         # 应用学习率限制调整幅度
         for key in new_params_dict:
@@ -266,7 +270,10 @@ class OnlineLearningEngine:
                     diff = new_val - old_val
                     new_params_dict[key] = old_val + diff * ADAPTATION_LEARNING_RATE
 
-        new_params_dict["take_profit_mult"] = max(float(new_params_dict.get("take_profit_mult", 3.5)), 3.5)
+        new_params_dict["take_profit_mult"] = max(
+            float(new_params_dict.get("take_profit_mult", TARGET_RR_FLOOR)),
+            TARGET_RR_FLOOR,
+        )
         new_params = StrategyParams(**new_params_dict)
 
         # 更新最佳参数

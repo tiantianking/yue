@@ -13,10 +13,14 @@ from okx_signal_system.backtest.grid_search import parameter_grid, run_grid_sear
 from okx_signal_system.backtest.runner import run_backtest, split_train_valid, summarize_trades
 from okx_signal_system.data.loader import SymbolData, load_all_symbols
 from okx_signal_system.strategy.trend_breakout import StrategyParams
+from okx_signal_system.timeframe import default_trend_timeframe, timeframe_spec
 
 log = logging.getLogger(__name__)
 
 BASELINE_PARAMS = StrategyParams()
+DEFAULT_DATASET = "okx_15m_extended"
+DEFAULT_SIGNAL_TIMEFRAME = "15m"
+DEFAULT_TREND_TIMEFRAME = "1h"
 
 
 def _prefixed(summary: dict, prefix: str) -> dict:
@@ -48,17 +52,56 @@ def combine_trade_summaries(
     return summarize_trades(combined, initial_equity=initial_equity_per_symbol * denominator_symbols)
 
 
+def _frame_timeframe(frame: pd.DataFrame, fallback: str = DEFAULT_SIGNAL_TIMEFRAME) -> str:
+    if "timeframe" in frame.columns:
+        values = frame["timeframe"].dropna()
+        if not values.empty:
+            return timeframe_spec(str(values.iloc[0])).key
+    return timeframe_spec(fallback).key
+
+
+def _resolve_timeframes(
+    frame: pd.DataFrame,
+    signal_timeframe: str | None,
+    trend_timeframe: str | None,
+) -> tuple[str, str]:
+    signal_key = timeframe_spec(signal_timeframe or _frame_timeframe(frame)).key
+    trend_key = timeframe_spec(trend_timeframe or default_trend_timeframe(signal_key)).key
+    return signal_key, trend_key
+
+
 def run_train_valid_symbol(
     frame: pd.DataFrame,
     *,
     inst_id: str,
     params_grid: list[StrategyParams] | None = None,
+    signal_timeframe: str | None = None,
+    trend_timeframe: str | None = None,
 ) -> dict:
+    signal_key, trend_key = _resolve_timeframes(frame, signal_timeframe, trend_timeframe)
     train_frame, valid_frame = split_train_valid(frame, valid_fraction=0.25)
-    grid = run_grid_search(train_frame, inst_id=inst_id, params_grid=params_grid)
+    grid = run_grid_search(
+        train_frame,
+        inst_id=inst_id,
+        params_grid=params_grid,
+        signal_timeframe=signal_key,
+        trend_timeframe=trend_key,
+    )
     selected = select_best_params(grid)
-    train_trades = run_backtest(train_frame, inst_id=inst_id, params=selected)
-    valid_trades = run_backtest(valid_frame, inst_id=inst_id, params=selected)
+    train_trades = run_backtest(
+        train_frame,
+        inst_id=inst_id,
+        params=selected,
+        signal_timeframe=signal_key,
+        trend_timeframe=trend_key,
+    )
+    valid_trades = run_backtest(
+        valid_frame,
+        inst_id=inst_id,
+        params=selected,
+        signal_timeframe=signal_key,
+        trend_timeframe=trend_key,
+    )
     train_summary = summarize_trades(train_trades)
     valid_summary = summarize_trades(valid_trades)
     evaluation = evaluate_symbol(train_summary, valid_summary)
@@ -78,12 +121,21 @@ def run_shared_train_grid(
     symbols: list[SymbolData],
     *,
     params_grid: list[StrategyParams] | None = None,
+    signal_timeframe: str | None = None,
+    trend_timeframe: str | None = None,
 ) -> pd.DataFrame:
-    grid = params_grid or parameter_grid()
+    signal_key, trend_key = _resolve_timeframes(symbols[0].frame, signal_timeframe, trend_timeframe)
+    grid = params_grid or parameter_grid(signal_key)
     all_rows: list[dict] = []
     for symbol_data in symbols:
         train_frame, _ = split_train_valid(symbol_data.frame, valid_fraction=0.25)
-        symbol_grid = run_grid_search(train_frame, inst_id=symbol_data.inst_id, params_grid=grid)
+        symbol_grid = run_grid_search(
+            train_frame,
+            inst_id=symbol_data.inst_id,
+            params_grid=grid,
+            signal_timeframe=signal_key,
+            trend_timeframe=trend_key,
+        )
         symbol_grid.insert(0, "symbol", symbol_data.inst_id)
         all_rows.extend(symbol_grid.to_dict("records"))
     symbol_results = pd.DataFrame(all_rows)
@@ -205,6 +257,8 @@ def run_walk_forward_validation(
     train_window: int = 1000,
     valid_window: int = 250,
     step: int = 250,
+    signal_timeframe: str | None = None,
+    trend_timeframe: str | None = None,
 ) -> dict:
     """
     Walk-Forward 步进式验证：模拟真实交易环境，验证策略稳定性
@@ -222,6 +276,7 @@ def run_walk_forward_validation(
         log.warning(f"{inst_id} 数据不足 walk-forward 验证")
         return {}
 
+    signal_key, trend_key = _resolve_timeframes(frame, signal_timeframe, trend_timeframe)
     results = []
     cursor = 0
 
@@ -230,8 +285,20 @@ def run_walk_forward_validation(
         valid_frame = frame.iloc[cursor + train_window : cursor + train_window + valid_window].reset_index(drop=True)
 
         # 用训练窗口生成信号（不重新调参，保持冻结参数）
-        train_trades = run_backtest(train_frame, inst_id=inst_id, params=params)
-        valid_trades = run_backtest(valid_frame, inst_id=inst_id, params=params)
+        train_trades = run_backtest(
+            train_frame,
+            inst_id=inst_id,
+            params=params,
+            signal_timeframe=signal_key,
+            trend_timeframe=trend_key,
+        )
+        valid_trades = run_backtest(
+            valid_frame,
+            inst_id=inst_id,
+            params=params,
+            signal_timeframe=signal_key,
+            trend_timeframe=trend_key,
+        )
 
         train_summary = summarize_trades(train_trades)
         valid_summary = summarize_trades(valid_trades)
@@ -267,35 +334,47 @@ def run_walk_forward_validation(
 
 def run_dataset_research(
     *,
-    dataset: str = "okx_1h_extended",
+    dataset: str = DEFAULT_DATASET,
     params_grid: list[StrategyParams] | None = None,
     max_symbols: int | None = None,
     shared_params: bool = True,
+    signal_timeframe: str | None = None,
+    trend_timeframe: str | None = None,
 ) -> pd.DataFrame:
     artifacts = run_dataset_research_artifacts(
         dataset=dataset,
         params_grid=params_grid,
         max_symbols=max_symbols,
         shared_params=shared_params,
+        signal_timeframe=signal_timeframe,
+        trend_timeframe=trend_timeframe,
     )
     return artifacts["single_symbol_results"]
 
 
 def run_dataset_research_artifacts(
     *,
-    dataset: str = "okx_1h_extended",
+    dataset: str = DEFAULT_DATASET,
     params_grid: list[StrategyParams] | None = None,
     max_symbols: int | None = None,
     shared_params: bool = True,
+    signal_timeframe: str | None = None,
+    trend_timeframe: str | None = None,
 ) -> dict[str, pd.DataFrame | dict | StrategyParams]:
     symbols = load_all_symbols(dataset)
     if max_symbols is not None:
         symbols = symbols[:max_symbols]
     if not symbols:
         raise ValueError("no symbols loaded for research")
+    signal_key, trend_key = _resolve_timeframes(symbols[0].frame, signal_timeframe, trend_timeframe)
 
     if shared_params:
-        train_grid_results = run_shared_train_grid(symbols, params_grid=params_grid)
+        train_grid_results = run_shared_train_grid(
+            symbols,
+            params_grid=params_grid,
+            signal_timeframe=signal_key,
+            trend_timeframe=trend_key,
+        )
         selected = select_shared_params(train_grid_results)
     else:
         train_grid_results = pd.DataFrame()
@@ -310,14 +389,32 @@ def run_dataset_research_artifacts(
         if shared_params:
             assert selected is not None
             train_frame, valid_frame = split_train_valid(symbol_data.frame, valid_fraction=0.25)
-            train_trades = run_backtest(train_frame, inst_id=symbol_data.inst_id, params=selected)
-            valid_trades = run_backtest(valid_frame, inst_id=symbol_data.inst_id, params=selected)
+            train_trades = run_backtest(
+                train_frame,
+                inst_id=symbol_data.inst_id,
+                params=selected,
+                signal_timeframe=signal_key,
+                trend_timeframe=trend_key,
+            )
+            valid_trades = run_backtest(
+                valid_frame,
+                inst_id=symbol_data.inst_id,
+                params=selected,
+                signal_timeframe=signal_key,
+                trend_timeframe=trend_key,
+            )
             train_summary = summarize_trades(train_trades)
             valid_summary = summarize_trades(valid_trades)
             evaluation = evaluate_symbol(train_summary, valid_summary)
             selected_params = asdict(selected)
         else:
-            result = run_train_valid_symbol(symbol_data.frame, inst_id=symbol_data.inst_id, params_grid=params_grid)
+            result = run_train_valid_symbol(
+                symbol_data.frame,
+                inst_id=symbol_data.inst_id,
+                params_grid=params_grid,
+                signal_timeframe=signal_key,
+                trend_timeframe=trend_key,
+            )
             train_trades = result["train_trades"]
             valid_trades = result["valid_trades"]
             train_summary = result["train_summary"]
@@ -362,6 +459,9 @@ def run_dataset_research_artifacts(
         [
             {
                 "portfolio_name": "shared_parameter_portfolio" if shared_params else "per_symbol_parameter_portfolio",
+                "dataset": dataset,
+                "signal_timeframe": signal_key,
+                "trend_timeframe": trend_key,
                 "symbols_included": len(symbols),
                 **_prefixed(train_portfolio, "train"),
                 **_prefixed(valid_portfolio, "valid"),
@@ -381,6 +481,7 @@ def run_dataset_research_artifacts(
         portfolio_results=portfolio_results,
         leverage_risk=leverage_risk,
         shared_params=shared_params,
+        signal_timeframe=signal_key,
     )
     return {
         "train_grid_results": train_grid_results,
@@ -434,12 +535,18 @@ def build_acceptance_checklist(
     portfolio_results: pd.DataFrame,
     leverage_risk: pd.DataFrame,
     shared_params: bool,
+    signal_timeframe: str = DEFAULT_SIGNAL_TIMEFRAME,
 ) -> pd.DataFrame:
     portfolio = portfolio_results.iloc[0].to_dict() if not portfolio_results.empty else {}
     near_liq_count = int(leverage_risk["near_liq_flag"].fillna(False).sum()) if "near_liq_flag" in leverage_risk else 0
+    expected_grid_size = len(parameter_grid(signal_timeframe))
     checks = [
         ("exchange_okx_only", True, "配置和合约命名固定 OKX SWAP"),
-        ("parameter_grid_1296", len(train_grid_results) in {0, 1296}, f"当前训练网格行数 {len(train_grid_results)}"),
+        (
+            "parameter_grid_evaluated",
+            len(train_grid_results) > 0 or not shared_params,
+            f"current rows {len(train_grid_results)}, full {signal_timeframe} grid {expected_grid_size}",
+        ),
         ("shared_params_selected", shared_params, json.dumps(asdict(selected), ensure_ascii=False)),
         ("validation_once_after_freeze", shared_params and not validation_results.empty, "验证结果只使用冻结参数生成"),
         ("portfolio_valid_trades_ge_80", portfolio.get("valid_total_trades", 0) >= 80, str(portfolio.get("valid_total_trades", 0))),

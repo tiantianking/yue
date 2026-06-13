@@ -13,14 +13,21 @@ from okx_signal_system.paths import find_lightweight_history
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", default="okx_1h_extended")
-    parser.add_argument("--symbol-file", default="BTC_USDT_USDT_1h.parquet")
+    parser.add_argument("--dataset", default="okx_15m_extended")
+    parser.add_argument("--symbol-file", default="BTC_USDT_USDT_15m.parquet")
     parser.add_argument("--inst-id", default="BTC-USDT-SWAP")
+    parser.add_argument("--signal-timeframe", default="15m")
+    parser.add_argument("--trend-timeframe", default="1h")
     args = parser.parse_args()
 
     root = find_lightweight_history(args.dataset)
     data = load_symbol_file(root / args.symbol_file)
-    trades = run_backtest(data.frame, inst_id=args.inst_id)
+    trades = run_backtest(
+        data.frame,
+        inst_id=args.inst_id,
+        signal_timeframe=args.signal_timeframe,
+        trend_timeframe=args.trend_timeframe,
+    )
     paths = project_paths()
     paths.output_dir.mkdir(parents=True, exist_ok=True)
     trades_path = paths.output_dir / "sample_trades.csv"

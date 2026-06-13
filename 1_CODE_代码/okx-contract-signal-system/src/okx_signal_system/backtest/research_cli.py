@@ -9,15 +9,17 @@ from okx_signal_system.strategy.trend_breakout import StrategyParams
 
 def smoke_grid() -> list[StrategyParams]:
     return [
-        StrategyParams(fast_ema=10, slow_ema=50, breakout_window=20, atr_stop_mult=1.5, take_profit_mult=3.5, max_hold_bars=24),
-        StrategyParams(fast_ema=20, slow_ema=60, breakout_window=40, atr_stop_mult=2.0, take_profit_mult=4.0, max_hold_bars=48),
-        StrategyParams(fast_ema=30, slow_ema=80, breakout_window=60, atr_stop_mult=3.0, take_profit_mult=5.0, max_hold_bars=72),
+        StrategyParams(fast_ema=96, slow_ema=576, breakout_window=288, atr_stop_mult=4.0, take_profit_mult=6.0, max_hold_bars=576),
+        StrategyParams(fast_ema=120, slow_ema=720, breakout_window=384, atr_stop_mult=4.0, take_profit_mult=6.0, max_hold_bars=768),
+        StrategyParams(fast_ema=120, slow_ema=960, breakout_window=480, atr_stop_mult=4.5, take_profit_mult=7.0, max_hold_bars=768),
     ]
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", default="okx_1h_extended")
+    parser.add_argument("--dataset", default="okx_15m_extended")
+    parser.add_argument("--signal-timeframe", default="15m")
+    parser.add_argument("--trend-timeframe", default="1h")
     parser.add_argument("--max-symbols", type=int, default=3)
     parser.add_argument("--full-grid", action="store_true")
     parser.add_argument("--per-symbol-params", action="store_true")
@@ -28,6 +30,8 @@ def main() -> None:
         params_grid=params_grid,
         max_symbols=args.max_symbols,
         shared_params=not args.per_symbol_params,
+        signal_timeframe=args.signal_timeframe,
+        trend_timeframe=args.trend_timeframe,
     )
     write_research_artifacts(artifacts, project_paths().output_dir)
 

@@ -17,19 +17,36 @@ from okx_signal_system.paths import find_lightweight_history
 from okx_signal_system.notification import feishu
 from okx_signal_system.risk.model import Ledger, RiskConfig, validate_signal
 from okx_signal_system.strategy.trend_breakout import StrategyParams, generate_signals, build_signal
+from okx_signal_system.timeframe import timeframe_spec
 
 log = logging.getLogger(__name__)
 
 SCAN_INTERVAL_SECONDS = 15 * 60  # 15分钟
 STATUS_INTERVAL_SECONDS = 30 * 60  # 30分钟状态推送
 GLOBAL_INITIAL_EQUITY = 10000.0  # 总初始本金
+DEFAULT_DATASET = "okx_15m_extended"
+DEFAULT_SIGNAL_TIMEFRAME = "15m"
+DEFAULT_TREND_TIMEFRAME = "1h"
 
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def load_symbols_for_scan(dataset: str = "okx_1h_extended") -> list[str]:
+def _data_defaults() -> tuple[str, str, str]:
+    try:
+        cfg = load_config("base.yaml")
+        data_cfg = cfg.get("data", {})
+        dataset = str(data_cfg.get("historical_dataset", DEFAULT_DATASET))
+        signal_timeframe = timeframe_spec(data_cfg.get("timeframe", DEFAULT_SIGNAL_TIMEFRAME)).key
+        trend_timeframe = timeframe_spec(data_cfg.get("trend_timeframe", DEFAULT_TREND_TIMEFRAME)).key
+        return dataset, signal_timeframe, trend_timeframe
+    except Exception:
+        log.warning("failed to load data defaults; using 15m defaults")
+        return DEFAULT_DATASET, DEFAULT_SIGNAL_TIMEFRAME, DEFAULT_TREND_TIMEFRAME
+
+
+def load_symbols_for_scan(dataset: str = DEFAULT_DATASET) -> list[str]:
     """加载配置中指定的币种列表"""
     try:
         cfg = load_config("base.yaml")
@@ -42,29 +59,37 @@ def load_symbols_for_scan(dataset: str = "okx_1h_extended") -> list[str]:
 def symbol_to_inst_id(symbol: str) -> str:
     """将 BTC-USDT-SWAP 转换为 BTC_USDT_USDT（匹配实际文件名）"""
     symbol_clean = symbol.replace("-", "_").replace("_SWAP", "")
-    # 实际文件名格式是 BTC_USDT_USDT_1h.parquet，需要两个 USDT
+    # 实际文件名格式是 BTC_USDT_USDT_<timeframe>.parquet，需要两个 USDT
     if symbol_clean.count("USDT") == 1:
         symbol_clean = symbol_clean + "_USDT"
     return symbol_clean
 
 
-def symbol_to_parquet_filename(symbol: str) -> str:
-    """将 BTC-USDT-SWAP 转换为 BTC_USDT_USDT_1h.parquet"""
-    return f"{symbol_to_inst_id(symbol)}_1h.parquet"
+def symbol_to_parquet_filename(symbol: str, timeframe: str = DEFAULT_SIGNAL_TIMEFRAME) -> str:
+    """将 BTC-USDT-SWAP 转换为 BTC_USDT_USDT_<timeframe>.parquet"""
+    return f"{symbol_to_inst_id(symbol)}_{timeframe_spec(timeframe).file_suffix}.parquet"
 
 
-def inst_id_to_parquet_filename(inst_id: str) -> str:
-    """将 BTC_USDT_USDT 转换为 BTC_USDT_USDT_1h.parquet"""
-    return f"{inst_id}_1h.parquet"
+def inst_id_to_parquet_filename(inst_id: str, timeframe: str = DEFAULT_SIGNAL_TIMEFRAME) -> str:
+    """将 BTC_USDT_USDT 转换为 BTC_USDT_USDT_<timeframe>.parquet"""
+    return f"{inst_id}_{timeframe_spec(timeframe).file_suffix}.parquet"
 
 
 def scan_single_symbol(
-    inst_id: str, ledger: Ledger, params: StrategyParams
+    inst_id: str,
+    ledger: Ledger,
+    params: StrategyParams,
+    *,
+    dataset: str = DEFAULT_DATASET,
+    signal_timeframe: str = DEFAULT_SIGNAL_TIMEFRAME,
+    trend_timeframe: str = DEFAULT_TREND_TIMEFRAME,
 ) -> dict | None:
     """扫描单个币种，返回信号或None"""
     try:
-        root = find_lightweight_history("okx_1h_extended")
-        fname = inst_id_to_parquet_filename(inst_id)
+        signal_timeframe = timeframe_spec(signal_timeframe).key
+        trend_timeframe = timeframe_spec(trend_timeframe).key
+        root = find_lightweight_history(dataset)
+        fname = inst_id_to_parquet_filename(inst_id, signal_timeframe)
         path = root / fname
         if not path.exists():
             log.warning(f"数据文件不存在: {path}")
@@ -80,6 +105,8 @@ def scan_single_symbol(
             slow_ema=params.slow_ema,
             breakout_window=params.breakout_window,
             atr_window=params.atr_window,
+            signal_timeframe=signal_timeframe,
+            trend_timeframe=trend_timeframe,
         )
         signals = generate_signals(features, inst_id=inst_id, params=params)
         accepted = [s for s in signals if s.accepted]
@@ -99,12 +126,27 @@ def scan_single_symbol(
         return None
 
 
-def run_scan_cycle(symbols: list[str], ledger: Ledger, params: StrategyParams) -> tuple[list[dict], Ledger]:
+def run_scan_cycle(
+    symbols: list[str],
+    ledger: Ledger,
+    params: StrategyParams,
+    *,
+    dataset: str = DEFAULT_DATASET,
+    signal_timeframe: str = DEFAULT_SIGNAL_TIMEFRAME,
+    trend_timeframe: str = DEFAULT_TREND_TIMEFRAME,
+) -> tuple[list[dict], Ledger]:
     """执行一次完整扫描，返回信号列表和更新后的账本"""
     results: list[dict] = []
     for symbol in symbols:
-        inst_id = symbol_to_parquet_filename(symbol).replace("_1h.parquet", "")
-        result = scan_single_symbol(inst_id, ledger, params)
+        inst_id = symbol_to_inst_id(symbol)
+        result = scan_single_symbol(
+            inst_id,
+            ledger,
+            params,
+            dataset=dataset,
+            signal_timeframe=signal_timeframe,
+            trend_timeframe=trend_timeframe,
+        )
         if result and result["decision"].accepted:
             results.append(result)
     if not results:
@@ -152,12 +194,17 @@ class SignalScheduler:
 
     def __init__(
         self,
-        dataset: str = "okx_1h_extended",
+        dataset: str | None = None,
         params: StrategyParams | None = None,
+        signal_timeframe: str | None = None,
+        trend_timeframe: str | None = None,
         status_callback=None,
     ):
-        self.dataset = dataset
+        default_dataset, default_signal_timeframe, default_trend_timeframe = _data_defaults()
+        self.dataset = dataset or default_dataset
         self.params = params or StrategyParams()
+        self.signal_timeframe = timeframe_spec(signal_timeframe or default_signal_timeframe).key
+        self.trend_timeframe = timeframe_spec(trend_timeframe or default_trend_timeframe).key
         self.status_callback = status_callback
         self._stop_event = Event()
         self._cycle = 0
@@ -177,7 +224,14 @@ class SignalScheduler:
     def run_cycle(self) -> list[dict]:
         self._cycle += 1
         log.info(f"=== 扫描周期 #{self._cycle} ===")
-        results, self._ledger = run_scan_cycle(self._symbols, self._ledger, self.params)
+        results, self._ledger = run_scan_cycle(
+            self._symbols,
+            self._ledger,
+            self.params,
+            dataset=self.dataset,
+            signal_timeframe=self.signal_timeframe,
+            trend_timeframe=self.trend_timeframe,
+        )
 
         # 推送信号到飞书
         if results:
@@ -217,7 +271,14 @@ class SignalScheduler:
 
     def run_forever(self):
         """主循环：每15分钟扫描一次，24小时运行"""
-        log.info(f"调度器启动，监控 {len(self._symbols)} 个币种，每 {SCAN_INTERVAL_SECONDS // 60} 分钟扫描")
+        log.info(
+            "scheduler started: dataset=%s signal_tf=%s trend_tf=%s symbols=%s interval=%sm",
+            self.dataset,
+            self.signal_timeframe,
+            self.trend_timeframe,
+            len(self._symbols),
+            SCAN_INTERVAL_SECONDS // 60,
+        )
         while not self._stop_event.is_set():
             try:
                 self.run_cycle()
@@ -239,7 +300,9 @@ def run_live_scan():
     import argparse
 
     parser = argparse.ArgumentParser(description="OKX信号系统实时扫描")
-    parser.add_argument("--dataset", default="okx_1h_extended", help="数据集名称")
+    parser.add_argument("--dataset", default=None, help="数据集名称")
+    parser.add_argument("--signal-timeframe", default=None)
+    parser.add_argument("--trend-timeframe", default=None)
     parser.add_argument("--once", action="store_true", help="单次扫描")
     args = parser.parse_args()
 
@@ -248,7 +311,11 @@ def run_live_scan():
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    scheduler = SignalScheduler(dataset=args.dataset)
+    scheduler = SignalScheduler(
+        dataset=args.dataset,
+        signal_timeframe=args.signal_timeframe,
+        trend_timeframe=args.trend_timeframe,
+    )
     if args.once:
         results = scheduler.run_once()
         if results:

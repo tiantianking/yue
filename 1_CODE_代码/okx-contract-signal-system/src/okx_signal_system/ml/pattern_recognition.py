@@ -44,7 +44,7 @@ class DiscoveredPattern:
 class PatternRecognizer:
     def __init__(self, data_dir: Path | str | None = None):
         if data_dir is None:
-            data_dir = find_lightweight_history("okx_1h_extended").parent / "pattern_recognition"
+            data_dir = find_lightweight_history("okx_15m_extended").parent / "pattern_recognition"
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self._contexts: list[TradeContext] = []

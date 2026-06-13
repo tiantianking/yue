@@ -26,12 +26,12 @@ EPSILON_MIN = 0.05  # 最小探索率
 EPSILON_DECAY = 0.995  # 探索率衰减
 
 # 参数离散化空间
-FAST_EMA_VALUES = [10, 15, 20, 25, 30]
-SLOW_EMA_VALUES = [40, 50, 60, 70, 80]
-BREAKOUT_VALUES = [20, 30, 40, 50, 60]
-ATR_STOP_VALUES = [1.5, 2.0, 2.5, 3.0]
-TAKE_PROFIT_VALUES = [3.5, 4.0, 5.0, 6.0]
-MAX_HOLD_VALUES = [24, 36, 48, 60, 72]
+FAST_EMA_VALUES = [96, 120, 144]
+SLOW_EMA_VALUES = [576, 720, 960]
+BREAKOUT_VALUES = [288, 384, 480]
+ATR_STOP_VALUES = [4.0, 4.5]
+TAKE_PROFIT_VALUES = [6.0, 7.0]
+MAX_HOLD_VALUES = [576, 768]
 
 
 @dataclass
@@ -201,7 +201,7 @@ class RLParameterOptimizer:
         """将动作应用到参数"""
         params_dict = asdict(params)
         params_dict[action.param_to_change] = action.new_value
-        params_dict["take_profit_mult"] = max(float(params_dict.get("take_profit_mult", 3.5)), 3.5)
+        params_dict["take_profit_mult"] = max(float(params_dict.get("take_profit_mult", 6.0)), 6.0)
         return StrategyParams(**params_dict)
 
     def get_best_action(self, state: State) -> Action | None:

@@ -14,7 +14,7 @@ from okx_signal_system.config import load_config, project_paths
 from okx_signal_system.features.indicators import prior_breakout_levels, resample_trend
 from okx_signal_system.risk.model import Ledger, RiskConfig, smart_leverage_for_signal, validate_signal
 from okx_signal_system.strategy.trend_breakout import StrategyParams, TradeSignal
-from okx_signal_system.timeframe import default_trend_timeframe, ratio_bars, timeframe_spec
+from okx_signal_system.timeframe import bars_for_hours, default_trend_timeframe, ratio_bars, timeframe_spec
 
 if TYPE_CHECKING:
     from okx_signal_system.data.loader import SymbolData
@@ -66,12 +66,12 @@ class StartupQualityReport:
 
 def params_from_dict(data: dict) -> StrategyParams:
     return StrategyParams(
-        fast_ema=int(data.get("fast_ema", 12)),
-        slow_ema=int(data.get("slow_ema", 64)),
-        breakout_window=int(data.get("breakout_window", 32)),
-        atr_stop_mult=float(data.get("atr_stop_mult", 2.4)),
-        take_profit_mult=max(float(data.get("take_profit_mult", 4.0)), 3.5),
-        max_hold_bars=int(data.get("max_hold_bars", 96)),
+        fast_ema=int(data.get("fast_ema", 120)),
+        slow_ema=int(data.get("slow_ema", 720)),
+        breakout_window=int(data.get("breakout_window", 384)),
+        atr_stop_mult=float(data.get("atr_stop_mult", 4.0)),
+        take_profit_mult=max(float(data.get("take_profit_mult", 6.0)), 3.5),
+        max_hold_bars=int(data.get("max_hold_bars", 768)),
         atr_window=int(data.get("atr_window", 14)),
     )
 
@@ -115,7 +115,7 @@ def _min_history_bars(params: StrategyParams, *, signal_timeframe: str, trend_ti
     )
 
 
-def _anti_future_checks(*, signal_timeframe: str = "1h", trend_timeframe: str | None = None) -> dict[str, bool]:
+def _anti_future_checks(*, signal_timeframe: str = "15m", trend_timeframe: str | None = None) -> dict[str, bool]:
     levels = prior_breakout_levels(pd.DataFrame({"high": [10, 11, 12, 50], "low": [8, 7, 6, 1]}), 3)
     breakout_ok = bool(levels.loc[3, "breakout_high"] == 12 and levels.loc[3, "breakout_low"] == 6)
 
@@ -211,15 +211,17 @@ def run_startup_quality_gate(
     signal_timeframe: str | None = None,
     trend_timeframe: str | None = None,
     output_dir: str | Path | None = None,
-    max_symbols: int | None = 6,
-    history_tail: int = 2500,
+    max_symbols: int | None = None,
+    history_tail: int | None = None,
 ) -> StartupQualityReport:
     config = load_config("base.yaml")
     data_cfg = config.get("data", {})
-    dataset = dataset or data_cfg.get("historical_dataset", "okx_1h_extended")
+    dataset = dataset or data_cfg.get("historical_dataset", "okx_15m_extended")
     signal_timeframe = timeframe_spec(signal_timeframe or data_cfg.get("timeframe", "1h")).key
     trend_timeframe = trend_timeframe or data_cfg.get("trend_timeframe") or default_trend_timeframe(signal_timeframe)
     trend_timeframe = timeframe_spec(trend_timeframe).key
+    if history_tail is None:
+        history_tail = bars_for_hours(24 * 365 * 3, signal_timeframe)
     params = load_selected_strategy_params(output_dir)
     from okx_signal_system.data.loader import load_all_symbols
     all_symbols = _select_symbols(load_all_symbols(dataset), symbols, max_symbols)

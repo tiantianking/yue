@@ -40,6 +40,7 @@ from okx_signal_system.notify.feishu import feishu_send_signal_card, send_text
 from okx_signal_system.data.gap_handler import IncrementalSyncer
 from okx_signal_system.paths import find_lightweight_history
 from okx_signal_system.strategy.trend_breakout import StrategyParams, generate_signals, build_signal
+from okx_signal_system.timeframe import timeframe_spec
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +60,10 @@ class TradingBrain:
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
         self.config = config or {}
+        data_cfg = self.config.get("data", {}) if isinstance(self.config, dict) else {}
+        self.dataset = data_cfg.get("historical_dataset", "okx_15m_extended")
+        self.signal_timeframe = timeframe_spec(data_cfg.get("timeframe", "15m")).key
+        self.trend_timeframe = timeframe_spec(data_cfg.get("trend_timeframe", "1h")).key
 
         # 初始化所有模块
         self.online_learning = create_learning_engine(self.data_dir / "online_learning")
@@ -75,13 +80,13 @@ class TradingBrain:
         )
 
         # 实时API
-        api_config = self.config.get("api", {})
+        api_config = self.config if "data" in self.config else self.config.get("api", {})
         self.api = create_realtime_api(api_config)
         # 信号执行器（使用 position_monitor 替代）
         self.auto_stop = None  # 延迟初始化
 
         # 增量数据同步器
-        self.syncer = IncrementalSyncer(self.data_dir.parent.parent / "data" / "okx_1h_extended")
+        self.syncer = IncrementalSyncer(timeframe=self.signal_timeframe, dataset=self.dataset)
 
         # 当前参数
         self.current_params = StrategyParams()
@@ -195,8 +200,9 @@ class TradingBrain:
             if inst_id_clean.count("USDT") == 1:
                 inst_id_clean = inst_id_clean + "_USDT"
 
-            fname = f"{inst_id_clean}_1h.parquet"
-            path = find_lightweight_history("okx_1h_extended") / fname
+            suffix = timeframe_spec(self.signal_timeframe).file_suffix
+            fname = f"{inst_id_clean}_{suffix}.parquet"
+            path = find_lightweight_history(self.dataset) / fname
 
             if not path.exists():
                 return None
@@ -208,6 +214,8 @@ class TradingBrain:
                 slow_ema=self.current_params.slow_ema,
                 breakout_window=self.current_params.breakout_window,
                 atr_window=self.current_params.atr_window,
+                signal_timeframe=self.signal_timeframe,
+                trend_timeframe=self.trend_timeframe,
             )
 
             signals = generate_signals(features, inst_id=inst_id, params=self.current_params)

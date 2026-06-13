@@ -60,7 +60,8 @@ def signal_view_model(payload: dict[str, Any]) -> dict[str, Any]:
         tone = "success"
     else:
         headline = "现在不交易"
-        action = "等待下一根已闭合 1h K 线。"
+        tf = payload.get("signal_timeframe") or signal.get("signal_timeframe") or "15m"
+        action = f"等待下一根已闭合 {tf} K 线。"
         tone = "warning"
 
     return {

@@ -10,9 +10,9 @@ risk:
   require_max_hold: true
 
 strategy:
-  fast_ema: [12, 8, 16]
-  slow_ema: [64, 48, 80]
-  breakout_window: [32, 24, 48]
-  atr_stop_mult: [2.4, 2.8, 3.2]
-  take_profit_mult: [4.0, 3.5, 5.0, 6.0]
-  max_hold_bars: [96, 48, 64, 32]
+  fast_ema: [96, 120, 144]
+  slow_ema: [576, 720, 960]
+  breakout_window: [288, 384, 480]
+  atr_stop_mult: [4.0, 4.5]
+  take_profit_mult: [6.0, 7.0]
+  max_hold_bars: [576, 768]

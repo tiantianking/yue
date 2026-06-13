@@ -125,7 +125,7 @@ class RealtimeDataStore:
         self,
         data_dir: Path | None = None,
         *,
-        timeframe: str = "1h",
+        timeframe: str = "15m",
         dataset: str | None = None,
     ):
         self.timeframe = timeframe_spec(timeframe)
@@ -263,7 +263,7 @@ class OKXWebSocketClient:
         on_candle: Callable[[str, dict], None] | None = None,
         on_ticker: Callable[[str, dict], None] | None = None,
         *,
-        timeframe: str = "1h",
+        timeframe: str = "15m",
     ):
         self.timeframe = timeframe_spec(timeframe)
         self._candle_channel = self.timeframe.ws_channel
@@ -477,7 +477,7 @@ class OKXRealtimeAPI:
                 config = {}
         self.config = config or {}
         data_cfg = self.config.get("data", {}) if isinstance(self.config, dict) else {}
-        self.timeframe = timeframe_spec(data_cfg.get("timeframe", "1h"))
+        self.timeframe = timeframe_spec(data_cfg.get("timeframe", "15m"))
         self.trend_timeframe = timeframe_spec(
             data_cfg.get("trend_timeframe") or default_trend_timeframe(self.timeframe.key)
         )

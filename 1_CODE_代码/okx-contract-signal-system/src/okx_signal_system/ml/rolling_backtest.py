@@ -13,18 +13,32 @@ from okx_signal_system.backtest.runner import run_backtest, summarize_trades
 from okx_signal_system.data.loader import file_symbol_to_inst_id, load_symbol_file
 from okx_signal_system.paths import find_lightweight_history
 from okx_signal_system.strategy.trend_breakout import StrategyParams
+from okx_signal_system.timeframe import timeframe_spec
 
 log = logging.getLogger(__name__)
 
 ROLLING_WINDOW_DAYS = 30
 MIN_TRADES_TO_COMPARE = 5
 VALIDATION_INTERVAL_DAYS = 7
+DEFAULT_DATASET = "okx_15m_extended"
+DEFAULT_SIGNAL_TIMEFRAME = "15m"
+DEFAULT_TREND_TIMEFRAME = "1h"
 
 
 class RollingBacktestValidator:
-    def __init__(self, data_dir: Path | str | None = None):
+    def __init__(
+        self,
+        data_dir: Path | str | None = None,
+        *,
+        dataset: str = DEFAULT_DATASET,
+        signal_timeframe: str = DEFAULT_SIGNAL_TIMEFRAME,
+        trend_timeframe: str = DEFAULT_TREND_TIMEFRAME,
+    ):
+        self.dataset = dataset
+        self.signal_timeframe = timeframe_spec(signal_timeframe).key
+        self.trend_timeframe = timeframe_spec(trend_timeframe).key
         if data_dir is None:
-            data_dir = find_lightweight_history("okx_1h_extended").parent / "rolling_backtest"
+            data_dir = find_lightweight_history(dataset).parent / "rolling_backtest"
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.last_backtest_time: str | None = None
@@ -81,9 +95,10 @@ class RollingBacktestValidator:
     ) -> dict:
         current_trades = []
         best_trades = []
-        data_root = find_lightweight_history("okx_1h_extended")
+        data_root = find_lightweight_history(self.dataset)
+        suffix = timeframe_spec(self.signal_timeframe).file_suffix
 
-        for path in sorted(data_root.glob("*_1h.parquet")):
+        for path in sorted(data_root.glob(f"*_{suffix}.parquet")):
             inst_id = file_symbol_to_inst_id(path)
             if symbols and inst_id not in symbols:
                 continue
@@ -95,8 +110,24 @@ class RollingBacktestValidator:
                     frame = frame[pd.to_datetime(frame["ts"], utc=True) >= cutoff]
                 if len(frame) < 100:
                     continue
-                current_trades.append(run_backtest(frame, inst_id=inst_id, params=current_params))
-                best_trades.append(run_backtest(frame, inst_id=inst_id, params=best_params))
+                current_trades.append(
+                    run_backtest(
+                        frame,
+                        inst_id=inst_id,
+                        params=current_params,
+                        signal_timeframe=self.signal_timeframe,
+                        trend_timeframe=self.trend_timeframe,
+                    )
+                )
+                best_trades.append(
+                    run_backtest(
+                        frame,
+                        inst_id=inst_id,
+                        params=best_params,
+                        signal_timeframe=self.signal_timeframe,
+                        trend_timeframe=self.trend_timeframe,
+                    )
+                )
             except Exception as exc:
                 log.debug("Rolling backtest skipped %s: %s", path.name, exc)
 
@@ -118,6 +149,9 @@ class RollingBacktestValidator:
 
         report = {
             "timestamp": self.last_backtest_time,
+            "dataset": self.dataset,
+            "signal_timeframe": self.signal_timeframe,
+            "trend_timeframe": self.trend_timeframe,
             "symbols_tested": len(symbols),
             "window_days": ROLLING_WINDOW_DAYS,
             "current_params_result": current_summary,

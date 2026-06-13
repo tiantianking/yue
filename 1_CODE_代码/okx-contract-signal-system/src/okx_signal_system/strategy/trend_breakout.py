@@ -23,12 +23,12 @@ MIN_REWARD_TO_RISK = 3.5
 
 @dataclass(frozen=True)
 class StrategyParams:
-    fast_ema: int = 12
-    slow_ema: int = 64
-    breakout_window: int = 32
-    atr_stop_mult: float = 2.4
-    take_profit_mult: float = 4.0
-    max_hold_bars: int = 96
+    fast_ema: int = 120
+    slow_ema: int = 720
+    breakout_window: int = 384
+    atr_stop_mult: float = 4.0
+    take_profit_mult: float = 6.0
+    max_hold_bars: int = 768
     atr_window: int = 14
 
 
