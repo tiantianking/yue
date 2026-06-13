@@ -66,6 +66,36 @@ def fetch_recent_from_okx(symbol: str, timeframe: str, limit: int) -> pd.DataFra
     return frame.sort_values("ts").drop_duplicates("ts", keep="last")
 
 
+def read_parquet_tail(path: Path, limit: int) -> pd.DataFrame:
+    try:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        parquet = pq.ParquetFile(path)
+        tables = []
+        rows = 0
+        for idx in range(parquet.num_row_groups - 1, -1, -1):
+            table = parquet.read_row_group(idx)
+            tables.append(table)
+            rows += table.num_rows
+            if rows >= limit:
+                break
+        if not tables:
+            return pd.DataFrame()
+        table = pa.concat_tables(list(reversed(tables)), promote_options="default")
+        return table.to_pandas().tail(limit).copy()
+    except Exception:
+        return pd.read_parquet(path).tail(limit).copy()
+
+
+def needs_recent_refresh(frame: pd.DataFrame, timeframe: str) -> bool:
+    if frame.empty or "ts" not in frame.columns:
+        return True
+    last_ts = pd.to_datetime(frame["ts"], utc=True).max()
+    stale_after = pd.Timedelta(minutes=timeframe_minutes(timeframe) * 3)
+    return pd.Timestamp.now(tz="UTC") - last_ts > stale_after
+
+
 def merge_recent_if_stale(path: Path, frame: pd.DataFrame, symbol: str, timeframe: str, limit: int) -> tuple[pd.DataFrame, str, str | None]:
     if frame.empty or "ts" not in frame.columns:
         try:
@@ -107,8 +137,11 @@ def main() -> None:
     source = "local"
     warning = None
     if path.exists():
-        frame = pd.read_parquet(path).copy()
-        frame, source, warning = merge_recent_if_stale(path, frame, args.symbol, timeframe, limit)
+        tail_limit = min(max(limit, 300), 60000)
+        frame = read_parquet_tail(path, tail_limit)
+        if needs_recent_refresh(frame, timeframe):
+            full_frame = pd.read_parquet(path).copy()
+            frame, source, warning = merge_recent_if_stale(path, full_frame, args.symbol, timeframe, limit)
         frame = frame.tail(limit).copy()
     else:
         try:

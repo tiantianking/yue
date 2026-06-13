@@ -48,6 +48,40 @@ export type LatestSignal = {
   mode?: string;
 };
 
+export type LatestScanStatus = {
+  generated_at?: string;
+  status?: string;
+  error?: string | null;
+  dataset?: string;
+  signal_timeframe?: string;
+  trend_timeframe?: string;
+  push_allowed?: boolean;
+  symbols_checked?: number;
+  ready_count?: number;
+  websocket?: {
+    running?: boolean;
+    degraded?: boolean;
+    reconnect_count?: number;
+    last_error?: string | null;
+  } | null;
+  symbols?: Array<{
+    symbol?: string;
+    reason?: string;
+    risk_reason?: string | null;
+    would_push?: boolean;
+    side?: string | null;
+    kline_time?: string | null;
+    close?: number | null;
+    bias?: string | null;
+    regime?: string | null;
+    raw_score?: number | null;
+    final_score?: number | null;
+    shadow_adjustment?: number | null;
+    breakout_gap_pct?: number | null;
+  }>;
+  last_signal?: LatestSignal | null;
+};
+
 export type BackfillRow = {
   inst_id: string;
   rows_before?: number;
@@ -92,6 +126,7 @@ export type ClosedBackfillStatus = {
 };
 
 export type DailyLearningReviewStatus = {
+  status?: string;
   generated_at?: string;
   next_run_at?: string;
   candidate_gate_passed?: boolean;
@@ -126,6 +161,7 @@ export type DashboardPayload = {
   selected_params: StrategyParams;
   risk_config: Record<string, unknown>;
   latest_signal: LatestSignal | null;
+  latest_scan?: LatestScanStatus | null;
   closed_backfill: ClosedBackfillStatus | null;
   closed_backfills?: Record<string, ClosedBackfillStatus | null>;
   learning_review: DailyLearningReviewStatus | null;

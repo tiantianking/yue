@@ -5,3 +5,6 @@ outputs/closed_kline_backfill_status.json
 outputs/closed_kline_backfill_status_5m.json
 outputs/daily_learning_review.json
 outputs/candidate_params.json
+outputs/latest_signal.json
+outputs/latest_scan_status.json
+outputs/startup_quality_gate.json

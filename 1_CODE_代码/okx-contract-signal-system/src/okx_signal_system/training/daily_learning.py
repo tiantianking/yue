@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import math
+import os
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -57,6 +58,7 @@ class LearningReviewConfig:
     shadow_min_closed_signals: int = 30
     shadow_min_quality_score: float = 70.0
     max_candidate_params: int = 17
+    max_runtime_seconds: float = 300.0
     auto_promote_params: bool = False
     live_param_updates_enabled: bool = False
 
@@ -79,6 +81,7 @@ class LearningReviewConfig:
             shadow_min_closed_signals=int(raw.get("shadow_min_closed_signals", 30)),
             shadow_min_quality_score=float(raw.get("shadow_min_quality_score", 70.0)),
             max_candidate_params=int(raw.get("max_candidate_params", 17)),
+            max_runtime_seconds=float(raw.get("max_runtime_seconds", 300.0)),
             auto_promote_params=bool(raw.get("auto_promote_params", False)),
             live_param_updates_enabled=bool(raw.get("live_param_updates_enabled", False)),
         )
@@ -850,10 +853,42 @@ class DailyLearningReviewService:
             config=self.config,
         )
 
+    def _write_service_status(self, status: str, reason: str) -> None:
+        now = datetime.now(timezone.utc)
+        payload = {
+            "status": status,
+            "generated_at": now.isoformat(),
+            "next_run_at": (pd.Timestamp(now) + pd.Timedelta(hours=self.config.review_interval_hours)).isoformat(),
+            "dataset": self.dataset,
+            "signal_timeframe": self.signal_timeframe,
+            "trend_timeframe": self.trend_timeframe,
+            "candidate_gate_passed": False,
+            "auto_promote_enabled": bool(self.config.auto_promote_params and self.config.live_param_updates_enabled),
+            "promotion_allowed": False,
+            "reasons": [reason],
+            "train_grid_meta": {"status": status, "reason": reason},
+        }
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        tmp_path = self.output_path.with_name(f"{self.output_path.stem}.{os.getpid()}.tmp{self.output_path.suffix}")
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.replace(self.output_path)
+
     async def run_forever(self) -> None:
         while True:
             if self.should_run():
-                await asyncio.to_thread(self.run_once)
+                self._write_service_status("running", "daily_review_started")
+                try:
+                    await asyncio.wait_for(
+                        asyncio.to_thread(self.run_once),
+                        timeout=max(30.0, self.config.max_runtime_seconds),
+                    )
+                except asyncio.TimeoutError:
+                    reason = f"daily_review_timeout_after_{int(self.config.max_runtime_seconds)}s"
+                    log.warning(reason)
+                    self._write_service_status("timeout", reason)
+                except Exception as exc:
+                    log.exception("daily learning review failed")
+                    self._write_service_status("failed", str(exc))
             delay = seconds_until_next_review(
                 self.output_path,
                 interval_hours=self.config.review_interval_hours,

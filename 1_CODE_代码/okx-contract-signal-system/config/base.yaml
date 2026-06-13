@@ -60,6 +60,7 @@ learning:
   max_train_valid_pf_ratio: 3.0
   min_profitable_symbol_ratio: 0.35
   max_candidate_params: 17
+  max_runtime_seconds: 300
   auto_promote_params: false
   shadow_score_min_closed_signals: 6
   shadow_min_closed_signals: 30

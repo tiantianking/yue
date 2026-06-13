@@ -51,7 +51,7 @@ const emptyData: DashboardPayload = {
   generated_at: "",
   project_root: "",
   signal_timeframe: "15m",
-  trend_timeframe: "1h",
+  trend_timeframe: "15m",
   dataset: "-",
   symbols: [],
   quality: {
@@ -67,6 +67,7 @@ const emptyData: DashboardPayload = {
   selected_params: {},
   risk_config: {},
   latest_signal: null,
+  latest_scan: null,
   closed_backfill: null,
   closed_backfills: {},
   learning_review: null,
@@ -197,9 +198,16 @@ function SymbolList({
 }
 
 function SignalPanel({ data }: { data: DashboardPayload }) {
+  const scan = data.latest_scan;
   const signal = data.latest_signal?.signal;
   const risk = data.latest_signal?.risk;
   const accepted = Boolean(risk?.accepted);
+  const scanned = scan?.symbols_checked ?? scan?.symbols?.length ?? 0;
+  const ready = scan?.ready_count ?? scan?.symbols?.filter((item) => item.would_push).length ?? 0;
+  const scanAge = minutesSince(scan?.generated_at);
+  const scanFresh = typeof scanAge === "number" && scanAge <= 2;
+  const topReason = scan?.symbols?.find((item) => item.reason)?.reason ?? signal?.reject_reason ?? risk?.reason ?? "-";
+  const badgeText = accepted ? "可推送" : scanFresh ? "已扫描" : "等待";
   return (
     <div className="rounded-lg border border-[#9be7e3] bg-white/90 p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
@@ -212,7 +220,7 @@ function SignalPanel({ data }: { data: DashboardPayload }) {
             {signal?.inst_id ?? "-"}
           </div>
         </div>
-        <Badge tone={accepted ? "green" : "amber"}>{accepted ? "可推送" : "等待"}</Badge>
+        <Badge tone={accepted ? "green" : scanFresh ? "neutral" : "amber"}>{badgeText}</Badge>
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3">
@@ -222,15 +230,16 @@ function SignalPanel({ data }: { data: DashboardPayload }) {
         <MetricTile label="止损" value={numberText(signal?.stop_loss, 4)} />
         <MetricTile label="止盈" value={numberText(signal?.take_profit, 4)} />
         <MetricTile label="风险额" value={numberText(risk?.risk_amount, 2)} tone={accepted ? "green" : "neutral"} />
+        <MetricTile label="扫描/可推" value={`${scanned}/${ready}`} tone={ready > 0 ? "green" : "neutral"} />
       </div>
 
       <div className="mt-4 rounded-lg border border-[#c4f1ef] bg-[#f0fffe] p-3">
         <div className="flex items-center gap-2 text-xs font-semibold text-zinc-500">
           <Clock3 className="h-4 w-4" />
-          {dateTimeText(signal?.ts)}
+          {dateTimeText(scan?.generated_at ?? signal?.ts)}
         </div>
         <div className="mt-2 text-sm font-semibold text-zinc-800">
-          {signal?.reject_reason ?? risk?.reason ?? "ready"}
+          {scan?.error ?? topReason}
         </div>
       </div>
     </div>

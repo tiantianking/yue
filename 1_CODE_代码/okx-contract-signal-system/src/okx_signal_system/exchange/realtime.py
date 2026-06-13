@@ -77,6 +77,24 @@ def _write_parquet_atomic(frame: pd.DataFrame, path: Path) -> None:
     tmp_path.replace(path)
 
 
+def _json_default(value: Any) -> Any:
+    if isinstance(value, (datetime, pd.Timestamp)):
+        return value.isoformat()
+    if hasattr(value, "item"):
+        return value.item()
+    return str(value)
+
+
+def _write_json_atomic(payload: dict[str, Any], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f"{path.stem}.{os.getpid()}.tmp{path.suffix}")
+    tmp_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default),
+        encoding="utf-8",
+    )
+    tmp_path.replace(path)
+
+
 @dataclass
 class MarketData:
     """市场数据"""
@@ -301,6 +319,8 @@ class OKXWebSocketClient:
         self._subscriptions: set[str] = set()
         self._reconnect_count = 0
         self._max_reconnect = 10
+        self._degraded = False
+        self._last_error: str | None = None
 
         # 回调函数
         self.on_candle = on_candle
@@ -324,12 +344,18 @@ class OKXWebSocketClient:
         self._subscriptions = set(subscriptions)
         self._running = True
         self._reconnect_count = 0
+        self._degraded = False
+        self._last_error = None
 
         try:
             self._start_websocket()
             return True
         except Exception as e:
-            log.error(f"WebSocket connect error: {e}")
+            self._degraded = True
+            self._last_error = str(e)
+            log.error(f"WebSocket connect error; REST fallback will stay available: {e}")
+            self._thread = threading.Thread(target=self._handle_disconnect, daemon=True)
+            self._thread.start()
             return False
 
     def _start_websocket(self):
@@ -357,6 +383,9 @@ class OKXWebSocketClient:
 
         def on_open(ws):
             log.info("WebSocket connected")
+            self._degraded = False
+            self._last_error = None
+            self._reconnect_count = 0
             self._subscribe_channels()
 
         self._ws = websocket.WebSocketApp(
@@ -448,36 +477,44 @@ class OKXWebSocketClient:
                     self.on_ticker(inst_id, ticker)
 
     def _handle_disconnect(self):
-        """处理断连 — 使用迭代重连循环，避免递归栈溢出"""
-        while self._running and self._reconnect_count <= self._max_reconnect:
+        """Keep the client alive; REST polling covers data while WS reconnects."""
+        self._degraded = True
+        while self._running:
             self._reconnect_count += 1
-
-            if self._reconnect_count > self._max_reconnect:
-                log.error(f"Max reconnect ({self._max_reconnect}) reached, giving up")
-                self._running = False
+            delay = min(RECONNECT_DELAY * max(1, self._reconnect_count), 60)
+            log.warning(
+                "WebSocket disconnected; reconnecting in %ss (attempt %s). REST fallback remains active.",
+                delay,
+                self._reconnect_count,
+            )
+            time.sleep(delay)
+            if not self._running:
                 return
-
-            log.info(f"Reconnecting in {RECONNECT_DELAY}s... ({self._reconnect_count}/{self._max_reconnect})")
-            time.sleep(RECONNECT_DELAY)
 
             try:
                 self._start_websocket()
-                return  # 重连成功 → 退出
+                return
             except Exception as e:
-                log.error(f"Reconnect attempt {self._reconnect_count} failed: {e}")
-                # 继续循环尝试
-
-        # 如果 _running 被外部设为 False 但尚未标记，补标记
-        if self._running:
-            self._running = False
+                self._last_error = str(e)
+                log.exception("WebSocket reconnect attempt %s failed", self._reconnect_count)
 
     def disconnect(self):
         """断开连接"""
         self._running = False
+        self._degraded = False
         if self._ws:
             self._ws.close()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2)
+
+    def status(self) -> dict[str, Any]:
+        return {
+            "running": self._running,
+            "degraded": self._degraded,
+            "reconnect_count": self._reconnect_count,
+            "last_error": self._last_error,
+            "subscriptions": sorted(self._subscriptions),
+        }
 
     def get_latest_candle(self, inst_id: str) -> dict | None:
         """获取最新K线"""
@@ -582,12 +619,14 @@ class OKXRealtimeAPI:
         )
 
         success = self._ws_client.connect(symbols)
-        self._connected = success
+        self._connected = True
 
         if success:
             log.info(f"OKX WebSocket connected, watching {len(symbols)} symbols")
+        else:
+            log.warning("OKX WebSocket unavailable; live monitor will use REST/local candle fallback")
 
-        return success
+        return True
 
     async def disconnect(self):
         """断开连接"""
@@ -857,6 +896,12 @@ class LiveSignalMonitor:
         self._shadow_ledger = ShadowTradingLedger()
         self._quality_gate_allows_push = False
         self._last_candidate_health_report_ts = 0.0
+        self._last_ready_signal: dict[str, Any] | None = None
+        try:
+            from okx_signal_system.config import project_paths
+            self._scan_status_path = project_paths().output_dir / "latest_scan_status.json"
+        except Exception:
+            self._scan_status_path = Path("outputs") / "latest_scan_status.json"
 
         # --- 持仓追踪 (max_hold_bars) ---
         self._position_entries: dict[str, tuple[pd.Timestamp, StrategyParams]] = {}
@@ -930,12 +975,25 @@ class LiveSignalMonitor:
     ) -> dict[str, Any]:
         raw_score = signal.signal_score if signal and signal.signal_score is not None else None
         side = signal.side if signal and signal.accepted else None
+        kline_time = None
+        close = None
+        if row is not None:
+            try:
+                kline_time = pd.Timestamp(row.get("ts")).isoformat()
+            except Exception:
+                kline_time = str(row.get("ts", ""))
+            try:
+                close = float(row.get("close"))
+            except (TypeError, ValueError):
+                close = None
         return {
             "symbol": inst_id,
             "reason": reason,
             "risk_reason": risk_reason,
             "would_push": would_push,
             "side": side,
+            "kline_time": kline_time,
+            "close": close,
             "bias": str(row.get("trend_bias", row.get("bias_4h", ""))) if row is not None else None,
             "regime": regime,
             "raw_score": float(raw_score) if raw_score is not None else None,
@@ -943,6 +1001,33 @@ class LiveSignalMonitor:
             "shadow_adjustment": float(shadow_adjustment) if shadow_adjustment is not None else None,
             "breakout_gap_pct": self._breakout_gap_pct(row),
         }
+
+    def _write_latest_scan_status(self, items: list[dict[str, Any]], *, error: str | None = None) -> None:
+        try:
+            shadow_summary = self._shadow_ledger.summary()
+        except Exception:
+            shadow_summary = {}
+        ws_status = self.api._ws_client.status() if self.api._ws_client else None
+        payload = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "status": "error" if error else "running",
+            "error": error,
+            "dataset": self.api.dataset,
+            "signal_timeframe": self.api.timeframe.key,
+            "trend_timeframe": self.api.trend_timeframe.key,
+            "push_allowed": self._quality_gate_allows_push,
+            "selected_params": asdict(self._strategy_params),
+            "websocket": ws_status,
+            "shadow_summary": shadow_summary,
+            "symbols_checked": len(items),
+            "ready_count": sum(1 for item in items if item.get("would_push")),
+            "symbols": items,
+            "last_signal": self._last_ready_signal,
+        }
+        try:
+            _write_json_atomic(payload, self._scan_status_path)
+        except Exception as exc:
+            log.warning("Failed to write latest scan status: %s", exc)
 
     def _send_candidate_health_report(self, items: list[dict[str, Any]]) -> None:
         try:
@@ -974,8 +1059,8 @@ class LiveSignalMonitor:
         health_interval = float(os.environ.get("SIGNAL_HEALTH_REPORT_INTERVAL_SECONDS", "3600"))
 
         while self._running:
+            cycle_health: list[dict[str, Any]] = []
             try:
-                cycle_health: list[dict[str, Any]] = []
                 # 获取持仓（模拟盘可能401，优雅降级）
                 positions = []
                 try:
@@ -1101,6 +1186,16 @@ class LiveSignalMonitor:
                     signal = replace(signal, signal_score=effective_score)
                     decision = validate_signal(signal, ledger, risk_cfg)
                     would_push = bool(decision.accepted and effective_score >= 6.0 and self._quality_gate_allows_push)
+                    signal_payload = {
+                        "signal": asdict(signal),
+                        "risk": asdict(decision),
+                        "live_order_enabled": False,
+                        "mode": "live_scan_manual_confirmation_only",
+                        "dataset": self.api.dataset,
+                        "signal_timeframe": self.api.timeframe.key,
+                        "trend_timeframe": self.api.trend_timeframe.key,
+                        "selected_params": asdict(strategy_params),
+                    }
                     if would_push:
                         health_reason = "ready"
                     elif not self._quality_gate_allows_push:
@@ -1130,6 +1225,7 @@ class LiveSignalMonitor:
                     )
 
                     if would_push:
+                        self._last_ready_signal = signal_payload
                         _last_signal_time[inst_id] = time.time()
                         log.info(
                             f"✅ SIGNAL: {inst_id} {signal.side.upper()} "
@@ -1180,6 +1276,7 @@ class LiveSignalMonitor:
 
                 # 持久化
                 self.api.persist_data()
+                self._write_latest_scan_status(cycle_health)
                 now_ts = time.time()
                 if (
                     health_interval > 0
@@ -1191,7 +1288,8 @@ class LiveSignalMonitor:
                 await asyncio.sleep(10)
 
             except Exception as e:
-                log.error(f"Monitor error: {e}")
+                log.exception("Monitor error")
+                self._write_latest_scan_status(cycle_health, error=str(e))
                 await asyncio.sleep(5)
 
     def stop(self):

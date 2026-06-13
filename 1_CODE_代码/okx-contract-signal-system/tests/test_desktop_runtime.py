@@ -33,6 +33,29 @@ def test_websocket_client_uses_15m_candle_channel(monkeypatch) -> None:
     assert client._get_wss_url() == "wss://example.invalid/ws"
 
 
+def test_websocket_reconnect_does_not_self_disable(monkeypatch) -> None:
+    from okx_signal_system.exchange import realtime
+    from okx_signal_system.exchange.realtime import OKXWebSocketClient
+
+    client = OKXWebSocketClient(timeframe="15m")
+    client._running = True
+    attempts = []
+
+    def fail_once():
+        attempts.append(True)
+        client._running = False
+        raise RuntimeError("temporary websocket failure")
+
+    monkeypatch.setattr(realtime.time, "sleep", lambda _delay: None)
+    monkeypatch.setattr(client, "_start_websocket", fail_once)
+
+    client._handle_disconnect()
+
+    assert attempts
+    assert client._degraded
+    assert client._last_error == "temporary websocket failure"
+
+
 def test_position_store_round_trip_and_validates_prices(tmp_path) -> None:
     store = PositionRecordStore(tmp_path)
     record = PositionRecord(

@@ -114,6 +114,12 @@ def test_local_candidate_grid_is_bounded_and_keeps_current() -> None:
     assert all(item.take_profit_mult >= 3.5 for item in grid)
 
 
+def test_learning_review_config_reads_runtime_timeout() -> None:
+    cfg = LearningReviewConfig.from_mapping({"max_runtime_seconds": 120})
+
+    assert cfg.max_runtime_seconds == 120
+
+
 def test_daily_learning_review_writes_report_with_closed_frames(tmp_path, monkeypatch) -> None:
     ts = pd.date_range("2026-01-01", periods=320, freq="15min", tz="UTC")
     frame = pd.DataFrame(

@@ -23,6 +23,8 @@ if str(_src_path) not in sys.path:
 
 log = logging.getLogger(__name__)
 
+APP_VERSION = "v3.20"
+
 
 COLORS = {
     "bg": "#0f172a",
@@ -48,6 +50,29 @@ def get_resource_path(relative_path):
         base_path = Path(__file__).parent
     
     return Path(base_path) / relative_path
+
+
+def _header_summary() -> dict:
+    summary = {
+        "signal_timeframe": "15m",
+        "trend_timeframe": "15m",
+        "symbol_count": 21,
+        "target_r": 6.0,
+    }
+    try:
+        from okx_signal_system.config import load_config
+        cfg = load_config("base.yaml")
+        data_cfg = cfg.get("data", {}) if isinstance(cfg, dict) else {}
+        strategy_cfg = cfg.get("strategy", {}) if isinstance(cfg, dict) else {}
+        summary["signal_timeframe"] = str(data_cfg.get("timeframe", summary["signal_timeframe"]))
+        summary["trend_timeframe"] = str(data_cfg.get("trend_timeframe", summary["trend_timeframe"]))
+        symbols = data_cfg.get("symbols", [])
+        if isinstance(symbols, list) and symbols:
+            summary["symbol_count"] = len(symbols)
+        summary["target_r"] = float(strategy_cfg.get("take_profit_mult", summary["target_r"]))
+    except Exception:
+        pass
+    return summary
 
 
 class GUILogHandler:
@@ -83,7 +108,7 @@ class OKXSignalGUI:
     
     def __init__(self, root):
         self.root = root
-        self.root.title("OKX 信号系统 v3.13")
+        self.root.title(f"OKX 信号系统 {APP_VERSION}")
         self.root.geometry("1120x760")
         self.root.minsize(980, 680)
         self.root.configure(bg=COLORS["bg"])
@@ -247,6 +272,7 @@ class OKXSignalGUI:
 
     def create_header(self):
         """创建顶部品牌和运行摘要."""
+        summary = _header_summary()
         header = ttk.Frame(self.main_frame, padding=(14, 12), style="Header.TFrame")
         header.pack(fill='x', pady=(0, 10))
 
@@ -259,14 +285,18 @@ class OKXSignalGUI:
         title_box = ttk.Frame(header, style="Header.TFrame")
         title_box.pack(side='left', fill='x', expand=True)
         ttk.Label(title_box, text="OKX 合约信号系统", style="HeaderTitle.TLabel").pack(anchor='w')
-        ttk.Label(title_box, text="15m 信号 / 1h 趋势过滤 / 手动确认下单", style="HeaderSub.TLabel").pack(anchor='w', pady=(3, 0))
+        ttk.Label(
+            title_box,
+            text=f"{summary['signal_timeframe']} 信号 / {summary['trend_timeframe']} 趋势过滤 / 手动确认下单",
+            style="HeaderSub.TLabel",
+        ).pack(anchor='w', pady=(3, 0))
 
         metrics = ttk.Frame(header, style="Header.TFrame")
         metrics.pack(side='right')
         for label, value in [
-            ("版本", "v3.13"),
-            ("币种", "21"),
-            ("目标", "6R"),
+            ("版本", APP_VERSION),
+            ("币种", str(summary["symbol_count"])),
+            ("目标", f"{summary['target_r']:g}R"),
             ("最大亏损", "27%"),
         ]:
             card = ttk.Frame(metrics, padding=(12, 8), style="Card.TFrame")
@@ -801,6 +831,7 @@ class OKXSignalGUI:
             from okx_signal_system.config import load_config
             from okx_signal_system.ml.regime_adaptive import AdaptiveParamsManager
             from okx_signal_system.training.startup_quality import is_latest_bar_fresh
+            from okx_signal_system.exchange.realtime import _live_signal_history_limit
 
             # 加载策略参数
             config = load_config("base.yaml")
@@ -831,7 +862,12 @@ class OKXSignalGUI:
             
             for inst_id in self._watched_symbols:
                 # 通过统一行情入口读取；WebSocket 不稳时会自动走 REST 兜底刷新。
-                df = await self.api.get_candles(inst_id, bar=self.api.timeframe.key, limit=600)
+                history_limit = _live_signal_history_limit(
+                    base_params,
+                    signal_timeframe=self.api.timeframe.key,
+                    trend_timeframe=self.api.trend_timeframe.key,
+                )
+                df = await self.api.get_candles(inst_id, bar=self.api.timeframe.key, limit=history_limit)
                 
                 if len(df) < 80:
                     cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="history_too_short"))

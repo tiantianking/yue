@@ -9,11 +9,13 @@ import type {
   DailyLearningReviewStatus,
   DashboardPayload,
   JsonRecord,
+  LatestScanStatus,
   LatestSignal,
   StrategyParams,
   SummaryMetrics,
   SymbolRow,
 } from "./types";
+import { dashboardExecTimeoutMs, historyDir, pythonPath } from "./runtime-paths";
 
 const execFileAsync = promisify(execFile);
 
@@ -23,23 +25,11 @@ export const projectRoot = path.resolve(
 
 const outputsDir = path.join(projectRoot, "outputs");
 const configDir = path.join(projectRoot, "config");
+const HISTORY_CACHE_TTL_MS = 5000;
 
-function pythonPath() {
-  return (
-    process.env.OKX_DASHBOARD_PYTHON ??
-    "D:\\JIAOYI-CX\\LOCAL_DEPS\\venv\\Scripts\\python.exe"
-  );
-}
-
-function historyDir(timeframe = "15m") {
-  if (process.env.OKX_HISTORY_DIR) {
-    return process.env.OKX_HISTORY_DIR;
-  }
-  const base =
-    process.env.OKX_HISTORY_BASE ??
-    "D:\\JIAOYI-CX\\历史数据_保留\\lightweight_history";
-  return path.join(base, `okx_${timeframe}_extended`);
-}
+let actualHistoryCache:
+  | { key: string; expiresAt: number; value: Map<string, Partial<SymbolRow>> }
+  | null = null;
 
 async function readJson<T>(filePath: string, fallback: T): Promise<T> {
   try {
@@ -94,6 +84,14 @@ async function readActualHistory(symbols: string[]) {
   if (symbols.length === 0) {
     return new Map<string, Partial<SymbolRow>>();
   }
+  const cacheKey = symbols.join("|");
+  if (
+    actualHistoryCache &&
+    actualHistoryCache.key === cacheKey &&
+    actualHistoryCache.expiresAt > Date.now()
+  ) {
+    return actualHistoryCache.value;
+  }
   try {
     const script = path.join(process.cwd(), "scripts", "read-history-summary.py");
     const { stdout } = await execFileAsync(
@@ -102,15 +100,22 @@ async function readActualHistory(symbols: string[]) {
       {
         maxBuffer: 1024 * 1024 * 8,
         windowsHide: true,
+        timeout: dashboardExecTimeoutMs(),
       },
     );
     const payload = JSON.parse(stdout) as { symbols?: Partial<SymbolRow>[] };
     const rows = Array.isArray(payload.symbols) ? payload.symbols : [];
-    return new Map(
+    const value = new Map(
       rows
         .filter((row) => typeof row.inst_id === "string")
         .map((row) => [String(row.inst_id), row]),
     );
+    actualHistoryCache = {
+      key: cacheKey,
+      expiresAt: Date.now() + HISTORY_CACHE_TTL_MS,
+      value,
+    };
+    return value;
   } catch {
     return new Map<string, Partial<SymbolRow>>();
   }
@@ -121,6 +126,7 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
     quality,
     selectedParams,
     latestSignal,
+    latestScan,
     backfill,
     closedBackfill,
     closedBackfill5m,
@@ -136,6 +142,10 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
       readJson<StrategyParams>(path.join(outputsDir, "selected_params.json"), {}),
       readJson<LatestSignal | null>(
         path.join(outputsDir, "latest_signal.json"),
+        null,
+      ),
+      readJson<LatestScanStatus | null>(
+        path.join(outputsDir, "latest_scan_status.json"),
         null,
       ),
       readJson<BackfillRow[]>(
@@ -166,6 +176,9 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
   const symbols = [...new Set([...configuredSymbols, ...backfillSymbols])];
   const backfillBySymbol = new Map(backfill.map((row) => [row.inst_id, row]));
   const actualBySymbol = await readActualHistory(symbols);
+  const effectiveLatestSignal = latestScan
+    ? latestScan.last_signal ?? null
+    : latestSignal;
   const symbolRows = symbols.map((symbol) => {
     const row = toSymbolRow(symbol, backfillBySymbol.get(symbol));
     const actual = actualBySymbol.get(symbol);
@@ -212,7 +225,8 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
       ...(asRecord(quality.selected_params) as StrategyParams),
     },
     risk_config: asRecord(riskConfig.risk),
-    latest_signal: latestSignal,
+    latest_signal: effectiveLatestSignal,
+    latest_scan: latestScan,
     closed_backfill: closedBackfill,
     closed_backfills: {
       "15m": closedBackfill,
