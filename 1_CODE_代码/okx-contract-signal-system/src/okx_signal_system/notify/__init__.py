@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from okx_signal_system.notify.feishu import (
+    send_b_tier_summary,
     send_close_notification,
     send_candidate_health_report,
     send_signal_alert,

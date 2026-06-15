@@ -6,6 +6,7 @@ import os
 import time
 from collections import Counter
 from datetime import datetime, timezone
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -148,6 +149,100 @@ def send_signal_alert(
     if reason:
         lines.append(f"触发原因: {reason}")
     lines.append("提示: 这是正式信号，先确认再执行。")
+    return send_text("\n".join(lines))
+
+
+def _candidate_value(candidate: Any, name: str, default: Any = None) -> Any:
+    if hasattr(candidate, name):
+        return getattr(candidate, name)
+    if isinstance(candidate, dict):
+        return candidate.get(name, default)
+    return default
+
+
+def _candidate_signal_value(candidate: Any, name: str, default: Any = None) -> Any:
+    signal = _candidate_value(candidate, "signal")
+    if signal is not None and hasattr(signal, name):
+        return getattr(signal, name)
+    if isinstance(signal, dict):
+        return signal.get(name, default)
+    return default
+
+
+def _candidate_decision_value(candidate: Any, name: str, default: Any = None) -> Any:
+    decision = _candidate_value(candidate, "decision")
+    if decision is not None and hasattr(decision, name):
+        return getattr(decision, name)
+    if isinstance(decision, dict):
+        return decision.get(name, default)
+    return default
+
+
+def _candidate_health_value(candidate: Any, name: str, default: Any = None) -> Any:
+    health = _candidate_value(candidate, "health_item")
+    if isinstance(health, dict):
+        return health.get(name, default)
+    return default
+
+
+def _format_candidate_time(value: Any) -> str:
+    if value is None:
+        return "-"
+    if hasattr(value, "isoformat"):
+        return str(value.isoformat())
+    return str(value)
+
+
+def send_b_tier_summary(
+    candidates: list[Any],
+    *,
+    total_candidates: int | None = None,
+    signal_timeframe: str | None = None,
+    trend_timeframe: str | None = None,
+    max_items: int = 5,
+) -> bool:
+    if not candidates:
+        return False
+
+    candle_time = _candidate_value(candidates[0], "candle_time", None)
+    if candle_time is None:
+        candle_time = _candidate_signal_value(candidates[0], "ts", None)
+    candle_text = _format_candidate_time(candle_time)
+    lines = [
+        "OKX B-tier candidate summary",
+        f"time: {_now_utc():%Y-%m-%d %H:%M:%S} UTC",
+        f"candle_time: {candle_text}",
+        f"B-tier candidates: {len(candidates)}",
+        "note: these are not immediate A-tier alerts; review only.",
+    ]
+    if total_candidates is not None:
+        lines.append(f"ranked_candidates: {total_candidates}")
+    if signal_timeframe:
+        lines.append(f"signal_timeframe: {signal_timeframe}")
+    if trend_timeframe:
+        lines.append(f"trend_timeframe: {trend_timeframe}")
+
+    lines.append("top B-tier candidates:")
+    for candidate in candidates[:max_items]:
+        rank = _candidate_value(candidate, "rank", "-")
+        symbol = _candidate_value(candidate, "inst_id") or _candidate_signal_value(candidate, "inst_id", "-")
+        side = _candidate_value(candidate, "side") or _candidate_signal_value(candidate, "side", "-")
+        score = _candidate_value(candidate, "raw_score", None)
+        if score is None:
+            score = _candidate_decision_value(candidate, "signal_score", None)
+        rr = _candidate_decision_value(candidate, "risk_reward_ratio", None)
+        if rr is None:
+            rr = _candidate_signal_value(candidate, "risk_reward_ratio", None)
+        reason = _candidate_health_value(candidate, "reason", None)
+        if not reason:
+            reason_codes = _candidate_signal_value(candidate, "reason_codes", ())
+            reason = ",".join(reason_codes) if reason_codes else "-"
+        score_text = f"{float(score):.1f}" if score is not None else "-"
+        rr_text = f"{float(rr):.2f}R" if rr is not None else "-"
+        lines.append(
+            f"- #{rank} {symbol} {side} "
+            f"score={score_text} rr={rr_text} reason={reason}"
+        )
     return send_text("\n".join(lines))
 
 

@@ -27,7 +27,7 @@ if str(_src_path) not in sys.path:
 
 log = logging.getLogger(__name__)
 
-APP_VERSION = "v3.31"
+APP_VERSION = "v3.32"
 DASHBOARD_HOST = "127.0.0.1"
 DASHBOARD_PORT = 3001
 DASHBOARD_URL = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}"
@@ -141,6 +141,7 @@ class OKXSignalGUI:
         self._quality_gate_allows_push = False
         self._last_candidate_health_report_ts = 0.0
         self._signal_notification_store = None
+        self._b_tier_summary_store = None
         self._runtime_modules: dict[str, dict] = {}
         self._background_tasks: list[asyncio.Task] = []
         self.dashboard_process = None
@@ -449,6 +450,13 @@ class OKXSignalGUI:
             self._signal_notification_store = SignalNotificationStore()
         return self._signal_notification_store
 
+    def _summary_notification_store(self):
+        if self._b_tier_summary_store is None:
+            from okx_signal_system.notify.signal_dedupe import BTierSummaryNotificationStore
+
+            self._b_tier_summary_store = BTierSummaryNotificationStore()
+        return self._b_tier_summary_store
+
     def _signal_notification_key(self, signal) -> str:
         from okx_signal_system.notify.signal_dedupe import signal_notification_key
 
@@ -471,7 +479,30 @@ class OKXSignalGUI:
                 "trend_timeframe": self.api.trend_timeframe.key if self.api else None,
             },
         )
-    
+
+    def _b_tier_summary_key(self, candidates) -> str | None:
+        if not candidates:
+            return None
+        from okx_signal_system.notify.signal_dedupe import b_tier_summary_key
+
+        return b_tier_summary_key(
+            candidates[0].candle_time,
+            signal_timeframe=self.api.timeframe.key if self.api else None,
+            trend_timeframe=self.api.trend_timeframe.key if self.api else None,
+        )
+
+    def _mark_b_tier_summary_notified(self, key: str, candidates) -> None:
+        candle_time = candidates[0].candle_time if candidates else None
+        self._summary_notification_store().mark(
+            key,
+            {
+                "kline_time": candle_time.isoformat() if hasattr(candle_time, "isoformat") else str(candle_time or ""),
+                "candidate_count": len(candidates),
+                "signal_timeframe": self.api.timeframe.key if self.api else None,
+                "trend_timeframe": self.api.trend_timeframe.key if self.api else None,
+            },
+        )
+
     def create_widgets(self):
         """创建所有界面组件"""
         self.main_frame = ttk.Frame(self.root, padding=(12, 10), style="App.TFrame")
@@ -1480,6 +1511,28 @@ class OKXSignalGUI:
                     self.message_queue.put(('log', (f"A级飞书推送失败: {e}", "WARNING")))
             if selection.tier_b:
                 self.message_queue.put(('log', (f"B级候选已保留到体检/面板：{len(selection.tier_b)} 个", "INFO")))
+            if selection.tier_b:
+                summary_key = self._b_tier_summary_key(selection.tier_b)
+                if summary_key and self._summary_notification_store().has(summary_key):
+                    self.message_queue.put(('log', ("B-tier summary already sent for this candle", "INFO")))
+                else:
+                    try:
+                        from okx_signal_system.notify.feishu import send_b_tier_summary
+
+                        summary_sent = send_b_tier_summary(
+                            selection.tier_b,
+                            total_candidates=len(selection.ranked),
+                            signal_timeframe=self.api.timeframe.key if self.api else None,
+                            trend_timeframe=self.api.trend_timeframe.key if self.api else None,
+                        )
+                    except Exception as e:
+                        summary_sent = False
+                        self.message_queue.put(('log', (f"B-tier summary push failed: {e}", "WARNING")))
+                    if summary_sent and summary_key:
+                        self._mark_b_tier_summary_notified(summary_key, selection.tier_b)
+                        self.message_queue.put(('log', (f"B-tier summary sent: {len(selection.tier_b)} candidates", "INFO")))
+                    elif summary_key:
+                        self.message_queue.put(('log', ("B-tier summary was not delivered; will retry", "WARNING")))
             self._write_latest_scan_status(cycle_health, base_params)
             if send_health_report:
                 self._send_candidate_health_report(cycle_health, base_params)

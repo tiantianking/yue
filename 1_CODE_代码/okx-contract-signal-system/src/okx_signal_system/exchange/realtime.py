@@ -990,9 +990,10 @@ class LiveSignalMonitor:
         self._last_candidate_health_report_ts = 0.0
         self._last_ready_signal: dict[str, Any] | None = None
         self._sent_startup_health_report = False
-        from okx_signal_system.notify.signal_dedupe import SignalNotificationStore
+        from okx_signal_system.notify.signal_dedupe import BTierSummaryNotificationStore, SignalNotificationStore
 
         self._signal_notification_store = SignalNotificationStore()
+        self._b_tier_summary_store = BTierSummaryNotificationStore()
         try:
             from okx_signal_system.config import project_paths
             self._scan_status_path = project_paths().output_dir / "latest_scan_status.json"
@@ -1023,6 +1024,29 @@ class LiveSignalMonitor:
                 "signal_timeframe": self.api.timeframe.key,
                 "trend_timeframe": self.api.trend_timeframe.key,
                 "strategy_version": __import__("okx_signal_system").__version__,
+            },
+        )
+
+    def _b_tier_summary_key(self, candidates: list[SignalCandidate]) -> str | None:
+        if not candidates:
+            return None
+        from okx_signal_system.notify.signal_dedupe import b_tier_summary_key
+
+        return b_tier_summary_key(
+            candidates[0].candle_time,
+            signal_timeframe=self.api.timeframe.key,
+            trend_timeframe=self.api.trend_timeframe.key,
+        )
+
+    def _mark_b_tier_summary_notified(self, key: str, candidates: list[SignalCandidate]) -> None:
+        candle_time = candidates[0].candle_time if candidates else None
+        self._b_tier_summary_store.mark(
+            key,
+            {
+                "kline_time": pd.Timestamp(candle_time).isoformat() if candle_time is not None else "",
+                "candidate_count": len(candidates),
+                "signal_timeframe": self.api.timeframe.key,
+                "trend_timeframe": self.api.trend_timeframe.key,
             },
         )
 
@@ -1252,6 +1276,27 @@ class LiveSignalMonitor:
                 log.warning("Signal alert was not delivered; will retry next scan: %s %s", candidate.inst_id, candidate.side)
         if selection.tier_b:
             log.info("B-tier candidates retained for summary: %s", len(selection.tier_b))
+            summary_key = self._b_tier_summary_key(selection.tier_b)
+            if summary_key and self._b_tier_summary_store.has(summary_key):
+                log.info("B-tier summary already sent for this candle: %s", summary_key)
+            else:
+                try:
+                    from okx_signal_system.notify.feishu import send_b_tier_summary
+
+                    summary_sent = send_b_tier_summary(
+                        selection.tier_b,
+                        total_candidates=len(selection.ranked),
+                        signal_timeframe=self.api.timeframe.key,
+                        trend_timeframe=self.api.trend_timeframe.key,
+                    )
+                except Exception as exc:
+                    log.error("B-tier summary push failed: %s", exc)
+                    summary_sent = False
+                if summary_sent and summary_key:
+                    self._mark_b_tier_summary_notified(summary_key, selection.tier_b)
+                    log.info("B-tier summary sent: %s candidates", len(selection.tier_b))
+                elif summary_key:
+                    log.warning("B-tier summary was not delivered; will retry next scan")
 
     async def _monitor_loop(self):
         """监控循环 — 信号生成 + 风控 + 环境自适应 + 持仓超时"""

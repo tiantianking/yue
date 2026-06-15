@@ -1,6 +1,8 @@
 from okx_signal_system.notify import feishu
 from okx_signal_system.notify.signal_dedupe import (
+    BTierSummaryNotificationStore,
     SignalNotificationStore,
+    b_tier_summary_key,
     signal_notification_key,
 )
 
@@ -133,6 +135,53 @@ def test_candidate_health_report_sends_even_without_candidates(monkeypatch) -> N
     assert "优先看: 无" in text
 
 
+def test_b_tier_summary_text_is_understandable(monkeypatch) -> None:
+    sent: list[str] = []
+
+    def fake_send_text(text: str, *args, **kwargs) -> bool:
+        sent.append(text)
+        return True
+
+    monkeypatch.setattr(feishu, "send_text", fake_send_text)
+
+    ok = feishu.send_b_tier_summary(
+        [
+            {
+                "inst_id": "ETH-USDT-SWAP",
+                "side": "long",
+                "rank": 3,
+                "raw_score": 7.1,
+                "decision": {"risk_reward_ratio": 3.5},
+                "health_item": {"reason": "correlation_group_demoted"},
+                "signal": {"ts": "2026-06-16T00:00:00+00:00"},
+            }
+        ],
+        total_candidates=4,
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+    )
+
+    assert ok
+    text = sent[0]
+    assert "OKX B-tier candidate summary" in text
+    assert "B-tier candidates: 1" in text
+    assert "not immediate A-tier alerts" in text
+    assert "#3 ETH-USDT-SWAP long score=7.1 rr=3.50R reason=correlation_group_demoted" in text
+
+
+def test_b_tier_summary_is_not_sent_without_candidates(monkeypatch) -> None:
+    sent: list[str] = []
+
+    def fake_send_text(text: str, *args, **kwargs) -> bool:
+        sent.append(text)
+        return True
+
+    monkeypatch.setattr(feishu, "send_text", fake_send_text)
+
+    assert not feishu.send_b_tier_summary([])
+    assert sent == []
+
+
 def test_waiting_next_bar_health_reason_is_readable() -> None:
     assert feishu._health_reason_label("waiting_next_bar") == "等待下一根K线"
 
@@ -154,6 +203,32 @@ def test_signal_notification_store_persists_dedupe_keys(tmp_path) -> None:
     reloaded = SignalNotificationStore(path)
     assert reloaded.has(key)
     assert "|15m|1h" in key
+
+
+def test_b_tier_summary_key_is_separate_from_a_tier_signal_key(tmp_path) -> None:
+    signal_path = tmp_path / "signal_notifications.sqlite3"
+    summary_path = tmp_path / "b_tier_summaries.sqlite3"
+    signal_key = signal_notification_key(
+        DummySignal(),
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+    )
+    summary_key = b_tier_summary_key(
+        DummySignal.ts,
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+    )
+
+    assert summary_key != signal_key
+    assert summary_key.startswith("b_tier_summary|")
+
+    signal_store = SignalNotificationStore(signal_path)
+    summary_store = BTierSummaryNotificationStore(summary_path)
+    assert signal_store.mark(signal_key, {"symbol": "BTC-USDT-SWAP", "tier": "A"})
+    assert signal_store.has(signal_key)
+    assert not summary_store.has(summary_key)
+    assert summary_store.mark(summary_key, {"kline_time": DummySignal.ts})
+    assert summary_store.has(summary_key)
 
 
 def test_signal_notification_key_uses_hash_when_params_are_supplied() -> None:

@@ -4,11 +4,11 @@
 
 - Repository root: `D:\JIAOYI-CX`
 - Project path: `D:\JIAOYI-CX\1_CODE_代码\okx-contract-signal-system`
-- Current completed version: v3.31
+- Current completed version: v3.32
 - Latest completed commits:
-  - `62d7891 fix: harden signal push correctness`
   - `a26f0d9 feat: batch rank and tier signal pushes`
   - `feat: add correlation-aware signal tiers`
+  - `feat: summarize b tier signal candidates`
 
 ## Completed Work
 
@@ -44,6 +44,13 @@
 - Correlated but otherwise ready candidates remain B-tier and stay visible in status output.
 - Version metadata was bumped to v3.31.
 
+### v3.32
+- Added B-tier summary text push for ready candidates that are not immediate A-tier alerts.
+- Realtime and GUI scans send at most one B-tier summary per closed-candle cycle.
+- B-tier summary de-duplication uses a separate SQLite store from A-tier signal push de-duplication.
+- A-tier individual push behavior remains unchanged.
+- Version metadata was bumped to v3.32.
+
 ## Absolute Constraints
 
 - Do not enable real orders.
@@ -62,33 +69,6 @@
 - Every code update must bump version and commit to git.
 
 ## Remaining Execution Plan
-
-### Phase 4: B-Tier Summary Push
-
-Goal: B-tier signals are not silently hidden; they are summarized without alert spam.
-
-Implement:
-- Add a Feishu summary helper for B-tier candidates.
-- Send at most one B-tier summary per closed-candle cycle.
-- Summary should include:
-  - candle time;
-  - number of B-tier candidates;
-  - top 5 B-tier symbols;
-  - rank, side, score, risk/reward, reason;
-  - note that these are not immediate A-tier alerts.
-- Keep SQLite de-duplication separate for A-tier signal pushes and B-tier summary messages.
-
-Suggested tests:
-- B-tier summary text is understandable.
-- Summary is not sent when there are no B-tier candidates.
-- A-tier individual push behavior remains unchanged.
-
-Primary files:
-- `src/okx_signal_system/notify/feishu.py`
-- `src/okx_signal_system/notify/signal_dedupe.py`
-- `src/okx_signal_system/exchange/realtime.py`
-- `gui.py`
-- `tests/test_feishu_notify.py`
 
 ### Phase 5: Signal Lifecycle
 
