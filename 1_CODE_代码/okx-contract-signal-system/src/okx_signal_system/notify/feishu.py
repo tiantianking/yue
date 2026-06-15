@@ -20,10 +20,33 @@ def _now_utc() -> datetime:
 def _entry_type_from_reason(reason: str) -> str:
     upper = reason.upper()
     if "PULLBACK_RECLAIM" in upper:
-        return "pullback_reclaim"
+        return "回踩确认"
     if "BREAKOUT" in upper:
-        return "breakout"
-    return "strategy_signal"
+        return "突破信号"
+    return "策略信号"
+
+
+def _health_reason_label(reason: str) -> str:
+    reason = str(reason or "unknown")
+    mapping = {
+        "position_open": "已有持仓",
+        "cooldown": "冷却中",
+        "history_too_short": "历史K线太少",
+        "stale_data": "K线太旧",
+        "feature_error": "特征计算失败",
+        "invalid_features": "特征无效",
+        "signal_rejected": "信号未通过",
+        "quality_gate_blocked": "训练质量门未通过",
+        "score_below_6": "分数不够",
+        "vote_flat": "投票偏平",
+        "vote_side_mismatch": "投票方向冲突",
+        "ready": "可推送",
+        "not_ready": "暂不可推送",
+        "no_evaluable_candidates": "没有可评估候选",
+    }
+    if reason.startswith("risk_"):
+        return f"风控拒绝({reason.removeprefix('risk_')})"
+    return mapping.get(reason, reason)
 
 
 def send_text(text: str, webhook_url: str | None = None, max_retries: int = 3) -> bool:
@@ -84,37 +107,37 @@ def send_signal_alert(
     tp_pct = abs(take_profit - entry_ref) / entry_ref * 100 if entry_ref else 0.0
     rr = risk_reward_ratio if risk_reward_ratio is not None else (tp_pct / stop_pct if stop_pct else 0.0)
     lines = [
-        "OKX signal",
-        f"time: {_now_utc():%Y-%m-%d %H:%M:%S} UTC",
-        f"symbol: {inst_id}",
-        f"side: {direction}",
-        f"entry: {entry_ref:.8f}",
-        f"stop: {stop_loss:.8f} ({stop_pct:.2f}%)",
-        f"take_profit: {take_profit:.8f} ({tp_pct:.2f}%)",
-        f"qty: {qty:.8f}",
-        f"leverage: {leverage:.2f}x",
-        f"target_rr: {rr:.2f}R",
-        f"entry_type: {_entry_type_from_reason(reason)}",
+        "OKX 正式交易信号",
+        f"时间: {_now_utc():%Y-%m-%d %H:%M:%S} UTC",
+        f"币种: {inst_id}",
+        f"方向: {'做多' if direction == 'LONG' else '做空'}",
+        f"入场: {entry_ref:.8f}",
+        f"止损: {stop_loss:.8f} ({stop_pct:.2f}%)",
+        f"止盈: {take_profit:.8f} ({tp_pct:.2f}%)",
+        f"仓位: {qty:.8f}",
+        f"杠杆: {leverage:.2f}x",
+        f"目标盈亏比: {rr:.2f}R",
+        f"信号类型: {_entry_type_from_reason(reason)}",
     ]
     if signal_score is not None:
-        lines.append(f"score: {signal_score:.1f}/10")
+        lines.append(f"评分: {signal_score:.1f}/10")
     if max_loss_pct is not None:
-        lines.append(f"account_risk_at_stop: {max_loss_pct:.2%}")
+        lines.append(f"账户止损风险: {max_loss_pct:.2%}")
     if margin_loss_pct is not None:
-        lines.append(f"margin_loss_at_stop: {margin_loss_pct:.2%} (cap 27.00%)")
+        lines.append(f"保证金止损风险: {margin_loss_pct:.2%} (上限 27.00%)")
     if kline_time:
-        lines.append(f"kline_time: {kline_time}")
+        lines.append(f"K线时间: {kline_time}")
     if signal_timeframe:
-        lines.append(f"signal_timeframe: {signal_timeframe}")
+        lines.append(f"信号周期: {signal_timeframe}")
     if trend_timeframe:
-        lines.append(f"trend_timeframe: {trend_timeframe}")
+        lines.append(f"趋势周期: {trend_timeframe}")
     if stop_reason:
-        lines.append(f"stop_reason: {stop_reason}")
+        lines.append(f"止损原因: {stop_reason}")
     if tp_reason:
-        lines.append(f"take_profit_reason: {tp_reason}")
+        lines.append(f"止盈原因: {tp_reason}")
     if reason:
-        lines.append(f"reason: {reason}")
-    lines.append("manual confirmation required")
+        lines.append(f"触发原因: {reason}")
+    lines.append("提示: 这是正式信号，先确认再执行。")
     return send_text("\n".join(lines))
 
 
@@ -194,39 +217,41 @@ def send_candidate_health_report(
     reasons = Counter(str(item.get("reason") or "unknown") for item in items if not item.get("would_push"))
     params = selected_params or {}
     lines = [
-        "OKX候选信号体检",
-        f"time: {_now_utc():%Y-%m-%d %H:%M:%S} UTC",
-        "not_trade_signal: true",
-        f"push_allowed: {'yes' if push_allowed else 'no'}",
-        f"symbols_checked: {total}",
-        f"ready_candidates: {len(ready)}",
+        "OKX 候选体检",
+        f"时间: {_now_utc():%Y-%m-%d %H:%M:%S} UTC",
+        "说明: 这不是正式信号，只是告诉你这一轮哪些币种更接近能下单。",
+        f"结论: {'允许推送' if push_allowed else '暂不推送'}",
+        f"已检查: {total} 个币种",
+        f"可推送: {len(ready)} 个",
     ]
     if params:
         lines.append(
-            "params: "
-            f"ATR_stop={float(params.get('atr_stop_mult', 0)):.2f}x, "
-            f"target_rr={float(params.get('take_profit_mult', 0)):.2f}R"
+            "参数: "
+            f"ATR止损 {float(params.get('atr_stop_mult', 0)):.2f}x, "
+            f"目标盈亏比 {float(params.get('take_profit_mult', 0)):.2f}R"
         )
         if params.get("signal_timeframe") or params.get("trend_timeframe"):
             lines.append(
-                "timeframes: "
-                f"signal={params.get('signal_timeframe', '-')}, "
-                f"trend={params.get('trend_timeframe', '-')}"
+                "周期: "
+                f"信号={params.get('signal_timeframe', '-')}, "
+                f"趋势={params.get('trend_timeframe', '-')}"
             )
         if params.get("shadow_closed") is not None:
             lines.append(
-                "shadow_review: "
-                f"open={int(params.get('shadow_open', 0))}, "
-                f"closed={int(params.get('shadow_closed', 0))}, "
-                f"tp={int(params.get('shadow_take_profit', 0))}, "
-                f"sl={int(params.get('shadow_stop_loss', 0))}, "
-                f"avg_quality={float(params.get('shadow_avg_quality_score', 0.0)):.1f}"
+                "影子交易: "
+                f"未平仓 {int(params.get('shadow_open', 0))}, "
+                f"已平仓 {int(params.get('shadow_closed', 0))}, "
+                f"止盈 {int(params.get('shadow_take_profit', 0))}, "
+                f"止损 {int(params.get('shadow_stop_loss', 0))}, "
+                f"平均质量 {float(params.get('shadow_avg_quality_score', 0.0)):.1f}"
             )
     if reasons:
-        top_reasons = ", ".join(f"{reason}={count}" for reason, count in reasons.most_common(6))
-        lines.append(f"blocked_reasons: {top_reasons}")
+        top_reasons = ", ".join(
+            f"{_health_reason_label(reason)}={count}" for reason, count in reasons.most_common(6)
+        )
+        lines.append(f"主要卡点: {top_reasons}")
     elif total == 0:
-        lines.append("blocked_reasons: no_evaluable_candidates")
+        lines.append("主要卡点: 没有可评估候选")
 
     ranked = sorted(
         items,
@@ -237,19 +262,24 @@ def send_candidate_health_report(
         ),
     )
     if ranked:
-        lines.append("watchlist:")
+        lines.append("优先看:")
     else:
-        lines.append("watchlist: none")
+        lines.append("优先看: 无")
     for item in ranked[:max_items]:
         gap = item.get("breakout_gap_pct")
-        gap_text = f", breakout_gap={float(gap):.2%}" if gap is not None else ""
+        gap_text = f"，离突破 {float(gap):.2%}" if gap is not None else ""
         score = item.get("final_score") if item.get("final_score") is not None else item.get("raw_score")
-        score_text = f", score={float(score):.1f}" if score is not None else ""
+        score_text = f"，分数 {float(score):.1f}" if score is not None else ""
         shadow_adj = item.get("shadow_adjustment")
-        shadow_text = f", shadow_adj={float(shadow_adj):+.1f}" if shadow_adj not in (None, 0, 0.0) else ""
+        shadow_text = f"，影子加权 {float(shadow_adj):+.1f}" if shadow_adj not in (None, 0, 0.0) else ""
         side = item.get("side") or item.get("bias") or "flat"
-        lines.append(f"- {item.get('symbol')}: {side}, {item.get('reason')}{score_text}{shadow_text}{gap_text}")
-    lines.append("正式信号会单独推送；这条只看机会接近程度")
+        lines.append(
+            f"- {item.get('symbol')}: "
+            f"{'可推送' if item.get('would_push') else '未通过'}，"
+            f"{'做多' if side == 'long' else ('做空' if side == 'short' else side)}，"
+            f"{_health_reason_label(item.get('reason'))}{score_text}{shadow_text}{gap_text}"
+        )
+    lines.append("提示: 这是体检，不是下单提醒。")
     return send_text("\n".join(lines))
 
 

@@ -36,9 +36,10 @@ def test_signal_alert_includes_target_rr_and_risk_fields(monkeypatch) -> None:
     assert ok
     assert sent
     text = sent[0]
-    assert "target_rr: 3.50R" in text
-    assert "account_risk_at_stop: 1.00%" in text
-    assert "margin_loss_at_stop: 27.00% (cap 27.00%)" in text
+    assert "OKX 正式交易信号" in text
+    assert "目标盈亏比: 3.50R" in text
+    assert "账户止损风险: 1.00%" in text
+    assert "保证金止损风险: 27.00% (上限 27.00%)" in text
 
 
 def test_candidate_health_report_is_not_a_trade_signal(monkeypatch) -> None:
@@ -75,10 +76,10 @@ def test_candidate_health_report_is_not_a_trade_signal(monkeypatch) -> None:
 
     assert ok
     text = sent[0]
-    assert "not_trade_signal: true" in text
-    assert "ready_candidates: 1" in text
-    assert "blocked_reasons: volume_too_low=1" in text
-    assert "target_rr=3.50R" in text
+    assert "这不是正式信号" in text
+    assert "可推送: 1 个" in text
+    assert "主要卡点: volume_too_low=1" in text
+    assert "目标盈亏比 3.50R" in text
     assert "BTC-USDT-SWAP" in text
 
 
@@ -99,10 +100,10 @@ def test_candidate_health_report_sends_even_without_candidates(monkeypatch) -> N
 
     assert ok
     text = sent[0]
-    assert "not_trade_signal: true" in text
-    assert "symbols_checked: 0" in text
-    assert "blocked_reasons: no_evaluable_candidates" in text
-    assert "watchlist: none" in text
+    assert "这不是正式信号" in text
+    assert "已检查: 0 个币种" in text
+    assert "主要卡点: 没有可评估候选" in text
+    assert "优先看: 无" in text
 
 
 def test_signal_notification_store_persists_dedupe_keys(tmp_path) -> None:

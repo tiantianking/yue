@@ -10,6 +10,8 @@ import logging
 import os
 import time
 import threading
+import contextlib
+import io
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -336,6 +338,10 @@ class OKXWebSocketClient:
             return configured
         return "wss://ws.okx.com:8443/ws/v5/public"
 
+    def _is_expected_ws_disconnect(self, error: Any) -> bool:
+        text = str(error or "").lower()
+        return "10054" in text or "goodbye" in text or "远程主机强迫关闭" in text
+
     def connect(self, subscriptions: list[str]) -> bool:
         """连接WebSocket"""
         if self._running:
@@ -375,10 +381,17 @@ class OKXWebSocketClient:
                 log.error(f"WebSocket message error: {e}")
 
         def on_error(ws, error):
-            log.error(f"WebSocket error: {error}")
+            if self._is_expected_ws_disconnect(error):
+                log.warning("WebSocket disconnected by remote peer; REST fallback remains active")
+            else:
+                log.error(f"WebSocket error: {error}")
 
         def on_close(ws, close_status_code, close_msg):
-            log.warning(f"WebSocket closed: {close_status_code} {close_msg}")
+            close_text = f"{close_status_code} {close_msg}"
+            if self._is_expected_ws_disconnect(close_text):
+                log.warning("WebSocket closed by remote peer; REST fallback remains active")
+            else:
+                log.warning(f"WebSocket closed: {close_status_code} {close_msg}")
             self._handle_disconnect()
 
         def on_open(ws):
@@ -396,7 +409,11 @@ class OKXWebSocketClient:
             on_open=on_open,
         )
 
-        self._thread = threading.Thread(target=self._ws.run_forever, daemon=True)
+        def run_ws():
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self._ws.run_forever()
+
+        self._thread = threading.Thread(target=run_ws, daemon=True)
         self._thread.start()
 
     def _subscribe_channels(self):
