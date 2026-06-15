@@ -1,6 +1,7 @@
 import pandas as pd
 import pytest
 import inspect
+import asyncio
 
 from okx_signal_system.exchange.position_monitor import (
     AutoStopMonitor,
@@ -27,10 +28,57 @@ def test_websocket_client_uses_15m_candle_channel(monkeypatch) -> None:
     monkeypatch.delenv("OKX_PUBLIC_WS_URL", raising=False)
     client = OKXWebSocketClient(timeframe="15m")
     assert client._candle_channel == "candle15m"
-    assert client._get_wss_url() == "wss://ws.okx.com:8443/ws/v5/public"
+    assert client._get_wss_url() == "wss://ws.okx.com:8443/ws/v5/business"
 
     monkeypatch.setenv("OKX_PUBLIC_WS_URL", "wss://example.invalid/ws")
     assert client._get_wss_url() == "wss://example.invalid/ws"
+
+
+def test_websocket_message_parses_okx_millisecond_timestamp() -> None:
+    from okx_signal_system.exchange.realtime import OKXWebSocketClient
+
+    candles = []
+    client = OKXWebSocketClient(on_candle=lambda inst_id, candle: candles.append((inst_id, candle)))
+    client._handle_message(
+        {
+            "arg": {"channel": "candle15m", "instId": "BTC-USDT-SWAP"},
+            "data": [
+                [
+                    "1781546400000",
+                    "66784.3",
+                    "66845.5",
+                    "66633.8",
+                    "66828.3",
+                    "88823.72",
+                    "888.2372",
+                    "59271158.11091000",
+                    "0",
+                ]
+            ],
+        }
+    )
+
+    assert candles
+    assert candles[0][0] == "BTC-USDT-SWAP"
+    assert candles[0][1]["ts"] == pd.Timestamp("2026-06-15T18:00:00Z")
+    assert candles[0][1]["is_closed"] is False
+
+
+def test_websocket_proxy_options_parse_env(monkeypatch) -> None:
+    from okx_signal_system.exchange import realtime
+
+    monkeypatch.setenv("OKX_WS_PROXY", "http://user:pass@127.0.0.1:1088")
+    assert realtime._okx_ws_proxy_url() == "http://user:pass@127.0.0.1:1088"
+    assert realtime._websocket_proxy_options(realtime._okx_ws_proxy_url()) == {
+        "http_proxy_host": "127.0.0.1",
+        "http_proxy_port": 1088,
+        "proxy_type": "http",
+        "http_proxy_timeout": 8,
+        "http_proxy_auth": ("user", "pass"),
+    }
+
+    monkeypatch.setenv("OKX_WS_PROXY", "off")
+    assert realtime._okx_ws_proxy_url() is None
 
 
 def test_websocket_reconnect_does_not_self_disable(monkeypatch) -> None:
@@ -54,6 +102,28 @@ def test_websocket_reconnect_does_not_self_disable(monkeypatch) -> None:
     assert attempts
     assert client._degraded
     assert client._last_error == "temporary websocket failure"
+
+
+def test_realtime_api_reports_failed_websocket_connect(monkeypatch, tmp_path) -> None:
+    from okx_signal_system.exchange import realtime
+
+    monkeypatch.setattr(realtime, "find_lightweight_history", lambda _dataset: tmp_path)
+    monkeypatch.setattr(realtime, "test_connection", lambda: {"connected": True})
+    monkeypatch.setattr(realtime.OKXWebSocketClient, "connect", lambda self, symbols: False)
+
+    api = realtime.OKXRealtimeAPI(
+        {
+            "data": {
+                "timeframe": "15m",
+                "trend_timeframe": "1h",
+                "historical_dataset": "test",
+                "symbols": ["BTC-USDT-SWAP"],
+            }
+        }
+    )
+
+    assert not asyncio.run(api.connect(["BTC-USDT-SWAP"]))
+    assert not api.is_connected()
 
 
 def test_position_store_round_trip_and_validates_prices(tmp_path) -> None:

@@ -7,6 +7,7 @@ from tkinter import ttk, scrolledtext, messagebox
 import threading
 import queue
 import asyncio
+import json
 import logging
 import socket
 import subprocess
@@ -26,7 +27,7 @@ if str(_src_path) not in sys.path:
 
 log = logging.getLogger(__name__)
 
-APP_VERSION = "v3.25"
+APP_VERSION = "v3.26"
 DASHBOARD_HOST = "127.0.0.1"
 DASHBOARD_PORT = 3001
 DASHBOARD_URL = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}"
@@ -201,6 +202,19 @@ class OKXSignalGUI:
             return None
         return None
 
+    @staticmethod
+    def _json_default(value):
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if hasattr(value, "isoformat"):
+            try:
+                return value.isoformat()
+            except Exception:
+                pass
+        if hasattr(value, "item"):
+            return value.item()
+        return str(value)
+
     def _candidate_health_item(
         self,
         *,
@@ -221,12 +235,45 @@ class OKXSignalGUI:
             "risk_reason": risk_reason,
             "would_push": would_push,
             "side": side,
+            "kline_time": row.get("ts").isoformat() if row is not None and hasattr(row.get("ts"), "isoformat") else (str(row.get("ts")) if row is not None else None),
+            "close": float(row.get("close")) if row is not None and row.get("close") is not None else None,
             "bias": str(row.get("trend_bias", row.get("bias_4h", ""))) if row is not None else None,
             "regime": regime,
             "raw_score": float(raw_score) if raw_score is not None else None,
             "final_score": float(final_score) if final_score is not None else None,
             "breakout_gap_pct": self._breakout_gap_pct(row),
         }
+
+    def _write_latest_scan_status(self, items: list[dict], params, *, error: str | None = None) -> None:
+        try:
+            from okx_signal_system.config import project_paths
+
+            path = project_paths().output_dir / "latest_scan_status.json"
+            ws_status = self.api._ws_client.status() if self.api and self.api._ws_client else None
+            payload = {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "status": "error" if error else "running",
+                "error": error,
+                "dataset": self.api.dataset if self.api else None,
+                "signal_timeframe": self.api.timeframe.key if self.api else None,
+                "trend_timeframe": self.api.trend_timeframe.key if self.api else None,
+                "push_allowed": self._quality_gate_allows_push,
+                "selected_params": asdict(params),
+                "websocket": ws_status,
+                "symbols_checked": len(items),
+                "ready_count": sum(1 for item in items if item.get("would_push")),
+                "symbols": items,
+                "last_signal": None,
+            }
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = path.with_name(f"{path.stem}.{os.getpid()}.tmp{path.suffix}")
+            tmp_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2, default=self._json_default),
+                encoding="utf-8",
+            )
+            tmp_path.replace(path)
+        except Exception as exc:
+            log.warning("Failed to write GUI latest scan status: %s", exc)
 
     def _send_candidate_health_report(self, items: list[dict], params) -> None:
         try:
@@ -837,7 +884,11 @@ class OKXSignalGUI:
             connected = await self.api.connect(self._watched_symbols)
             
             if not connected:
-                self.message_queue.put(('log', ('WebSocket 连接失败（仅使用本地数据）', "WARNING")))
+                self._write_latest_scan_status([], self._trained_params, error="websocket_not_connected")
+                self.message_queue.put(('log', ('WebSocket 连接失败，实时行情模块未正常工作；监控已停止', "ERROR")))
+                self.message_queue.put(('status', 'error'))
+                self.monitoring = False
+                return
             else:
                 self.message_queue.put(('log', ('WebSocket 已连接，实时数据推送中', "INFO")))
             
@@ -966,6 +1017,7 @@ class OKXSignalGUI:
                 last_ts = str(df["ts"].iloc[-1]) if len(df) > 0 else ""
                 is_new_bar = checked_bars.get(inst_id) != last_ts
                 if not is_new_bar and not send_health_report:
+                    cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="waiting_next_bar"))
                     continue  # 没有新数据
                 
                 if is_new_bar:
@@ -1172,11 +1224,16 @@ class OKXSignalGUI:
                         self.message_queue.put(('log', (f"已通知过同一根K线信号，跳过重复推送: {signal.inst_id} {signal.side}", "INFO")))
                     elif decision.accepted and effective_score >= 6.0:
                         self.message_queue.put(('log', ("质量门未通过，高分候选信号暂不推送飞书", "WARNING")))
+            self._write_latest_scan_status(cycle_health, base_params)
             if send_health_report:
                 self._send_candidate_health_report(cycle_health, base_params)
         
         except Exception as e:
             log.exception("Signal check failed")
+            try:
+                self._write_latest_scan_status([], base_params, error=str(e))
+            except Exception:
+                pass
             self.message_queue.put(('log', (f"信号检测异常: {e}", "ERROR")))
     
     def update_gui(self):

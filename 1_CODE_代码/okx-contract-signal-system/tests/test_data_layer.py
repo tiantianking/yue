@@ -83,6 +83,44 @@ def test_realtime_store_preserves_quote_volume(tmp_path) -> None:
     assert (tmp_path / "ADA_USDT_USDT_15m.parquet").name == store._get_file_path("ADA-USDT-SWAP").name
 
 
+def test_realtime_store_overwrites_same_bar_without_dtype_error(tmp_path) -> None:
+    store = RealtimeDataStore(tmp_path, timeframe="15m")
+    inst_id = "BTC-USDT-SWAP"
+    store._cache[inst_id] = pd.DataFrame(
+        {
+            "ts": [pd.Timestamp("2026-06-15T18:00:00Z")],
+            "open": [66784.3],
+            "high": [66845.5],
+            "low": [66633.8],
+            "close": [66828.3],
+            "volume": [88823.72],
+            "quote_volume": [59271158.11091],
+            "symbol": [inst_id],
+            "timeframe": ["15m"],
+            "is_closed": [False],
+        }
+    )
+
+    store.append_candle(
+        inst_id,
+        {
+            "ts": pd.Timestamp("2026-06-15T18:00:00Z"),
+            "open": 66784.3,
+            "high": 66850.0,
+            "low": 66633.8,
+            "close": 66840.0,
+            "volume": 90035.49768,
+            "quote_volume": 60000000.0,
+            "is_closed": False,
+        },
+    )
+
+    frame = store.load(inst_id)
+    assert len(frame) == 1
+    assert frame.iloc[-1]["close"] == 66840.0
+    assert frame.iloc[-1]["volume"] == 90035.49768
+
+
 def test_gap_sync_stops_batch_after_rest_unavailable(tmp_path, monkeypatch) -> None:
     stale = pd.DataFrame(
         {

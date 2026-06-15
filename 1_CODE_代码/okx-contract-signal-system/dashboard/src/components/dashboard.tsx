@@ -246,6 +246,37 @@ function SignalPanel({ data }: { data: DashboardPayload }) {
   );
 }
 
+function RuntimePanel({ data }: { data: DashboardPayload }) {
+  const scan = data.latest_scan;
+  const ws = scan?.websocket;
+  const scanAge = minutesSince(scan?.generated_at);
+  const scanFresh = typeof scanAge === "number" && scanAge <= 2;
+  const wsHealthy = Boolean(ws?.running && ws?.connected && !ws?.degraded);
+  const tone = wsHealthy && scanFresh ? "green" : "red";
+  return (
+    <div className="rounded-lg border border-[#9be7e3] bg-white/90 p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm font-bold text-zinc-900">
+          <Activity className="h-4 w-4 text-[#008f8a]" />
+          运行状态
+        </div>
+        <Badge tone={tone}>{wsHealthy && scanFresh ? "正常" : "异常"}</Badge>
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <MetricTile label="WebSocket" value={wsHealthy ? "已连接" : "未正常"} tone={wsHealthy ? "green" : "red"} />
+        <MetricTile label="扫描刷新" value={ageText(scanAge)} tone={scanFresh ? "green" : "red"} />
+        <MetricTile label="重连次数" value={integerText(ws?.reconnect_count)} tone={(ws?.reconnect_count ?? 0) === 0 ? "green" : "amber"} />
+        <MetricTile label="检查币种" value={integerText(scan?.symbols_checked)} />
+      </div>
+      {ws?.last_error || scan?.error ? (
+        <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-700">
+          {scan?.error ?? ws?.last_error}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function QualityPanel({ data }: { data: DashboardPayload }) {
   const stress = data.stress_checks;
   return (
@@ -581,6 +612,7 @@ export function Dashboard() {
           </div>
 
           <aside className="grid gap-4">
+            <RuntimePanel data={data} />
             <SignalPanel data={data} />
             <QualityPanel data={data} />
             <BackfillPanel

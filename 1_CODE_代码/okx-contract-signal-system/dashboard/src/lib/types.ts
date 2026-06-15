@@ -60,9 +60,15 @@ export type LatestScanStatus = {
   ready_count?: number;
   websocket?: {
     running?: boolean;
+    connected?: boolean;
     degraded?: boolean;
     reconnect_count?: number;
     last_error?: string | null;
+    last_open_at?: number | null;
+    last_message_at?: number | null;
+    last_close?: { code?: number | null; message?: string | null } | null;
+    url?: string;
+    proxy?: string | null;
   } | null;
   symbols?: Array<{
     symbol?: string;

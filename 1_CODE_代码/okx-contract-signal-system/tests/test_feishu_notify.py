@@ -106,6 +106,10 @@ def test_candidate_health_report_sends_even_without_candidates(monkeypatch) -> N
     assert "优先看: 无" in text
 
 
+def test_waiting_next_bar_health_reason_is_readable() -> None:
+    assert feishu._health_reason_label("waiting_next_bar") == "等待下一根K线"
+
+
 def test_signal_notification_store_persists_dedupe_keys(tmp_path) -> None:
     path = tmp_path / "signal_notifications.json"
     key = signal_notification_key(

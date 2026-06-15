@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import socket
 import time
 import threading
 import contextlib
@@ -44,6 +45,45 @@ from okx_signal_system.features.indicators import build_feature_frame
 from okx_signal_system.timeframe import default_trend_timeframe, ratio_bars, timeframe_spec
 
 log = logging.getLogger(__name__)
+DEFAULT_LOCAL_PROXY = "http://127.0.0.1:1088"
+
+
+def _tcp_port_open(host: str, port: int, timeout: float = 0.25) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _okx_ws_proxy_url() -> str | None:
+    configured = os.environ.get("OKX_WS_PROXY", "").strip()
+    if configured.lower() in {"0", "false", "off", "none"}:
+        return None
+    if configured:
+        return configured
+    if _tcp_port_open("127.0.0.1", 1088):
+        return DEFAULT_LOCAL_PROXY
+    return None
+
+
+def _websocket_proxy_options(proxy_url: str | None) -> dict[str, Any]:
+    if not proxy_url:
+        return {}
+    from urllib.parse import urlparse
+
+    parsed = urlparse(proxy_url)
+    if not parsed.hostname:
+        return {}
+    options: dict[str, Any] = {
+        "http_proxy_host": parsed.hostname,
+        "http_proxy_port": parsed.port or (443 if parsed.scheme == "https" else 80),
+        "proxy_type": (parsed.scheme or "http").lower(),
+        "http_proxy_timeout": 8,
+    }
+    if parsed.username:
+        options["http_proxy_auth"] = (parsed.username, parsed.password or "")
+    return options
 
 # 缓存配置
 CACHE_TTL_SECONDS = 5  # 缓存5秒
@@ -233,11 +273,11 @@ class RealtimeDataStore:
             "is_closed": bool(candle.get("is_closed", True)),
         }])
 
-        # 去重 + 追加
-        if len(df) > 0 and new_row["ts"].iloc[0] == df["ts"].iloc[-1]:
-            df.iloc[-1] = new_row.iloc[0]
-        else:
-            df = pd.concat([df, new_row], ignore_index=True)
+        # Merge then de-duplicate instead of assigning by row; old parquet
+        # columns may have stricter dtypes than live float payloads.
+        df = pd.concat([df, new_row], ignore_index=True)
+        df["ts"] = pd.to_datetime(df["ts"], utc=True)
+        df = df.drop_duplicates(subset=["ts"], keep="last").sort_values("ts").reset_index(drop=True)
 
         # 保持最新1000根K线在内存
         if len(df) > 1000:
@@ -323,6 +363,11 @@ class OKXWebSocketClient:
         self._max_reconnect = 10
         self._degraded = False
         self._last_error: str | None = None
+        self._opened = threading.Event()
+        self._connected = False
+        self._last_message_at: float | None = None
+        self._last_open_at: float | None = None
+        self._last_close: dict[str, Any] | None = None
 
         # 回调函数
         self.on_candle = on_candle
@@ -336,7 +381,7 @@ class OKXWebSocketClient:
         configured = os.environ.get("OKX_PUBLIC_WS_URL", "").strip()
         if configured:
             return configured
-        return "wss://ws.okx.com:8443/ws/v5/public"
+        return "wss://ws.okx.com:8443/ws/v5/business"
 
     def _is_expected_ws_disconnect(self, error: Any) -> bool:
         text = str(error or "").lower()
@@ -352,10 +397,17 @@ class OKXWebSocketClient:
         self._reconnect_count = 0
         self._degraded = False
         self._last_error = None
+        self._connected = False
+        self._opened.clear()
 
         try:
             self._start_websocket()
-            return True
+            if not self._opened.wait(timeout=12):
+                self._degraded = True
+                self._last_error = "websocket_open_timeout"
+                log.error("WebSocket did not open within 12s")
+                return False
+            return self._connected
         except Exception as e:
             self._degraded = True
             self._last_error = str(e)
@@ -376,17 +428,23 @@ class OKXWebSocketClient:
         def on_message(ws, message):
             try:
                 data = json.loads(message)
+                self._last_message_at = time.time()
                 self._handle_message(data)
             except Exception as e:
                 log.error(f"WebSocket message error: {e}")
 
         def on_error(ws, error):
+            self._connected = False
+            self._degraded = True
+            self._last_error = str(error)
             if self._is_expected_ws_disconnect(error):
                 log.warning("WebSocket disconnected by remote peer; REST fallback remains active")
             else:
                 log.error(f"WebSocket error: {error}")
 
         def on_close(ws, close_status_code, close_msg):
+            self._connected = False
+            self._last_close = {"code": close_status_code, "message": close_msg}
             close_text = f"{close_status_code} {close_msg}"
             if self._is_expected_ws_disconnect(close_text):
                 log.warning("WebSocket closed by remote peer; REST fallback remains active")
@@ -396,8 +454,11 @@ class OKXWebSocketClient:
 
         def on_open(ws):
             log.info("WebSocket connected")
+            self._connected = True
             self._degraded = False
             self._last_error = None
+            self._last_open_at = time.time()
+            self._opened.set()
             self._reconnect_count = 0
             self._subscribe_channels()
 
@@ -411,7 +472,11 @@ class OKXWebSocketClient:
 
         def run_ws():
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                self._ws.run_forever()
+                self._ws.run_forever(
+                    ping_interval=20,
+                    ping_timeout=10,
+                    **_websocket_proxy_options(_okx_ws_proxy_url()),
+                )
 
         self._thread = threading.Thread(target=run_ws, daemon=True)
         self._thread.start()
@@ -434,22 +499,13 @@ class OKXWebSocketClient:
             self._ws.send(json.dumps(msg))
             log.info(f"Subscribed: {inst_id} {self._candle_channel}")
 
-        # 订阅ticker数据
-        for inst_id in self._subscriptions:
-            args = [{
-                "channel": "tickers",
-                "instId": inst_id,
-            }]
-            msg = {
-                "op": "subscribe",
-                "args": args
-            }
-            self._ws.send(json.dumps(msg))
-            log.info(f"Subscribed: {inst_id} tickers")
-
     def _handle_message(self, data: dict):
         """处理接收到的消息"""
         if "event" in data:
+            if data.get("event") == "error":
+                self._degraded = True
+                self._last_error = f"{data.get('code')}: {data.get('msg')}"
+                log.error("WebSocket subscription error: %s", self._last_error)
             return  # 订阅确认等事件
 
         if "data" not in data:
@@ -464,14 +520,18 @@ class OKXWebSocketClient:
             for item in items:
                 # K线格式: [ts, open, high, low, close, vol, volCcy, volCcyQuote, confirm]
                 confirm = str(item[8]) if len(item) > 8 else "1"
+                frame = okx_candles_to_frame([item])
+                if frame.empty:
+                    continue
+                row = frame.iloc[-1]
                 candle = {
-                    "ts": item[0],
-                    "open": float(item[1]),
-                    "high": float(item[2]),
-                    "low": float(item[3]),
-                    "close": float(item[4]),
-                    "volume": float(item[5]),
-                    "quote_volume": float(item[7]) if len(item) > 7 and item[7] not in (None, "") else None,
+                    "ts": row["ts"],
+                    "open": float(row["open"]),
+                    "high": float(row["high"]),
+                    "low": float(row["low"]),
+                    "close": float(row["close"]),
+                    "volume": float(row["volume"]),
+                    "quote_volume": float(row["quote_volume"]) if pd.notna(row.get("quote_volume")) else None,
                     "is_closed": confirm == "1",
                 }
                 self._candle_cache[inst_id] = candle
@@ -519,6 +579,7 @@ class OKXWebSocketClient:
         """断开连接"""
         self._running = False
         self._degraded = False
+        self._connected = False
         if self._ws:
             self._ws.close()
         if self._thread and self._thread.is_alive():
@@ -527,9 +588,15 @@ class OKXWebSocketClient:
     def status(self) -> dict[str, Any]:
         return {
             "running": self._running,
+            "connected": self._connected,
             "degraded": self._degraded,
             "reconnect_count": self._reconnect_count,
             "last_error": self._last_error,
+            "last_open_at": self._last_open_at,
+            "last_message_at": self._last_message_at,
+            "last_close": self._last_close,
+            "url": self._get_wss_url(),
+            "proxy": _okx_ws_proxy_url(),
             "subscriptions": sorted(self._subscriptions),
         }
 
@@ -636,14 +703,14 @@ class OKXRealtimeAPI:
         )
 
         success = self._ws_client.connect(symbols)
-        self._connected = True
+        self._connected = bool(success)
 
         if success:
             log.info(f"OKX WebSocket connected, watching {len(symbols)} symbols")
         else:
-            log.warning("OKX WebSocket unavailable; live monitor will use REST/local candle fallback")
+            log.error("OKX WebSocket unavailable; live monitor not fully healthy")
 
-        return True
+        return success
 
     async def disconnect(self):
         """断开连接"""
@@ -656,7 +723,7 @@ class OKXRealtimeAPI:
 
     def is_connected(self) -> bool:
         """检查连接状态"""
-        return self._connected and self._ws_client is not None
+        return bool(self._connected and self._ws_client and self._ws_client.status().get("connected"))
 
     async def get_market_data(self, inst_id: str) -> MarketData | None:
         """
