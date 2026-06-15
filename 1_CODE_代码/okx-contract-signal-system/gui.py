@@ -27,7 +27,7 @@ if str(_src_path) not in sys.path:
 
 log = logging.getLogger(__name__)
 
-APP_VERSION = "v3.32"
+APP_VERSION = "v3.33"
 DASHBOARD_HOST = "127.0.0.1"
 DASHBOARD_PORT = 3001
 DASHBOARD_URL = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}"
@@ -142,6 +142,7 @@ class OKXSignalGUI:
         self._last_candidate_health_report_ts = 0.0
         self._signal_notification_store = None
         self._b_tier_summary_store = None
+        self._lifecycle_store = None
         self._runtime_modules: dict[str, dict] = {}
         self._background_tasks: list[asyncio.Task] = []
         self.dashboard_process = None
@@ -261,6 +262,7 @@ class OKXSignalGUI:
 
             path = project_paths().output_dir / "latest_scan_status.json"
             ws_status = self.api._ws_client.status() if self.api and self.api._ws_client else None
+            lifecycle_summary = self._signal_lifecycle_store().summary()
             payload = {
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "status": "error" if error else "running",
@@ -271,6 +273,7 @@ class OKXSignalGUI:
                 "push_allowed": self._quality_gate_allows_push,
                 "selected_params": asdict(params),
                 "websocket": ws_status,
+                "lifecycle_summary": lifecycle_summary,
                 "modules": self._runtime_modules,
                 "symbols_checked": len(items),
                 "ready_count": sum(1 for item in items if item.get("would_push")),
@@ -456,6 +459,13 @@ class OKXSignalGUI:
 
             self._b_tier_summary_store = BTierSummaryNotificationStore()
         return self._b_tier_summary_store
+
+    def _signal_lifecycle_store(self):
+        if self._lifecycle_store is None:
+            from okx_signal_system.signal_quality import SignalLifecycleStore
+
+            self._lifecycle_store = SignalLifecycleStore()
+        return self._lifecycle_store
 
     def _signal_notification_key(self, signal) -> str:
         from okx_signal_system.notify.signal_dedupe import signal_notification_key
@@ -1186,7 +1196,7 @@ class OKXSignalGUI:
             from okx_signal_system.data.closed_backfill import latest_closed_candle_start
             from okx_signal_system.data.loader import closed_bars
             from okx_signal_system.signal_runtime import DEFAULT_MAX_SIGNAL_LAG_MINUTES, signal_is_stale
-            from okx_signal_system.signal_quality import SignalCandidate, assign_tiers
+            from okx_signal_system.signal_quality import SignalCandidate, assign_tiers, lifecycle_payload
             from okx_signal_system.strategy.vote_gate import min_vote_approval_rate, vote_gate_passed
 
             # 加载策略参数
@@ -1234,6 +1244,7 @@ class OKXSignalGUI:
                     continue  # 数据不足（至少需要80根K线计算EMA60+突破位）
 
                 candidate_history[inst_id] = df
+                self._signal_lifecycle_store().update_symbol(inst_id, df)
                 expected_closed = pd.Timestamp(latest_closed_candle_start(self.api.timeframe.key, settle_seconds=60))
                 latest_closed = pd.to_datetime(df["ts"].iloc[-1], utc=True)
                 if latest_closed < expected_closed:
@@ -1440,21 +1451,37 @@ class OKXSignalGUI:
                     )))
                     
                     if would_push:
+                        notify_key = self._signal_notification_key(signal)
+                        lifecycle_record = self._signal_lifecycle_store().record_signal(
+                            signal,
+                            signal_id=notify_key,
+                            invalidation_price=signal.stop_loss,
+                            signal_timeframe=self.api.timeframe.key if self.api else None,
+                            trend_timeframe=self.api.trend_timeframe.key if self.api else None,
+                        )
+                        payload = {
+                            "signal": asdict(signal),
+                            "risk": asdict(decision),
+                            "live_order_enabled": False,
+                            "mode": "desktop_manual_confirmation_only",
+                            "dataset": self.api.dataset,
+                            "signal_timeframe": self.api.timeframe.key,
+                            "trend_timeframe": self.api.trend_timeframe.key,
+                            "selected_params": asdict(params),
+                        }
+                        if lifecycle_record is not None:
+                            lifecycle = lifecycle_payload(lifecycle_record)
+                            payload["signal"]["invalidation_price"] = lifecycle_record.invalidation_price
+                            payload["lifecycle"] = lifecycle
+                            health_item["invalidation_price"] = lifecycle_record.invalidation_price
+                            health_item["lifecycle_status"] = lifecycle_record.status
+                            health_item["lifecycle"] = lifecycle
                         ready_candidates.append(
                             SignalCandidate(
                                 signal=signal,
                                 decision=decision,
-                                notify_key=self._signal_notification_key(signal),
-                                payload={
-                                    "signal": asdict(signal),
-                                    "risk": asdict(decision),
-                                    "live_order_enabled": False,
-                                    "mode": "desktop_manual_confirmation_only",
-                                    "dataset": self.api.dataset,
-                                    "signal_timeframe": self.api.timeframe.key,
-                                    "trend_timeframe": self.api.trend_timeframe.key,
-                                    "selected_params": asdict(params),
-                                },
+                                notify_key=notify_key,
+                                payload=payload,
                                 health_item=health_item,
                                 rank_score=float(effective_score)
                                 + min(float(decision.risk_reward_ratio or 0.0), 8.0) * 0.15
@@ -1501,6 +1528,8 @@ class OKXSignalGUI:
                         tier=candidate.tier,
                         rank=candidate.rank,
                         total_candidates=len(selection.ranked),
+                        lifecycle_status=(candidate.payload.get("lifecycle") or {}).get("status"),
+                        invalidation_price=candidate.invalidation_price,
                     )
                     if sent:
                         self._mark_signal_notified(candidate.notify_key, signal, score=float(candidate.raw_score))

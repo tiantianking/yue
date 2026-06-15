@@ -109,6 +109,8 @@ def send_signal_alert(
     tier: str | None = None,
     rank: int | None = None,
     total_candidates: int | None = None,
+    lifecycle_status: str | None = None,
+    invalidation_price: float | None = None,
 ) -> bool:
     direction = "LONG" if side == "long" else "SHORT"
     stop_pct = abs(entry_ref - stop_loss) / entry_ref * 100 if entry_ref else 0.0
@@ -132,6 +134,10 @@ def send_signal_alert(
         lines.append(f"评分: {signal_score:.1f}/10")
     if rank is not None and total_candidates is not None:
         lines.append(f"21币横向排名: {rank}/{total_candidates}")
+    if lifecycle_status:
+        lines.append(f"signal_status: {lifecycle_status}")
+    if invalidation_price is not None:
+        lines.append(f"invalidation_price: {invalidation_price:.8f}")
     if max_loss_pct is not None:
         lines.append(f"账户止损风险: {max_loss_pct:.2%}")
     if margin_loss_pct is not None:
@@ -234,14 +240,18 @@ def send_b_tier_summary(
         if rr is None:
             rr = _candidate_signal_value(candidate, "risk_reward_ratio", None)
         reason = _candidate_health_value(candidate, "reason", None)
+        lifecycle_status = _candidate_health_value(candidate, "lifecycle_status", None)
+        invalidation_price = _candidate_health_value(candidate, "invalidation_price", None)
         if not reason:
             reason_codes = _candidate_signal_value(candidate, "reason_codes", ())
             reason = ",".join(reason_codes) if reason_codes else "-"
         score_text = f"{float(score):.1f}" if score is not None else "-"
         rr_text = f"{float(rr):.2f}R" if rr is not None else "-"
+        lifecycle_text = f" status={lifecycle_status}" if lifecycle_status else ""
+        invalidation_text = f" invalidation={float(invalidation_price):.8f}" if invalidation_price is not None else ""
         lines.append(
             f"- #{rank} {symbol} {side} "
-            f"score={score_text} rr={rr_text} reason={reason}"
+            f"score={score_text} rr={rr_text} reason={reason}{lifecycle_text}{invalidation_text}"
         )
     return send_text("\n".join(lines))
 

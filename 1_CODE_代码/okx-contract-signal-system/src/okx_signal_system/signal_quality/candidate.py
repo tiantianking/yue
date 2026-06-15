@@ -28,5 +28,10 @@ class SignalCandidate:
         return str(getattr(self.signal, "side", ""))
 
     @property
+    def invalidation_price(self) -> float | None:
+        value = getattr(self.signal, "stop_loss", None)
+        return float(value) if value is not None else None
+
+    @property
     def candle_time(self) -> pd.Timestamp:
         return pd.Timestamp(getattr(self.signal, "ts"))

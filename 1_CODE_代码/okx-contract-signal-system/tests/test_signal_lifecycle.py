@@ -1,0 +1,108 @@
+from __future__ import annotations
+
+import pandas as pd
+
+from okx_signal_system.signal_quality import SignalLifecycleStore
+from okx_signal_system.strategy.trend_breakout import TradeSignal
+
+
+def _signal(*, side: str = "long", ts: str = "2026-01-01T00:00:00Z", entry_ref: float = 100.0, stop_loss: float = 95.0, take_profit: float = 115.0, max_hold_bars: int = 3) -> TradeSignal:
+    return TradeSignal(
+        ts=pd.Timestamp(ts),
+        inst_id="BTC-USDT-SWAP",
+        side=side,
+        entry_ref=entry_ref,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        max_hold_bars=max_hold_bars,
+        reason_codes=("TEST",),
+        signal_score=8.0,
+        risk_reward_ratio=3.0,
+    )
+
+
+def _frame(rows: list[dict]) -> pd.DataFrame:
+    return pd.DataFrame(rows)
+
+
+def test_lifecycle_confirmed_after_later_closed_candle(tmp_path) -> None:
+    store = SignalLifecycleStore(tmp_path / "lifecycle.json")
+    signal = _signal()
+    record = store.record_signal(signal, signal_id="sig-1")
+    assert record is not None
+    assert record.status == "TRIGGERED"
+
+    first = _frame(
+        [
+            {"ts": pd.Timestamp("2026-01-01T00:15:00Z"), "close": 99.0, "is_closed": True},
+        ]
+    )
+    assert store.update_symbol("BTC-USDT-SWAP", first) == 1
+    assert store.get("sig-1").status == "TRIGGERED"
+
+    second = _frame(
+        [
+            {"ts": pd.Timestamp("2026-01-01T00:15:00Z"), "close": 99.0, "is_closed": True},
+            {"ts": pd.Timestamp("2026-01-01T00:30:00Z"), "close": 101.0, "is_closed": True},
+        ]
+    )
+    assert store.update_symbol("BTC-USDT-SWAP", second) == 1
+    assert store.get("sig-1").status == "CONFIRMED"
+
+
+def test_lifecycle_invalidates_on_immediate_reversal(tmp_path) -> None:
+    store = SignalLifecycleStore(tmp_path / "lifecycle.json")
+    signal = _signal(stop_loss=95.0)
+    store.record_signal(signal, signal_id="sig-2")
+
+    frame = _frame(
+        [
+            {"ts": pd.Timestamp("2026-01-01T00:15:00Z"), "close": 94.5, "is_closed": True},
+        ]
+    )
+    assert store.update_symbol("BTC-USDT-SWAP", frame) == 1
+    record = store.get("sig-2")
+    assert record.status == "INVALIDATED"
+    assert record.invalidated_at is not None
+
+
+def test_lifecycle_ignores_unclosed_reversal(tmp_path) -> None:
+    store = SignalLifecycleStore(tmp_path / "lifecycle.json")
+    signal = _signal(stop_loss=95.0)
+    store.record_signal(signal, signal_id="sig-unclosed")
+
+    frame = _frame(
+        [
+            {"ts": pd.Timestamp("2026-01-01T00:15:00Z"), "close": 94.5, "is_closed": False},
+        ]
+    )
+    assert store.update_symbol("BTC-USDT-SWAP", frame) == 0
+    assert store.get("sig-unclosed").status == "TRIGGERED"
+
+
+def test_lifecycle_expires_after_hold_limit(tmp_path) -> None:
+    store = SignalLifecycleStore(tmp_path / "lifecycle.json")
+    signal = _signal(max_hold_bars=2)
+    store.record_signal(signal, signal_id="sig-3")
+
+    frame = _frame(
+        [
+            {"ts": pd.Timestamp("2026-01-01T00:15:00Z"), "close": 99.0, "is_closed": True},
+            {"ts": pd.Timestamp("2026-01-01T00:30:00Z"), "close": 99.5, "is_closed": True},
+        ]
+    )
+    assert store.update_symbol("BTC-USDT-SWAP", frame) == 1
+    record = store.get("sig-3")
+    assert record.status == "EXPIRED"
+    assert record.expired_at is not None
+
+
+def test_lifecycle_persists_records(tmp_path) -> None:
+    path = tmp_path / "lifecycle.json"
+    store = SignalLifecycleStore(path)
+    store.record_signal(_signal(side="short", stop_loss=105.0, entry_ref=100.0), signal_id="sig-4")
+    reloaded = SignalLifecycleStore(path)
+    record = reloaded.get("sig-4")
+    assert record is not None
+    assert record.invalidation_price == 105.0
+    assert record.status == "TRIGGERED"

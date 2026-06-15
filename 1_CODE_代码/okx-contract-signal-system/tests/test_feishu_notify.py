@@ -71,6 +71,32 @@ def test_signal_alert_includes_tier_and_cross_symbol_rank(monkeypatch) -> None:
     assert "21币横向排名: 1/6" in sent[0]
 
 
+def test_signal_alert_includes_lifecycle_status(monkeypatch) -> None:
+    sent: list[str] = []
+
+    def fake_send_text(text: str, *args, **kwargs) -> bool:
+        sent.append(text)
+        return True
+
+    monkeypatch.setattr(feishu, "send_text", fake_send_text)
+
+    ok = feishu.send_signal_alert(
+        inst_id="BTC-USDT-SWAP",
+        side="long",
+        entry_ref=100.0,
+        stop_loss=95.0,
+        take_profit=117.5,
+        qty=1.0,
+        leverage=3.0,
+        lifecycle_status="TRIGGERED",
+        invalidation_price=95.0,
+    )
+
+    assert ok
+    assert "signal_status: TRIGGERED" in sent[0]
+    assert "invalidation_price: 95.00000000" in sent[0]
+
+
 def test_candidate_health_report_is_not_a_trade_signal(monkeypatch) -> None:
     sent: list[str] = []
 

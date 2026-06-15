@@ -66,3 +66,33 @@
 - `docs/okx-signal-quality-next-steps.md`: moved Phase 4 into completed v3.32 work and left Phase 5 as the next execution phase.
 - `progress.md`: appended this task record.
 - Rollback method: revert the upcoming commit `feat: summarize b tier signal candidates`.
+
+## 2026-06-16 - Task: Track Signal Lifecycle States
+### What was done
+- Added Phase 5 lifecycle tracking so push-eligible signals are recorded as `TRIGGERED`.
+- Added invalidation price and lifecycle status to candidate payloads, health output, and Feishu signal summaries.
+- Updated realtime and GUI scans to refresh lifecycle state from closed K-line history only.
+- Added persistent lifecycle JSON output under `outputs/signal_lifecycle.json`.
+- Bumped version metadata to v3.33.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m compileall gui.py main.py src` passed.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest` passed, 115 tests.
+- `npm.cmd run lint` passed from `D:\JIAOYI-CX\1_CODE_代码\okx-contract-signal-system\dashboard`.
+- `npm.cmd run build` passed from `D:\JIAOYI-CX\1_CODE_代码\okx-contract-signal-system\dashboard`.
+### Notes
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/signal_quality/lifecycle.py`: added persistent signal lifecycle records and closed-candle state transitions.
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/signal_quality/candidate.py`: exposed candidate invalidation price.
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/signal_quality/__init__.py`: exported lifecycle helpers.
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/exchange/realtime.py`: updates lifecycle records and includes lifecycle summary in scan status.
+- `1_CODE_代码/okx-contract-signal-system/gui.py`: applies the same lifecycle handling in desktop scans.
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/notify/feishu.py`: includes lifecycle status and invalidation price in alert text.
+- `1_CODE_代码/okx-contract-signal-system/tests/test_signal_lifecycle.py`: covers trigger, confirm, invalidation, expiry, closed-candle filtering, and persistence.
+- `1_CODE_代码/okx-contract-signal-system/tests/test_feishu_notify.py`: covers lifecycle fields in signal alerts.
+- `1_CODE_代码/okx-contract-signal-system/main.py`: bumped app version to v3.33.
+- `1_CODE_代码/okx-contract-signal-system/pyproject.toml`: bumped package version to 3.33.0.
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/__init__.py`: bumped package runtime version to 3.33.0.
+- `1_CODE_代码/okx-contract-signal-system/start.bat`: bumped launcher version text to v3.33.
+- `docs/okx-runtime-health-v3.33.md`: added the v3.33 runtime health note.
+- `docs/okx-signal-quality-next-steps.md`: moved Phase 5 into completed v3.33 work and left Phase 6 as the next execution phase.
+- `progress.md`: appended this task record.
+- Rollback method: revert the upcoming commit `feat: track signal lifecycle states`.

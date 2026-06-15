@@ -47,7 +47,7 @@ from okx_signal_system.signal_runtime import (
     seconds_until_next_signal_scan,
     signal_is_stale,
 )
-from okx_signal_system.signal_quality import SignalCandidate, assign_tiers
+from okx_signal_system.signal_quality import SignalCandidate, SignalLifecycleStore, assign_tiers, lifecycle_payload
 from okx_signal_system.timeframe import default_trend_timeframe, ratio_bars, timeframe_spec
 
 log = logging.getLogger(__name__)
@@ -986,6 +986,7 @@ class LiveSignalMonitor:
         self._min_vote_approval_rate = min_vote_approval_rate(self.api.config if isinstance(self.api.config, dict) else {})
         self._shadow_score_min_closed = int(learning_cfg.get("shadow_score_min_closed_signals", 6))
         self._shadow_ledger = ShadowTradingLedger()
+        self._lifecycle_store = SignalLifecycleStore()
         self._quality_gate_allows_push = False
         self._last_candidate_health_report_ts = 0.0
         self._last_ready_signal: dict[str, Any] | None = None
@@ -1151,6 +1152,10 @@ class LiveSignalMonitor:
             shadow_summary = self._shadow_ledger.summary()
         except Exception:
             shadow_summary = {}
+        try:
+            lifecycle_summary = self._lifecycle_store.summary()
+        except Exception:
+            lifecycle_summary = {}
         ws_status = self.api._ws_client.status() if self.api._ws_client else None
         payload = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -1163,6 +1168,7 @@ class LiveSignalMonitor:
             "selected_params": asdict(self._strategy_params),
             "websocket": ws_status,
             "shadow_summary": shadow_summary,
+            "lifecycle_summary": lifecycle_summary,
             "symbols_checked": len(items),
             "ready_count": sum(1 for item in items if item.get("would_push")),
             "symbols": items,
@@ -1263,6 +1269,8 @@ class LiveSignalMonitor:
                         tier=candidate.tier,
                         rank=candidate.rank,
                         total_candidates=len(selection.ranked),
+                        lifecycle_status=(candidate.payload.get("lifecycle") or {}).get("status"),
+                        invalidation_price=candidate.invalidation_price,
                     )
                     if signal_recorded:
                         self._shadow_ledger.record_signal(signal, decision)
@@ -1352,6 +1360,7 @@ class LiveSignalMonitor:
                         continue
                     candidate_history[inst_id] = df
                     self._shadow_ledger.update_symbol(inst_id, df)
+                    self._lifecycle_store.update_symbol(inst_id, df)
                     from okx_signal_system.training.startup_quality import is_latest_bar_fresh
                     from okx_signal_system.data.closed_backfill import latest_closed_candle_start
                     if not is_latest_bar_fresh(df, max_lag_hours=self.api.timeframe.fresh_lag_hours):
@@ -1494,6 +1503,20 @@ class LiveSignalMonitor:
 
                     if would_push:
                         notify_key = self._signal_notification_key(signal)
+                        lifecycle_record = self._lifecycle_store.record_signal(
+                            signal,
+                            signal_id=notify_key,
+                            invalidation_price=signal.stop_loss,
+                            signal_timeframe=self.api.timeframe.key,
+                            trend_timeframe=self.api.trend_timeframe.key,
+                        )
+                        if lifecycle_record is not None:
+                            lifecycle = lifecycle_payload(lifecycle_record)
+                            signal_payload["signal"]["invalidation_price"] = lifecycle_record.invalidation_price
+                            signal_payload["lifecycle"] = lifecycle
+                            health_item["invalidation_price"] = lifecycle_record.invalidation_price
+                            health_item["lifecycle_status"] = lifecycle_record.status
+                            health_item["lifecycle"] = lifecycle
                         ready_candidates.append(
                             SignalCandidate(
                                 signal=signal,
