@@ -47,6 +47,7 @@ from okx_signal_system.signal_runtime import (
     seconds_until_next_signal_scan,
     signal_is_stale,
 )
+from okx_signal_system.signal_quality import SignalCandidate, assign_tiers
 from okx_signal_system.timeframe import default_trend_timeframe, ratio_bars, timeframe_spec
 
 log = logging.getLogger(__name__)
@@ -1171,12 +1172,88 @@ class LiveSignalMonitor:
         except Exception as exc:
             log.warning("Candidate health report failed: %s", exc)
 
+    def _candidate_rank_score(self, *, final_score: float, decision: RiskDecision, shadow_adjustment: float = 0.0) -> float:
+        rr = float(decision.risk_reward_ratio or 0.0)
+        leverage = float(decision.leverage_used or 0.0)
+        return float(final_score) + min(rr, 8.0) * 0.15 + float(shadow_adjustment or 0.0) - max(0.0, leverage - 5.0) * 0.05
+
+    async def _publish_tiered_candidates(self, candidates: list[SignalCandidate]) -> None:
+        selection = assign_tiers(candidates, max_tier_a=2)
+        for candidate in selection.ranked:
+            candidate.health_item["tier"] = candidate.tier
+            candidate.health_item["rank"] = candidate.rank
+            candidate.health_item["rank_score"] = candidate.rank_score
+        for candidate in selection.tier_a:
+            if self._signal_notification_store.has(candidate.notify_key):
+                self._last_ready_signal = candidate.payload
+                log.info("Signal already notified; skipping duplicate push: %s %s", candidate.inst_id, candidate.side)
+                continue
+            signal = candidate.signal
+            decision = candidate.decision
+            self._last_ready_signal = candidate.payload
+            log.info(
+                "A-tier signal: %s %s rank=%s score=%.2f",
+                candidate.inst_id,
+                candidate.side.upper(),
+                candidate.rank,
+                candidate.rank_score,
+            )
+            signal_recorded = False
+            if self.signal_callback:
+                try:
+                    callback_result = self.signal_callback(signal, decision)
+                    signal_recorded = callback_result is not False
+                    if signal_recorded:
+                        self._shadow_ledger.record_signal(signal, decision)
+                except Exception as cb_err:
+                    log.error("Signal callback error: %s", cb_err)
+                    signal_recorded = False
+            else:
+                try:
+                    from okx_signal_system.notify.feishu import send_signal_alert
+
+                    signal_recorded = send_signal_alert(
+                        inst_id=signal.inst_id,
+                        side=signal.side,
+                        entry_ref=signal.entry_ref or 0,
+                        stop_loss=signal.stop_loss or 0,
+                        take_profit=signal.take_profit or 0,
+                        qty=decision.qty or 0,
+                        leverage=decision.leverage_used,
+                        reason=", ".join(signal.reason_codes) if signal.reason_codes else "",
+                        signal_score=decision.signal_score,
+                        risk_reward_ratio=decision.risk_reward_ratio,
+                        stop_reason=decision.stop_reason or "",
+                        tp_reason=decision.tp_reason or "",
+                        max_loss_pct=getattr(decision, "max_loss_pct", None),
+                        margin_loss_pct=getattr(decision, "margin_loss_pct", None),
+                        kline_time=pd.Timestamp(signal.ts).isoformat(),
+                        signal_timeframe=self.api.timeframe.key,
+                        trend_timeframe=self.api.trend_timeframe.key,
+                        tier=candidate.tier,
+                        rank=candidate.rank,
+                        total_candidates=len(selection.ranked),
+                    )
+                    if signal_recorded:
+                        self._shadow_ledger.record_signal(signal, decision)
+                        log.info("Feishu A-tier push sent: %s %s", candidate.inst_id, candidate.side)
+                except Exception as feishu_err:
+                    log.error("Feishu push failed: %s", feishu_err)
+                    signal_recorded = False
+            if signal_recorded:
+                self._mark_signal_notified(candidate.notify_key, signal, score=float(candidate.payload["signal"].get("signal_score") or 0.0))
+            else:
+                log.warning("Signal alert was not delivered; will retry next scan: %s %s", candidate.inst_id, candidate.side)
+        if selection.tier_b:
+            log.info("B-tier candidates retained for summary: %s", len(selection.tier_b))
+
     async def _monitor_loop(self):
         """监控循环 — 信号生成 + 风控 + 环境自适应 + 持仓超时"""
         health_interval = float(os.environ.get("SIGNAL_HEALTH_REPORT_INTERVAL_SECONDS", "3600"))
 
         while self._running:
             cycle_health: list[dict[str, Any]] = []
+            ready_candidates: list[SignalCandidate] = []
             try:
                 # 获取持仓（模拟盘可能401，优雅降级）
                 positions = []
@@ -1349,87 +1426,39 @@ class LiveSignalMonitor:
                         health_reason = "score_below_6"
                     else:
                         health_reason = "not_ready"
-                    cycle_health.append(
-                        self._candidate_health_item(
-                            inst_id=inst_id,
-                            reason=health_reason,
-                            row=latest_row,
-                            signal=signal,
-                            regime=regime,
-                            final_score=effective_score,
-                            risk_reason=decision.reason,
-                            shadow_adjustment=shadow_adjustment,
-                            would_push=would_push,
-                        )
+                    health_item = self._candidate_health_item(
+                        inst_id=inst_id,
+                        reason=health_reason,
+                        row=latest_row,
+                        signal=signal,
+                        regime=regime,
+                        final_score=effective_score,
+                        risk_reason=decision.reason,
+                        shadow_adjustment=shadow_adjustment,
+                        would_push=would_push,
                     )
+                    cycle_health.append(health_item)
 
-                    notify_key = self._signal_notification_key(signal) if would_push else ""
-                    already_notified = bool(
-                        notify_key and self._signal_notification_store.has(notify_key)
-                    )
-
-                    if would_push and not already_notified:
-                        self._last_ready_signal = signal_payload
-                        log.info(
-                            f"✅ SIGNAL: {inst_id} {signal.side.upper()} "
-                            f"@ {signal.entry_ref:.2f} | "
-                            f"score={decision.signal_score:.0f}/10 | "
-                            f"regime={self._regime_mgr.get_regime_name_cn()} | "
-                            f"RR={decision.risk_reward_ratio:.1f}:1 | "
-                            f"lev={decision.leverage_used:.1f}x"
+                    if would_push:
+                        notify_key = self._signal_notification_key(signal)
+                        ready_candidates.append(
+                            SignalCandidate(
+                                signal=signal,
+                                decision=decision,
+                                notify_key=notify_key,
+                                payload=signal_payload,
+                                health_item=health_item,
+                                rank_score=self._candidate_rank_score(
+                                    final_score=effective_score,
+                                    decision=decision,
+                                    shadow_adjustment=shadow_adjustment,
+                                ),
+                                raw_score=effective_score,
+                            )
                         )
-                        # 回调通知
-                        signal_recorded = False
-                        if self.signal_callback:
-                            try:
-                                callback_result = self.signal_callback(signal, decision)
-                                signal_recorded = callback_result is not False
-                                if signal_recorded:
-                                    self._shadow_ledger.record_signal(signal, decision)
-                            except Exception as cb_err:
-                                log.error(f"Signal callback error: {cb_err}")
-                                signal_recorded = False
-                        # 内嵌飞书推送（callback 未设置时的 fallback）
-                        else:
-                            try:
-                                from okx_signal_system.notify.feishu import send_signal_alert
-                                signal_recorded = send_signal_alert(
-                                    inst_id=signal.inst_id,
-                                    side=signal.side,
-                                    entry_ref=signal.entry_ref or 0,
-                                    stop_loss=signal.stop_loss or 0,
-                                    take_profit=signal.take_profit or 0,
-                                    qty=decision.qty or 0,
-                                    leverage=decision.leverage_used,
-                                    reason=", ".join(signal.reason_codes) if signal.reason_codes else "",
-                                    signal_score=decision.signal_score,
-                                    risk_reward_ratio=decision.risk_reward_ratio,
-                                    stop_reason=decision.stop_reason or "",
-                                    tp_reason=decision.tp_reason or "",
-                                    max_loss_pct=getattr(decision, 'max_loss_pct', None),
-                                    margin_loss_pct=getattr(decision, 'margin_loss_pct', None),
-                                    kline_time=pd.Timestamp(signal.ts).isoformat(),
-                                    signal_timeframe=self.api.timeframe.key,
-                                    trend_timeframe=self.api.trend_timeframe.key,
-                                )
-                                if signal_recorded:
-                                    self._shadow_ledger.record_signal(signal, decision)
-                                    log.info(f"飞书推送(fallback): {inst_id} {signal.side}")
-                                else:
-                                    log.warning("飞书推送未送达(fallback): %s %s", inst_id, signal.side)
-                            except Exception as feishu_err:
-                                log.error(f"飞书推送失败: {feishu_err}")
-                                signal_recorded = False
-
-                        if signal_recorded:
-                            self._mark_signal_notified(notify_key, signal, score=effective_score)
-                        else:
-                            log.warning("Signal alert was not delivered; will retry: %s %s", inst_id, signal.side)
-                    elif would_push and already_notified:
-                        self._last_ready_signal = signal_payload
-                        log.info("Signal already notified; skipping duplicate push: %s %s", inst_id, signal.side)
 
                 # 持久化
+                await self._publish_tiered_candidates(ready_candidates)
                 self.api.persist_data()
                 self._write_latest_scan_status(cycle_health)
                 now_ts = time.time()

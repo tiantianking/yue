@@ -27,7 +27,7 @@ if str(_src_path) not in sys.path:
 
 log = logging.getLogger(__name__)
 
-APP_VERSION = "v3.28"
+APP_VERSION = "v3.29"
 DASHBOARD_HOST = "127.0.0.1"
 DASHBOARD_PORT = 3001
 DASHBOARD_URL = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}"
@@ -1155,6 +1155,7 @@ class OKXSignalGUI:
             from okx_signal_system.data.closed_backfill import latest_closed_candle_start
             from okx_signal_system.data.loader import closed_bars
             from okx_signal_system.signal_runtime import DEFAULT_MAX_SIGNAL_LAG_MINUTES, signal_is_stale
+            from okx_signal_system.signal_quality import SignalCandidate, assign_tiers
             from okx_signal_system.strategy.vote_gate import min_vote_approval_rate, vote_gate_passed
 
             # 加载策略参数
@@ -1184,6 +1185,7 @@ class OKXSignalGUI:
             if not hasattr(self, '_adaptive_manager'):
                 self._adaptive_manager = AdaptiveParamsManager()
             cycle_health: list[dict] = []
+            ready_candidates: list[SignalCandidate] = []
             
             for inst_id in self._watched_symbols:
                 # 通过统一行情入口读取；WebSocket 不稳时会自动走 REST 兜底刷新。
@@ -1362,18 +1364,17 @@ class OKXSignalGUI:
                         health_reason = "score_below_6"
                     else:
                         health_reason = "not_ready"
-                    cycle_health.append(
-                        self._candidate_health_item(
-                            inst_id=inst_id,
-                            reason=health_reason,
-                            row=last_row,
-                            signal=signal,
-                            regime=regime,
-                            final_score=effective_score,
-                            risk_reason=decision.reason,
-                            would_push=would_push,
-                        )
+                    health_item = self._candidate_health_item(
+                        inst_id=inst_id,
+                        reason=health_reason,
+                        row=last_row,
+                        signal=signal,
+                        regime=regime,
+                        final_score=effective_score,
+                        risk_reason=decision.reason,
+                        would_push=would_push,
                     )
+                    cycle_health.append(health_item)
 
                     signal_type = f"{'多' if signal.side == 'long' else '空'}头突破"
                     leverage_text = f"{decision.leverage_used:.1f}x" if decision.accepted and decision.leverage_used else "N/A"
@@ -1405,45 +1406,77 @@ class OKXSignalGUI:
                         f"| 杠杆{leverage_text} | 盈亏比{rr_text} | {status}", "INFO"
                     )))
                     
-                    notify_key = self._signal_notification_key(signal) if would_push else ""
-                    already_notified = bool(notify_key and self._notification_store().has(notify_key))
-
-                    # 推送飞书（风控通过 + 综合评分≥6；同一K线同一方向只推一次）
-                    if would_push and not already_notified:
-                        try:
-                            from okx_signal_system.notify.feishu import send_signal_alert
-                            sent = send_signal_alert(
-                                inst_id=signal.inst_id,
-                                side=signal.side,
-                                entry_ref=signal.entry_ref,
-                                stop_loss=signal.stop_loss,
-                                take_profit=signal.take_profit,
-                                qty=decision.qty or 0,
-                                leverage=decision.leverage_used or decision.leverage_cap,
-                                reason=",".join(signal.reason_codes),
-                                signal_score=effective_score,
-                                risk_reward_ratio=decision.risk_reward_ratio,
-                                stop_reason=decision.stop_reason,
-                                tp_reason=decision.tp_reason,
-                                max_loss_pct=decision.max_position_loss_pct,
-                                margin_loss_pct=decision.margin_loss_pct,
-                                kline_time=kline_time,
-                                signal_timeframe=self.api.timeframe.key,
-                                trend_timeframe=self.api.trend_timeframe.key,
+                    if would_push:
+                        ready_candidates.append(
+                            SignalCandidate(
+                                signal=signal,
+                                decision=decision,
+                                notify_key=self._signal_notification_key(signal),
+                                payload={
+                                    "signal": asdict(signal),
+                                    "risk": asdict(decision),
+                                    "live_order_enabled": False,
+                                    "mode": "desktop_manual_confirmation_only",
+                                    "dataset": self.api.dataset,
+                                    "signal_timeframe": self.api.timeframe.key,
+                                    "trend_timeframe": self.api.trend_timeframe.key,
+                                    "selected_params": asdict(params),
+                                },
+                                health_item=health_item,
+                                rank_score=float(effective_score)
+                                + min(float(decision.risk_reward_ratio or 0.0), 8.0) * 0.15
+                                - max(0.0, float((decision.leverage_used or 0.0) - 5.0)) * 0.05,
+                                raw_score=float(effective_score),
                             )
-                            if sent:
-                                self._mark_signal_notified(notify_key, signal, score=effective_score)
-                                self.message_queue.put(('log', (f"📤 飞书推送已发送 (评分{effective_score:.1f}≥6)", "INFO")))
-                            else:
-                                self.message_queue.put(('log', ("飞书推送未送达：飞书返回失败，稍后会重试", "WARNING")))
-                        except Exception as e:
-                            self.message_queue.put(('log', (f"飞书推送失败: {e}", "WARNING")))
+                        )
                     elif decision.accepted and effective_score < 6.0:
                         self.message_queue.put(('log', (f"🔕 低分信号不推送飞书 (评分{effective_score:.1f}<6)", "INFO")))
-                    elif would_push and already_notified:
-                        self.message_queue.put(('log', (f"已通知过同一根K线信号，跳过重复推送: {signal.inst_id} {signal.side}", "INFO")))
                     elif decision.accepted and effective_score >= 6.0:
                         self.message_queue.put(('log', ("质量门未通过，高分候选信号暂不推送飞书", "WARNING")))
+            selection = assign_tiers(ready_candidates, max_tier_a=2)
+            for candidate in selection.ranked:
+                candidate.health_item["tier"] = candidate.tier
+                candidate.health_item["rank"] = candidate.rank
+                candidate.health_item["rank_score"] = candidate.rank_score
+            for candidate in selection.tier_a:
+                signal = candidate.signal
+                decision = candidate.decision
+                if self._notification_store().has(candidate.notify_key):
+                    self.message_queue.put(('log', (f"已通知过同一根K线A级信号，跳过重复推送: {signal.inst_id} {signal.side}", "INFO")))
+                    continue
+                try:
+                    from okx_signal_system.notify.feishu import send_signal_alert
+                    sent = send_signal_alert(
+                        inst_id=signal.inst_id,
+                        side=signal.side,
+                        entry_ref=signal.entry_ref,
+                        stop_loss=signal.stop_loss,
+                        take_profit=signal.take_profit,
+                        qty=decision.qty or 0,
+                        leverage=decision.leverage_used or decision.leverage_cap,
+                        reason=",".join(signal.reason_codes),
+                        signal_score=float(candidate.raw_score),
+                        risk_reward_ratio=decision.risk_reward_ratio,
+                        stop_reason=decision.stop_reason,
+                        tp_reason=decision.tp_reason,
+                        max_loss_pct=decision.max_position_loss_pct,
+                        margin_loss_pct=decision.margin_loss_pct,
+                        kline_time=signal.ts.strftime('%Y-%m-%d %H:%M') if hasattr(signal.ts, 'strftime') else str(signal.ts),
+                        signal_timeframe=self.api.timeframe.key,
+                        trend_timeframe=self.api.trend_timeframe.key,
+                        tier=candidate.tier,
+                        rank=candidate.rank,
+                        total_candidates=len(selection.ranked),
+                    )
+                    if sent:
+                        self._mark_signal_notified(candidate.notify_key, signal, score=float(candidate.raw_score))
+                        self.message_queue.put(('log', (f"📤 A级飞书推送已发送：排名 {candidate.rank}/{len(selection.ranked)}，评分{candidate.raw_score:.1f}", "INFO")))
+                    else:
+                        self.message_queue.put(('log', ("A级飞书推送未送达：飞书返回失败，稍后会重试", "WARNING")))
+                except Exception as e:
+                    self.message_queue.put(('log', (f"A级飞书推送失败: {e}", "WARNING")))
+            if selection.tier_b:
+                self.message_queue.put(('log', (f"B级候选已保留到体检/面板：{len(selection.tier_b)} 个", "INFO")))
             self._write_latest_scan_status(cycle_health, base_params)
             if send_health_report:
                 self._send_candidate_health_report(cycle_health, base_params)

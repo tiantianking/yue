@@ -42,6 +42,33 @@ def test_signal_alert_includes_target_rr_and_risk_fields(monkeypatch) -> None:
     assert "保证金止损风险: 27.00% (上限 27.00%)" in text
 
 
+def test_signal_alert_includes_tier_and_cross_symbol_rank(monkeypatch) -> None:
+    sent: list[str] = []
+
+    def fake_send_text(text: str, *args, **kwargs) -> bool:
+        sent.append(text)
+        return True
+
+    monkeypatch.setattr(feishu, "send_text", fake_send_text)
+
+    ok = feishu.send_signal_alert(
+        inst_id="BTC-USDT-SWAP",
+        side="long",
+        entry_ref=100.0,
+        stop_loss=95.0,
+        take_profit=117.5,
+        qty=1.0,
+        leverage=3.0,
+        tier="A",
+        rank=1,
+        total_candidates=6,
+    )
+
+    assert ok
+    assert "OKX A级正式交易信号" in sent[0]
+    assert "21币横向排名: 1/6" in sent[0]
+
+
 def test_candidate_health_report_is_not_a_trade_signal(monkeypatch) -> None:
     sent: list[str] = []
 

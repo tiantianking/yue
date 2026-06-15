@@ -105,13 +105,17 @@ def send_signal_alert(
     kline_time: str | None = None,
     signal_timeframe: str | None = None,
     trend_timeframe: str | None = None,
+    tier: str | None = None,
+    rank: int | None = None,
+    total_candidates: int | None = None,
 ) -> bool:
     direction = "LONG" if side == "long" else "SHORT"
     stop_pct = abs(entry_ref - stop_loss) / entry_ref * 100 if entry_ref else 0.0
     tp_pct = abs(take_profit - entry_ref) / entry_ref * 100 if entry_ref else 0.0
     rr = risk_reward_ratio if risk_reward_ratio is not None else (tp_pct / stop_pct if stop_pct else 0.0)
+    title = f"OKX {tier}级正式交易信号" if tier else "OKX 正式交易信号"
     lines = [
-        "OKX 正式交易信号",
+        title,
         f"时间: {_now_utc():%Y-%m-%d %H:%M:%S} UTC",
         f"币种: {inst_id}",
         f"方向: {'做多' if direction == 'LONG' else '做空'}",
@@ -125,6 +129,8 @@ def send_signal_alert(
     ]
     if signal_score is not None:
         lines.append(f"评分: {signal_score:.1f}/10")
+    if rank is not None and total_candidates is not None:
+        lines.append(f"21币横向排名: {rank}/{total_candidates}")
     if max_loss_pct is not None:
         lines.append(f"账户止损风险: {max_loss_pct:.2%}")
     if margin_loss_pct is not None:
