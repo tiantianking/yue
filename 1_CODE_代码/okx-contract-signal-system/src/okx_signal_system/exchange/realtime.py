@@ -42,6 +42,11 @@ from okx_signal_system.risk.model import (
     apply_halt_policy, COST_BUFFER_RATE
 )
 from okx_signal_system.features.indicators import build_feature_frame
+from okx_signal_system.signal_runtime import (
+    DEFAULT_MAX_SIGNAL_LAG_MINUTES,
+    seconds_until_next_signal_scan,
+    signal_is_stale,
+)
 from okx_signal_system.timeframe import default_trend_timeframe, ratio_bars, timeframe_spec
 
 log = logging.getLogger(__name__)
@@ -1003,6 +1008,7 @@ class LiveSignalMonitor:
             signal,
             signal_timeframe=self.api.timeframe.key,
             trend_timeframe=self.api.trend_timeframe.key,
+            params=self._strategy_params,
         )
 
     def _mark_signal_notified(self, key: str, signal: TradeSignal, *, score: float | None = None) -> None:
@@ -1015,6 +1021,7 @@ class LiveSignalMonitor:
                 "score": float(score) if score is not None else None,
                 "signal_timeframe": self.api.timeframe.key,
                 "trend_timeframe": self.api.trend_timeframe.key,
+                "strategy_version": __import__("okx_signal_system").__version__,
             },
         )
 
@@ -1166,8 +1173,6 @@ class LiveSignalMonitor:
 
     async def _monitor_loop(self):
         """监控循环 — 信号生成 + 风控 + 环境自适应 + 持仓超时"""
-        PREV_SIGNAL_COOLDOWN = 300  # 同一币种信号冷却5分钟
-        _last_signal_time: dict[str, float] = {}
         health_interval = float(os.environ.get("SIGNAL_HEALTH_REPORT_INTERVAL_SECONDS", "3600"))
 
         while self._running:
@@ -1203,11 +1208,6 @@ class LiveSignalMonitor:
                         cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="position_open"))
                         continue
 
-                    # 冷却期
-                    if inst_id in _last_signal_time and time.time() - _last_signal_time[inst_id] < PREV_SIGNAL_COOLDOWN:
-                        cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="cooldown"))
-                        continue
-
                     # 获取K线数据
                     strategy_params = self._strategy_params
                     history_limit = _live_signal_history_limit(
@@ -1232,6 +1232,13 @@ class LiveSignalMonitor:
                     latest_closed = pd.to_datetime(df["ts"].iloc[-1], utc=True)
                     if latest_closed < expected_closed:
                         cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="missing_latest_closed_bar"))
+                        continue
+                    if signal_is_stale(
+                        latest_closed,
+                        timeframe=self.api.timeframe.key,
+                        max_lag_minutes=DEFAULT_MAX_SIGNAL_LAG_MINUTES,
+                    ):
+                        cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="stale_signal_bar"))
                         continue
 
                     # 构建特征帧
@@ -1416,12 +1423,10 @@ class LiveSignalMonitor:
 
                         if signal_recorded:
                             self._mark_signal_notified(notify_key, signal, score=effective_score)
-                            _last_signal_time[inst_id] = time.time()
                         else:
                             log.warning("Signal alert was not delivered; will retry: %s %s", inst_id, signal.side)
                     elif would_push and already_notified:
                         self._last_ready_signal = signal_payload
-                        _last_signal_time[inst_id] = time.time()
                         log.info("Signal already notified; skipping duplicate push: %s %s", inst_id, signal.side)
 
                 # 持久化
@@ -1439,7 +1444,9 @@ class LiveSignalMonitor:
                     self._sent_startup_health_report = True
                     self._send_candidate_health_report(cycle_health)
 
-                await asyncio.sleep(10)
+                await asyncio.sleep(
+                    min(seconds_until_next_signal_scan(self.api.timeframe.key, settle_seconds=60), 3600.0)
+                )
 
             except Exception as e:
                 log.exception("Monitor error")

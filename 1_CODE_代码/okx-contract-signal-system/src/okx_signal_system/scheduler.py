@@ -16,7 +16,12 @@ from okx_signal_system.features.indicators import build_feature_frame
 from okx_signal_system.paths import find_lightweight_history
 from okx_signal_system.notification import feishu
 from okx_signal_system.risk.model import Ledger, RiskConfig, validate_signal
-from okx_signal_system.strategy.trend_breakout import StrategyParams, generate_signals, build_signal
+from okx_signal_system.signal_runtime import (
+    DEFAULT_MAX_SIGNAL_LAG_MINUTES,
+    latest_closed_signal,
+    signal_is_stale,
+)
+from okx_signal_system.strategy.trend_breakout import StrategyParams
 from okx_signal_system.timeframe import timeframe_spec
 
 log = logging.getLogger(__name__)
@@ -108,11 +113,15 @@ def scan_single_symbol(
             signal_timeframe=signal_timeframe,
             trend_timeframe=trend_timeframe,
         )
-        signals = generate_signals(features, inst_id=inst_id, params=params)
-        accepted = [s for s in signals if s.accepted]
-        if not accepted:
+        signal = latest_closed_signal(features, inst_id=inst_id, params=params)
+        if signal is None:
             return None
-        signal = accepted[-1]
+        if signal_is_stale(
+            signal.ts,
+            timeframe=signal_timeframe,
+            max_lag_minutes=DEFAULT_MAX_SIGNAL_LAG_MINUTES,
+        ):
+            return None
         risk_config = RiskConfig(initial_equity=GLOBAL_INITIAL_EQUITY)
         decision = validate_signal(signal, ledger, risk_config)
         return {

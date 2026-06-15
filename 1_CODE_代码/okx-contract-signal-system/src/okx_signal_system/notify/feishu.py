@@ -33,6 +33,7 @@ def _health_reason_label(reason: str) -> str:
         "cooldown": "冷却中",
         "history_too_short": "历史K线太少",
         "stale_data": "K线太旧",
+        "stale_signal_bar": "信号K线过期",
         "feature_error": "特征计算失败",
         "invalid_features": "特征无效",
         "signal_rejected": "信号未通过",

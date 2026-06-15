@@ -127,3 +127,15 @@ def test_signal_notification_store_persists_dedupe_keys(tmp_path) -> None:
     reloaded = SignalNotificationStore(path)
     assert reloaded.has(key)
     assert "|15m|1h" in key
+
+
+def test_signal_notification_key_uses_hash_when_params_are_supplied() -> None:
+    key = signal_notification_key(
+        DummySignal(),
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+        params=__import__("okx_signal_system.strategy.trend_breakout", fromlist=["StrategyParams"]).StrategyParams(),
+    )
+
+    assert "|" not in key
+    assert len(key) == 64

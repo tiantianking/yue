@@ -27,7 +27,7 @@ if str(_src_path) not in sys.path:
 
 log = logging.getLogger(__name__)
 
-APP_VERSION = "v3.27"
+APP_VERSION = "v3.28"
 DASHBOARD_HOST = "127.0.0.1"
 DASHBOARD_PORT = 3001
 DASHBOARD_URL = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}"
@@ -456,6 +456,7 @@ class OKXSignalGUI:
             signal,
             signal_timeframe=self.api.timeframe.key if self.api else None,
             trend_timeframe=self.api.trend_timeframe.key if self.api else None,
+            params=getattr(self, "_trained_params", None),
         )
 
     def _mark_signal_notified(self, key: str, signal, *, score: float | None = None) -> None:
@@ -1153,6 +1154,7 @@ class OKXSignalGUI:
             from okx_signal_system.exchange.realtime import _live_signal_history_limit
             from okx_signal_system.data.closed_backfill import latest_closed_candle_start
             from okx_signal_system.data.loader import closed_bars
+            from okx_signal_system.signal_runtime import DEFAULT_MAX_SIGNAL_LAG_MINUTES, signal_is_stale
             from okx_signal_system.strategy.vote_gate import min_vote_approval_rate, vote_gate_passed
 
             # 加载策略参数
@@ -1208,6 +1210,13 @@ class OKXSignalGUI:
                         latest_closed=latest_closed.isoformat(),
                         expected_latest_closed=expected_closed.isoformat(),
                     )
+                    continue
+                if signal_is_stale(
+                    latest_closed,
+                    timeframe=self.api.timeframe.key,
+                    max_lag_minutes=DEFAULT_MAX_SIGNAL_LAG_MINUTES,
+                ):
+                    cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="stale_signal_bar"))
                     continue
                 self._update_runtime_module_status(
                     "signal_closed_bar_gate",

@@ -39,7 +39,13 @@ from okx_signal_system.ml.pattern_recognition import PatternRecognizer
 from okx_signal_system.notify.feishu import feishu_send_signal_card, send_text
 from okx_signal_system.data.gap_handler import IncrementalSyncer
 from okx_signal_system.paths import find_lightweight_history
-from okx_signal_system.strategy.trend_breakout import StrategyParams, generate_signals, build_signal
+from okx_signal_system.risk.model import Ledger, RiskConfig, validate_signal
+from okx_signal_system.signal_runtime import (
+    DEFAULT_MAX_SIGNAL_LAG_MINUTES,
+    latest_closed_signal,
+    signal_is_stale,
+)
+from okx_signal_system.strategy.trend_breakout import StrategyParams
 from okx_signal_system.training.startup_quality import load_selected_strategy_params
 from okx_signal_system.timeframe import timeframe_spec
 
@@ -175,14 +181,21 @@ class TradingBrain:
                 # 生成信号
                 signal = self._generate_signal(inst_id, market)
                 if signal and signal.accepted:
+                    decision = validate_signal(
+                        signal,
+                        Ledger(inst_id=inst_id, init_capital=10000, equity=10000),
+                        RiskConfig(),
+                    )
+                    if not decision.accepted:
+                        continue
                     signals_generated.append(signal)
 
                     # 推送到飞书
                     feishu_send_signal_card(
                         inst_id=signal.inst_id,
                         direction=signal.side,
-                        qty=0.01,  # 建议数量
-                        leverage=5.0,
+                        qty=decision.qty or 0,
+                        leverage=decision.leverage_used or decision.leverage_cap,
                         entry_price=signal.entry_ref or market.last_price,
                         stop_loss=signal.stop_loss or 0,
                         take_profit=signal.take_profit or 0,
@@ -228,11 +241,16 @@ class TradingBrain:
                 trend_timeframe=self.trend_timeframe,
             )
 
-            signals = generate_signals(features, inst_id=inst_id, params=self.current_params)
-            accepted = [s for s in signals if s.accepted]
-
-            if accepted:
-                return accepted[-1]
+            signal = latest_closed_signal(features, inst_id=inst_id, params=self.current_params)
+            if signal is None:
+                return None
+            if signal_is_stale(
+                signal.ts,
+                timeframe=self.signal_timeframe,
+                max_lag_minutes=DEFAULT_MAX_SIGNAL_LAG_MINUTES,
+            ):
+                return None
+            return signal
 
         except Exception as e:
             log.error(f"Signal generation error: {e}")

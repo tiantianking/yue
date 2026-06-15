@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from okx_signal_system.signal_runtime import parameter_hash, signal_id, strategy_version
 
 
 def _json_default(value: Any) -> Any:
@@ -31,8 +34,11 @@ def signal_notification_key(
     *,
     signal_timeframe: str | None = None,
     trend_timeframe: str | None = None,
+    params: Any | None = None,
 ) -> str:
     """Build a stable key for one tradable signal on one K-line."""
+    if params is not None:
+        return signal_id(signal, params)
     return "|".join(
         [
             str(getattr(signal, "inst_id", "")),
@@ -52,16 +58,41 @@ class SignalNotificationStore:
             try:
                 from okx_signal_system.config import project_paths
 
-                path = project_paths().output_dir / "signal_notifications.json"
+                path = project_paths().output_dir / "pushed_signals.sqlite3"
             except Exception:
-                path = Path("outputs") / "signal_notifications.json"
+                path = Path("outputs") / "pushed_signals.sqlite3"
         self.path = path
         self.max_records = max_records
         self._records: list[dict[str, Any]] = []
         self._keys: set[str] = set()
+        self._sqlite = self.path.suffix.lower() in {".sqlite", ".sqlite3", ".db"}
         self._load()
 
+    def _connect(self) -> sqlite3.Connection:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(self.path)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pushed_signals (
+                signal_id TEXT PRIMARY KEY,
+                inst_id TEXT NOT NULL,
+                candle_time TEXT NOT NULL,
+                side TEXT NOT NULL,
+                tier TEXT NOT NULL,
+                pushed_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL
+            )
+            """
+        )
+        return conn
+
     def _load(self) -> None:
+        if self._sqlite:
+            with self._connect() as conn:
+                rows = conn.execute("SELECT signal_id FROM pushed_signals").fetchall()
+            self._keys = {str(row[0]) for row in rows}
+            self._records = []
+            return
         if not self.path.exists():
             return
         try:
@@ -83,6 +114,37 @@ class SignalNotificationStore:
 
     def mark(self, key: str, metadata: dict[str, Any] | None = None) -> bool:
         """Persist a successful notification. Returns False when already marked."""
+        metadata = metadata or {}
+        if self._sqlite:
+            payload = {
+                "key": key,
+                "notified_at": datetime.now(timezone.utc).isoformat(),
+                **metadata,
+            }
+            try:
+                with self._connect() as conn:
+                    conn.execute(
+                        """
+                        INSERT INTO pushed_signals (
+                            signal_id, inst_id, candle_time, side, tier, pushed_at, payload_json
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            key,
+                            str(metadata.get("symbol") or metadata.get("inst_id") or ""),
+                            str(metadata.get("kline_time") or metadata.get("candle_time") or ""),
+                            str(metadata.get("side") or ""),
+                            str(metadata.get("tier") or "A"),
+                            datetime.now(timezone.utc).isoformat(),
+                            json.dumps(payload, ensure_ascii=False, default=_json_default),
+                        ),
+                    )
+                self._keys.add(key)
+                return True
+            except sqlite3.IntegrityError:
+                self._keys.add(key)
+                return False
+
         self._load()
         if key in self._keys:
             return False
@@ -90,7 +152,7 @@ class SignalNotificationStore:
         record = {
             "key": key,
             "notified_at": datetime.now(timezone.utc).isoformat(),
-            **(metadata or {}),
+            **metadata,
         }
         self._records.append(record)
         if len(self._records) > self.max_records:
@@ -108,3 +170,12 @@ class SignalNotificationStore:
             encoding="utf-8",
         )
         tmp_path.replace(self.path)
+
+
+__all__ = [
+    "SignalNotificationStore",
+    "parameter_hash",
+    "signal_id",
+    "signal_notification_key",
+    "strategy_version",
+]
