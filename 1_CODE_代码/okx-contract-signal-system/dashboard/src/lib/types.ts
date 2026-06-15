@@ -70,6 +70,14 @@ export type LatestScanStatus = {
     url?: string;
     proxy?: string | null;
   } | null;
+  modules?: Record<
+    string,
+    {
+      status?: string;
+      updated_at?: string;
+      [key: string]: unknown;
+    }
+  >;
   symbols?: Array<{
     symbol?: string;
     reason?: string;

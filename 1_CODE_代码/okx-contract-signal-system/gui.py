@@ -27,7 +27,7 @@ if str(_src_path) not in sys.path:
 
 log = logging.getLogger(__name__)
 
-APP_VERSION = "v3.26"
+APP_VERSION = "v3.27"
 DASHBOARD_HOST = "127.0.0.1"
 DASHBOARD_PORT = 3001
 DASHBOARD_URL = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}"
@@ -141,6 +141,8 @@ class OKXSignalGUI:
         self._quality_gate_allows_push = False
         self._last_candidate_health_report_ts = 0.0
         self._signal_notification_store = None
+        self._runtime_modules: dict[str, dict] = {}
+        self._background_tasks: list[asyncio.Task] = []
         self.dashboard_process = None
         
         # 创建界面
@@ -244,6 +246,14 @@ class OKXSignalGUI:
             "breakout_gap_pct": self._breakout_gap_pct(row),
         }
 
+    def _update_runtime_module_status(self, name: str, status: str, **details) -> None:
+        payload = {
+            "status": status,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        payload.update(details)
+        self._runtime_modules[name] = payload
+
     def _write_latest_scan_status(self, items: list[dict], params, *, error: str | None = None) -> None:
         try:
             from okx_signal_system.config import project_paths
@@ -260,6 +270,7 @@ class OKXSignalGUI:
                 "push_allowed": self._quality_gate_allows_push,
                 "selected_params": asdict(params),
                 "websocket": ws_status,
+                "modules": self._runtime_modules,
                 "symbols_checked": len(items),
                 "ready_count": sum(1 for item in items if item.get("would_push")),
                 "symbols": items,
@@ -274,6 +285,137 @@ class OKXSignalGUI:
             tmp_path.replace(path)
         except Exception as exc:
             log.warning("Failed to write GUI latest scan status: %s", exc)
+
+    def _run_closed_backfill_once(self):
+        from okx_signal_system.config import project_paths
+        from okx_signal_system.data.closed_backfill import ClosedCandleBackfillService
+
+        service = ClosedCandleBackfillService(
+            self._watched_symbols,
+            timeframe=self.api.timeframe.key,
+            dataset=self.api.dataset,
+            settle_seconds=60,
+            output_path=project_paths().output_dir / "closed_kline_backfill_status.json",
+            fetch_limit=300,
+        )
+        status = service.run_once()
+        lagging = [row for row in status.symbols if row.status != "passed"]
+        self._update_runtime_module_status(
+            "closed_kline_backfill",
+            "healthy" if status.all_complete else "blocked",
+            all_complete=status.all_complete,
+            symbols_checked=status.symbols_checked,
+            expected_latest_closed=status.expected_latest_closed,
+            lagging_symbols=[row.inst_id for row in lagging[:8]],
+            missing_closed_bars=sum(row.missing_closed_bars for row in status.symbols),
+        )
+        return status
+
+    async def _run_learning_review_once_if_due(self) -> None:
+        from okx_signal_system.config import load_config, project_paths
+        from okx_signal_system.training.daily_learning import (
+            LearningReviewConfig,
+            DailyLearningReviewService,
+        )
+
+        cfg = load_config("base.yaml")
+        learning_cfg = cfg.get("learning", {})
+        review_cfg = LearningReviewConfig.from_mapping(learning_cfg if isinstance(learning_cfg, dict) else {})
+        enabled = bool(review_cfg.daily_review_enabled)
+        self._update_runtime_module_status(
+            "daily_learning_review",
+            "disabled" if not enabled else "checking",
+            auto_promote_enabled=bool(review_cfg.auto_promote_params and review_cfg.live_param_updates_enabled),
+            live_param_updates_enabled=bool(review_cfg.live_param_updates_enabled),
+        )
+        if not enabled:
+            return
+
+        service = DailyLearningReviewService(
+            self._watched_symbols,
+            dataset=self.api.dataset,
+            signal_timeframe=self.api.timeframe.key,
+            trend_timeframe=self.api.trend_timeframe.key,
+            output_dir=project_paths().output_dir,
+            config=review_cfg,
+        )
+        if not service.should_run():
+            self._update_runtime_module_status(
+                "daily_learning_review",
+                "healthy",
+                ran_this_start=False,
+                reason="not_due",
+                output_path=str(service.output_path),
+            )
+            return
+
+        self._update_runtime_module_status("daily_learning_review", "running", ran_this_start=True)
+        try:
+            report = await asyncio.wait_for(
+                asyncio.to_thread(service.run_once),
+                timeout=max(30.0, review_cfg.max_runtime_seconds),
+            )
+        except asyncio.TimeoutError:
+            reason = f"daily_review_timeout_after_{int(review_cfg.max_runtime_seconds)}s"
+            service._write_service_status("timeout", reason)
+            self._update_runtime_module_status("daily_learning_review", "timeout", reason=reason)
+            return
+        except Exception as exc:
+            service._write_service_status("failed", str(exc))
+            self._update_runtime_module_status("daily_learning_review", "failed", error=str(exc))
+            return
+
+        self._update_runtime_module_status(
+            "daily_learning_review",
+            "healthy",
+            ran_this_start=True,
+            candidate_gate_passed=report.candidate_gate_passed,
+            promotion_allowed=report.promotion_allowed,
+            auto_promote_enabled=report.auto_promote_enabled,
+            reasons=report.reasons[:8],
+        )
+
+    async def _closed_backfill_loop(self) -> None:
+        from okx_signal_system.data.closed_backfill import seconds_until_next_closed_run
+
+        while self.monitoring:
+            try:
+                status = await asyncio.to_thread(self._run_closed_backfill_once)
+                if status.all_complete:
+                    self.message_queue.put(('log', ("闭合K线核对正常，所有监控币种已补齐", "INFO")))
+                else:
+                    lagging = [row for row in status.symbols if row.status != "passed"]
+                    first = lagging[0].error if lagging and lagging[0].error else "unknown"
+                    self.message_queue.put(('log', (f"闭合K线仍有缺口：{len(lagging)} 个币种，原因: {first}", "WARNING")))
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._update_runtime_module_status("closed_kline_backfill", "failed", error=str(exc))
+                self.message_queue.put(('log', (f"闭合K线后台核对异常: {exc}", "WARNING")))
+
+            delay = seconds_until_next_closed_run(self.api.timeframe.key, settle_seconds=60)
+            await asyncio.sleep(min(delay, 3600.0))
+
+    async def _daily_learning_review_loop(self) -> None:
+        from okx_signal_system.training.daily_learning import seconds_until_next_review, LearningReviewConfig
+        from okx_signal_system.config import load_config, project_paths
+
+        while self.monitoring:
+            try:
+                await self._run_learning_review_once_if_due()
+                cfg = load_config("base.yaml")
+                review_cfg = LearningReviewConfig.from_mapping(cfg.get("learning", {}))
+                delay = seconds_until_next_review(
+                    project_paths().output_dir / "daily_learning_review.json",
+                    interval_hours=review_cfg.review_interval_hours,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._update_runtime_module_status("daily_learning_review", "failed", error=str(exc))
+                self.message_queue.put(('log', (f"每日学习复盘后台异常: {exc}", "WARNING")))
+                delay = 3600.0
+            await asyncio.sleep(min(delay, 3600.0))
 
     def _send_candidate_health_report(self, items: list[dict], params) -> None:
         try:
@@ -797,6 +939,27 @@ class OKXSignalGUI:
                 except Exception:
                     pass
             self.message_queue.put(('log', (f"已加载 {loaded_count} 个币种的历史数据", "INFO")))
+
+            self.message_queue.put(('log', ('正在核对当前闭合K线并自动补齐...', "INFO")))
+            closed_status = await asyncio.to_thread(self._run_closed_backfill_once)
+            if not closed_status.all_complete:
+                lagging = [row for row in closed_status.symbols if row.status != "passed"]
+                first_error = next((row.error for row in lagging if row.error), "closed_kline_backfill_incomplete")
+                self._write_latest_scan_status([], self._trained_params, error=first_error)
+                self.message_queue.put(('log', (
+                    f"闭合K线未补齐，监控暂不启动：{len(lagging)} 个币种仍缺失；原因: {first_error}",
+                    "ERROR",
+                )))
+                self.message_queue.put(('status', 'error'))
+                self.monitoring = False
+                return
+            added_rows = sum(row.added_rows for row in closed_status.symbols)
+            if hasattr(self.api._data_store, "_cache"):
+                self.api._data_store._cache.clear()
+            self.message_queue.put(('log', (
+                f"闭合K线核对完成：{closed_status.symbols_checked} 个币种，补齐 {added_rows} 根K线",
+                "INFO",
+            )))
             
             # 启动时自动补全数据缺口（断网/几天未开后的数据回补）
             self.message_queue.put(('log', ('正在检查数据缺口并回补...', "INFO")))
@@ -878,7 +1041,7 @@ class OKXSignalGUI:
             except Exception as e:
                 self._quality_gate_allows_push = False
                 self.message_queue.put(('log', (f"启动训练质量门异常，使用默认参数: {e}", "WARNING")))
-            
+
             # 连接 WebSocket（接收实时更新）
             self.message_queue.put(('log', ('正在连接 WebSocket...', "INFO")))
             connected = await self.api.connect(self._watched_symbols)
@@ -891,6 +1054,11 @@ class OKXSignalGUI:
                 return
             else:
                 self.message_queue.put(('log', ('WebSocket 已连接，实时数据推送中', "INFO")))
+
+            self._background_tasks = [
+                asyncio.create_task(self._closed_backfill_loop()),
+                asyncio.create_task(self._daily_learning_review_loop()),
+            ]
             
             # 更新状态
             self.message_queue.put(('status', 'connected'))
@@ -953,6 +1121,13 @@ class OKXSignalGUI:
                 await asyncio.sleep(1)
             
             # 断开连接
+            for task in self._background_tasks:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            self._background_tasks = []
             await self.api.disconnect()
             self.message_queue.put(('log', ("WebSocket 已断开", "INFO")))
         
@@ -960,6 +1135,10 @@ class OKXSignalGUI:
             self.message_queue.put(('log', ("监控被取消", "WARNING")))
         except Exception as e:
             self.message_queue.put(('log', (f"监控循环异常: {e}", "ERROR")))
+        finally:
+            for task in self._background_tasks:
+                task.cancel()
+            self._background_tasks = []
     
     async def _check_signals(self, checked_bars: dict[str, str], send_health_report: bool = False):
         """检查各币种的 trading 信号"""
@@ -972,10 +1151,14 @@ class OKXSignalGUI:
             from okx_signal_system.ml.regime_adaptive import AdaptiveParamsManager
             from okx_signal_system.training.startup_quality import is_latest_bar_fresh
             from okx_signal_system.exchange.realtime import _live_signal_history_limit
+            from okx_signal_system.data.closed_backfill import latest_closed_candle_start
+            from okx_signal_system.data.loader import closed_bars
+            from okx_signal_system.strategy.vote_gate import min_vote_approval_rate, vote_gate_passed
 
             # 加载策略参数
             config = load_config("base.yaml")
             strategy_cfg = config.get('strategy', {})
+            min_vote_rate = min_vote_approval_rate(config)
 
             # 从配置取参数（列表取第一个，标量直接取）
             def _first_or_val(val, default):
@@ -1008,10 +1191,29 @@ class OKXSignalGUI:
                     trend_timeframe=self.api.trend_timeframe.key,
                 )
                 df = await self.api.get_candles(inst_id, bar=self.api.timeframe.key, limit=history_limit)
+                df = closed_bars(df)
                 
                 if len(df) < 80:
                     cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="history_too_short"))
                     continue  # 数据不足（至少需要80根K线计算EMA60+突破位）
+
+                expected_closed = pd.Timestamp(latest_closed_candle_start(self.api.timeframe.key, settle_seconds=60))
+                latest_closed = pd.to_datetime(df["ts"].iloc[-1], utc=True)
+                if latest_closed < expected_closed:
+                    cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="missing_latest_closed_bar"))
+                    self._update_runtime_module_status(
+                        "signal_closed_bar_gate",
+                        "blocked",
+                        symbol=inst_id,
+                        latest_closed=latest_closed.isoformat(),
+                        expected_latest_closed=expected_closed.isoformat(),
+                    )
+                    continue
+                self._update_runtime_module_status(
+                    "signal_closed_bar_gate",
+                    "healthy",
+                    expected_latest_closed=expected_closed.isoformat(),
+                )
                 
                 # 检查是否有新K线
                 last_ts = str(df["ts"].iloc[-1]) if len(df) > 0 else ""
@@ -1122,13 +1324,26 @@ class OKXSignalGUI:
                     risk_config = RiskConfig(max_leverage=max_lev_adjusted)
                     ledger = Ledger(inst_id=inst_id, init_capital=10000, equity=10000)
                     signal = replace(signal, signal_score=effective_score)
+                    vote_ok = vote_gate_passed(
+                        ensemble_result.final_side,
+                        signal.side,
+                        ensemble_result.approval_rate,
+                        min_vote_rate,
+                    )
                     decision = validate_signal(signal, ledger, risk_config)
                     would_push = bool(
                         decision.accepted
                         and effective_score >= 6.0
                         and getattr(self, '_quality_gate_allows_push', False)
+                        and vote_ok
                     )
-                    if would_push:
+                    if ensemble_result.final_side == "flat":
+                        health_reason = "vote_flat"
+                    elif ensemble_result.final_side != signal.side:
+                        health_reason = "vote_side_mismatch"
+                    elif ensemble_result.approval_rate < min_vote_rate:
+                        health_reason = "vote_support_too_low"
+                    elif would_push:
                         health_reason = "ready"
                     elif not getattr(self, '_quality_gate_allows_push', False):
                         health_reason = "quality_gate_blocked"
@@ -1136,10 +1351,6 @@ class OKXSignalGUI:
                         health_reason = f"risk_{decision.reason or 'rejected'}"
                     elif effective_score < 6.0:
                         health_reason = "score_below_6"
-                    elif ensemble_result.final_side == "flat":
-                        health_reason = "vote_flat"
-                    elif ensemble_result.final_side != signal.side:
-                        health_reason = "vote_side_mismatch"
                     else:
                         health_reason = "not_ready"
                     cycle_health.append(

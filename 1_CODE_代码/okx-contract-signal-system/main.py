@@ -43,7 +43,7 @@ def safe_input(prompt=""):
         return ""
 
 # 添加 src/ 到 Python 路径
-APP_VERSION = "v3.26"
+APP_VERSION = "v3.27"
 _project_root = Path(__file__).parent
 _runtime_root = Path(sys.executable).parent if getattr(sys, "frozen", False) else _project_root
 _src_path = _project_root / "src"
@@ -325,6 +325,8 @@ async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -
     """信号检测循环"""
     from okx_signal_system.exchange.realtime import LiveSignalMonitor
     from okx_signal_system.notify.feishu import send_signal_alert, send_text
+    from okx_signal_system.config import project_paths
+    from okx_signal_system.data.closed_backfill import ClosedCandleBackfillService
 
     # 构建信号回调：信号通过风控后自动推飞书
     def on_signal(signal, decision):
@@ -358,6 +360,22 @@ async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -
             logger.error(f"飞书推送失败: {e}")
 
             return False
+
+    closed_service = ClosedCandleBackfillService(
+        symbols,
+        timeframe=api.timeframe.key,
+        dataset=api.dataset,
+        settle_seconds=60,
+        output_path=project_paths().output_dir / "closed_kline_backfill_status.json",
+        fetch_limit=300,
+    )
+    closed_status = await asyncio.to_thread(closed_service.run_once)
+    if not closed_status.all_complete:
+        lagging = [row for row in closed_status.symbols if row.status != "passed"]
+        first_error = next((row.error for row in lagging if row.error), "closed_kline_backfill_incomplete")
+        logger.error("Closed K-line backfill incomplete; monitor not started: %s symbols, %s", len(lagging), first_error)
+        print(f"[FAIL] 闭合K线未补齐，监控未启动：{len(lagging)} 个币种；原因: {first_error}")
+        return
 
     monitor = LiveSignalMonitor(api, signal_callback=on_signal, risk_config=None)
     backfill_task = asyncio.create_task(run_closed_kline_backfill_service(symbols))

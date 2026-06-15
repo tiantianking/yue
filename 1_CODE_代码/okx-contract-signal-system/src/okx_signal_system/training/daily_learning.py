@@ -18,6 +18,7 @@ from okx_signal_system.config import load_config, project_paths
 from okx_signal_system.data.loader import SymbolData, closed_bars, load_all_symbols
 from okx_signal_system.ml.shadow_trading import ShadowTradingLedger
 from okx_signal_system.strategy.trend_breakout import StrategyParams
+from okx_signal_system.strategy.vote_gate import min_vote_approval_rate
 from okx_signal_system.timeframe import bars_for_hours, default_trend_timeframe, timeframe_spec
 from okx_signal_system.training.startup_quality import (
     _anti_future_checks,
@@ -321,6 +322,7 @@ def _evaluate_params(
     signal_timeframe: str,
     trend_timeframe: str,
     history_tail: int,
+    min_vote_approval_rate: float,
 ) -> dict:
     train_trades: list[pd.DataFrame] = []
     valid_trades: list[pd.DataFrame] = []
@@ -357,6 +359,7 @@ def _evaluate_params(
             params=params,
             signal_timeframe=signal_timeframe,
             trend_timeframe=trend_timeframe,
+            min_vote_approval_rate=min_vote_approval_rate,
         )
         valid = run_backtest(
             valid_frame,
@@ -364,6 +367,7 @@ def _evaluate_params(
             params=params,
             signal_timeframe=signal_timeframe,
             trend_timeframe=trend_timeframe,
+            min_vote_approval_rate=min_vote_approval_rate,
         )
         train_trades.append(train)
         valid_trades.append(valid)
@@ -577,6 +581,7 @@ def _run_candidate_search(
     trend_timeframe: str,
     params_grid: list[StrategyParams] | None,
     max_candidate_params: int,
+    min_vote_approval_rate: float,
 ) -> tuple[StrategyParams, dict]:
     grid = params_grid or local_candidate_grid(
         current_params,
@@ -588,6 +593,7 @@ def _run_candidate_search(
         params_grid=grid,
         signal_timeframe=signal_timeframe,
         trend_timeframe=trend_timeframe,
+        min_vote_approval_rate=min_vote_approval_rate,
     )
     selected = select_shared_params(train_grid)
     meta = {
@@ -640,6 +646,7 @@ def run_daily_learning_review(
     data_cfg = base_config.get("data", {})
     learning_cfg = base_config.get("learning", {})
     cfg = config or LearningReviewConfig.from_mapping(learning_cfg if isinstance(learning_cfg, dict) else {})
+    min_vote_rate = min_vote_approval_rate(base_config)
 
     dataset = dataset or data_cfg.get("historical_dataset", "okx_15m_extended")
     signal_key = timeframe_spec(signal_timeframe or data_cfg.get("timeframe", "15m")).key
@@ -672,6 +679,7 @@ def run_daily_learning_review(
         signal_timeframe=signal_key,
         trend_timeframe=trend_key,
         history_tail=history_tail,
+        min_vote_approval_rate=min_vote_rate,
     )
 
     candidate_params = current_params
@@ -698,6 +706,7 @@ def run_daily_learning_review(
                 trend_timeframe=trend_key,
                 params_grid=params_grid,
                 max_candidate_params=cfg.max_candidate_params,
+                min_vote_approval_rate=min_vote_rate,
             )
         except Exception as exc:
             train_grid_meta = {
@@ -721,6 +730,7 @@ def run_daily_learning_review(
         signal_timeframe=signal_key,
         trend_timeframe=trend_key,
         history_tail=history_tail,
+        min_vote_approval_rate=min_vote_rate,
     )
 
     anti_future = _anti_future_checks(signal_timeframe=signal_key, trend_timeframe=trend_key)

@@ -127,6 +127,7 @@ def run_shared_train_grid(
     params_grid: list[StrategyParams] | None = None,
     signal_timeframe: str | None = None,
     trend_timeframe: str | None = None,
+    min_vote_approval_rate: float = 0.40,
 ) -> pd.DataFrame:
     signal_key, trend_key = _resolve_timeframes(symbols[0].frame, signal_timeframe, trend_timeframe)
     grid = params_grid or parameter_grid(signal_key)
@@ -139,6 +140,7 @@ def run_shared_train_grid(
             params_grid=grid,
             signal_timeframe=signal_key,
             trend_timeframe=trend_key,
+            min_vote_approval_rate=min_vote_approval_rate,
         )
         symbol_grid.insert(0, "symbol", symbol_data.inst_id)
         all_rows.extend(symbol_grid.to_dict("records"))

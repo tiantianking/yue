@@ -15,6 +15,7 @@ from okx_signal_system.risk.model import (
     validate_signal,
 )
 from okx_signal_system.strategy.ensemble import ensemble_vote
+from okx_signal_system.strategy.vote_gate import DEFAULT_MIN_VOTE_APPROVAL_RATE, vote_gate_passed
 from okx_signal_system.strategy.trend_breakout import (
     ATR_PCT_MIN,
     CONTINUATION_TREND_STRENGTH_MIN,
@@ -248,6 +249,7 @@ def run_backtest(
     risk_config: RiskConfig = RiskConfig(),
     signal_timeframe: str = "1h",
     trend_timeframe: str | None = None,
+    min_vote_approval_rate: float = DEFAULT_MIN_VOTE_APPROVAL_RATE,
 ) -> pd.DataFrame:
     features = build_feature_frame(
         frame_1h,
@@ -258,7 +260,13 @@ def run_backtest(
         signal_timeframe=signal_timeframe,
         trend_timeframe=trend_timeframe,
     ).reset_index(drop=True)
-    return run_backtest_from_features(features, inst_id=inst_id, params=params, risk_config=risk_config)
+    return run_backtest_from_features(
+        features,
+        inst_id=inst_id,
+        params=params,
+        risk_config=risk_config,
+        min_vote_approval_rate=min_vote_approval_rate,
+    )
 
 
 def run_backtest_from_features(
@@ -267,6 +275,7 @@ def run_backtest_from_features(
     inst_id: str,
     params: StrategyParams = StrategyParams(),
     risk_config: RiskConfig = RiskConfig(),
+    min_vote_approval_rate: float = DEFAULT_MIN_VOTE_APPROVAL_RATE,
 ) -> pd.DataFrame:
     features = features.reset_index(drop=True)
     ledger = Ledger(
@@ -338,6 +347,8 @@ def run_backtest_from_features(
         if not signal.accepted or signal.entry_ref is None or signal.stop_loss is None or signal.take_profit is None:
             continue
         vote = ensemble_vote(features.iloc[idx], params, features, idx, base_score=signal.signal_score or 5.0, base_signal=signal)
+        if not vote_gate_passed(vote.final_side, signal.side, vote.approval_rate, min_vote_approval_rate):
+            continue
         effective_score = signal.signal_score or 5.0
         if vote.final_side == "flat":
             effective_score = max(1.0, effective_score - 3.0)

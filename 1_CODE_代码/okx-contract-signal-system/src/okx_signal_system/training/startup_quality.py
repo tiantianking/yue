@@ -14,6 +14,7 @@ from okx_signal_system.config import load_config, project_paths
 from okx_signal_system.features.indicators import prior_breakout_levels, resample_trend
 from okx_signal_system.risk.model import Ledger, RiskConfig, smart_leverage_for_signal, validate_signal
 from okx_signal_system.strategy.trend_breakout import StrategyParams, TradeSignal
+from okx_signal_system.strategy.vote_gate import min_vote_approval_rate
 from okx_signal_system.timeframe import bars_for_hours, default_trend_timeframe, ratio_bars, timeframe_spec
 
 if TYPE_CHECKING:
@@ -225,6 +226,7 @@ def run_startup_quality_gate(
     if history_tail is None:
         history_tail = bars_for_hours(24 * 365 * 3, signal_timeframe)
     params = load_selected_strategy_params(output_dir)
+    min_vote_rate = min_vote_approval_rate(config)
     from okx_signal_system.data.loader import load_all_symbols
     all_symbols = _select_symbols(load_all_symbols(dataset), symbols, max_symbols)
 
@@ -249,6 +251,7 @@ def run_startup_quality_gate(
                 params=params,
                 signal_timeframe=signal_timeframe,
                 trend_timeframe=trend_timeframe,
+                min_vote_approval_rate=min_vote_rate,
             )
         )
         valid_trades.append(
@@ -258,6 +261,7 @@ def run_startup_quality_gate(
                 params=params,
                 signal_timeframe=signal_timeframe,
                 trend_timeframe=trend_timeframe,
+                min_vote_approval_rate=min_vote_rate,
             )
         )
 

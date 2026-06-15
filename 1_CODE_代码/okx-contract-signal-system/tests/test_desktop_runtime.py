@@ -11,6 +11,7 @@ from okx_signal_system.exchange.position_monitor import (
 )
 from okx_signal_system.strategy.ensemble import ensemble_vote
 from okx_signal_system.strategy.trend_breakout import StrategyParams
+from okx_signal_system.strategy.vote_gate import min_vote_approval_rate, vote_gate_passed
 
 
 def test_gui_runtime_dependencies_import() -> None:
@@ -206,3 +207,10 @@ def test_ensemble_vote_returns_bounded_score() -> None:
     assert result.final_side in {"long", "short", "flat"}
     assert 1.0 <= result.final_score <= 10.0
     assert len(result.votes) == 4
+
+
+def test_vote_gate_uses_support_ratio_not_unanimity() -> None:
+    assert min_vote_approval_rate({"strategy": {"min_vote_approval_rate": 0.5}}) == 0.5
+    assert vote_gate_passed("long", "long", 0.50, 0.40)
+    assert not vote_gate_passed("long", "long", 0.25, 0.40)
+    assert not vote_gate_passed("short", "long", 0.80, 0.40)

@@ -40,6 +40,8 @@ def _health_reason_label(reason: str) -> str:
         "score_below_6": "分数不够",
         "vote_flat": "投票偏平",
         "vote_side_mismatch": "投票方向冲突",
+        "vote_support_too_low": "投票支持不足",
+        "missing_latest_closed_bar": "缺少最新闭合K线",
         "waiting_next_bar": "等待下一根K线",
         "ready": "可推送",
         "not_ready": "暂不可推送",

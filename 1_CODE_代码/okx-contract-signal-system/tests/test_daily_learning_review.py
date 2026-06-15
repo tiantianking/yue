@@ -120,6 +120,69 @@ def test_learning_review_config_reads_runtime_timeout() -> None:
     assert cfg.max_runtime_seconds == 120
 
 
+def test_daily_learning_passes_vote_gate_to_backtest(tmp_path, monkeypatch) -> None:
+    ts = pd.date_range("2026-01-01", periods=320, freq="15min", tz="UTC")
+    frame = pd.DataFrame(
+        {
+            "ts": ts,
+            "open": [100.0] * len(ts),
+            "high": [101.0] * len(ts),
+            "low": [99.0] * len(ts),
+            "close": [100.5] * len(ts),
+            "volume": [1000.0] * len(ts),
+            "symbol": ["BTC-USDT-SWAP"] * len(ts),
+            "timeframe": ["15m"] * len(ts),
+            "is_closed": [True] * len(ts),
+        }
+    )
+    monkeypatch.setattr(
+        daily_learning,
+        "load_all_symbols",
+        lambda dataset: [SymbolData("BTC-USDT-SWAP", tmp_path / "BTC.parquet", frame)],
+    )
+    (tmp_path / "selected_params.json").write_text(
+        json.dumps(
+            {
+                "fast_ema": 5,
+                "slow_ema": 10,
+                "breakout_window": 5,
+                "atr_stop_mult": 1.5,
+                "take_profit_mult": 3.5,
+                "max_hold_bars": 12,
+                "atr_window": 5,
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls = []
+
+    def fake_backtest(*args, **kwargs):
+        calls.append(kwargs.get("min_vote_approval_rate"))
+        return pd.DataFrame()
+
+    monkeypatch.setattr(daily_learning, "run_backtest", fake_backtest)
+    run_daily_learning_review(
+        symbols=["BTC-USDT-SWAP"],
+        dataset="unit",
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+        output_dir=tmp_path,
+        history_tail=320,
+        run_candidate_search=False,
+        config=LearningReviewConfig(
+            min_validation_trades=0,
+            min_validation_profit_factor=0.0,
+            min_profit_factor_delta=0.0,
+            min_profit_factor_ratio=1.0,
+            min_profitable_symbol_ratio=0.0,
+            shadow_min_closed_signals=0,
+        ),
+    )
+
+    assert calls
+    assert set(calls) == {0.40}
+
+
 def test_daily_learning_review_writes_report_with_closed_frames(tmp_path, monkeypatch) -> None:
     ts = pd.date_range("2026-01-01", periods=320, freq="15min", tz="UTC")
     frame = pd.DataFrame(

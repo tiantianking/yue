@@ -8,6 +8,7 @@ import pandas as pd
 from okx_signal_system.backtest.runner import run_backtest_from_features, summarize_trades
 from okx_signal_system.features.indicators import build_feature_frame
 from okx_signal_system.strategy.trend_breakout import StrategyParams
+from okx_signal_system.strategy.vote_gate import DEFAULT_MIN_VOTE_APPROVAL_RATE
 from okx_signal_system.timeframe import normalize_timeframe
 
 
@@ -61,6 +62,7 @@ def run_grid_search(
     params_grid: list[StrategyParams] | None = None,
     signal_timeframe: str = "15m",
     trend_timeframe: str | None = None,
+    min_vote_approval_rate: float = DEFAULT_MIN_VOTE_APPROVAL_RATE,
 ) -> pd.DataFrame:
     rows = []
     feature_cache: dict[tuple[int, int, int, int], pd.DataFrame] = {}
@@ -76,7 +78,12 @@ def run_grid_search(
                 signal_timeframe=signal_timeframe,
                 trend_timeframe=trend_timeframe,
             )
-        trades = run_backtest_from_features(feature_cache[feature_key], inst_id=inst_id, params=params)
+        trades = run_backtest_from_features(
+            feature_cache[feature_key],
+            inst_id=inst_id,
+            params=params,
+            min_vote_approval_rate=min_vote_approval_rate,
+        )
         summary = summarize_trades(trades)
         rows.append({**asdict(params), **{f"train_{key}": value for key, value in summary.items()}})
     return pd.DataFrame(rows)

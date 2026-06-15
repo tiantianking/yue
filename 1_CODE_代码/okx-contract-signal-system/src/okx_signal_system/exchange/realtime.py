@@ -975,7 +975,9 @@ class LiveSignalMonitor:
         from okx_signal_system.training.startup_quality import load_selected_strategy_params
         self._regime_mgr = AdaptiveParamsManager()
         self._strategy_params = load_selected_strategy_params()
+        from okx_signal_system.strategy.vote_gate import min_vote_approval_rate
         learning_cfg = self.api.config.get("learning", {}) if isinstance(self.api.config, dict) else {}
+        self._min_vote_approval_rate = min_vote_approval_rate(self.api.config if isinstance(self.api.config, dict) else {})
         self._shadow_score_min_closed = int(learning_cfg.get("shadow_score_min_closed_signals", 6))
         self._shadow_ledger = ShadowTradingLedger()
         self._quality_gate_allows_push = False
@@ -1221,9 +1223,15 @@ class LiveSignalMonitor:
                         continue
                     self._shadow_ledger.update_symbol(inst_id, df)
                     from okx_signal_system.training.startup_quality import is_latest_bar_fresh
+                    from okx_signal_system.data.closed_backfill import latest_closed_candle_start
                     if not is_latest_bar_fresh(df, max_lag_hours=self.api.timeframe.fresh_lag_hours):
                         log.warning(f"{inst_id} latest candle is stale; waiting for live data")
                         cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="stale_data"))
+                        continue
+                    expected_closed = pd.Timestamp(latest_closed_candle_start(self.api.timeframe.key, settle_seconds=60))
+                    latest_closed = pd.to_datetime(df["ts"].iloc[-1], utc=True)
+                    if latest_closed < expected_closed:
+                        cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="missing_latest_closed_bar"))
                         continue
 
                     # 构建特征帧
@@ -1263,6 +1271,7 @@ class LiveSignalMonitor:
                         continue
 
                     from okx_signal_system.strategy.ensemble import ensemble_vote
+                    from okx_signal_system.strategy.vote_gate import vote_gate_passed
                     ensemble_result = ensemble_vote(
                         latest_row,
                         strategy_params,
@@ -1272,6 +1281,12 @@ class LiveSignalMonitor:
                         base_signal=signal,
                     )
                     effective_score = ensemble_result.final_score
+                    vote_ok = vote_gate_passed(
+                        ensemble_result.final_side,
+                        signal.side,
+                        ensemble_result.approval_rate,
+                        self._min_vote_approval_rate,
+                    )
                     if ensemble_result.final_side == "flat":
                         effective_score = max(1.0, effective_score - 3.0)
                     elif ensemble_result.final_side != signal.side:
@@ -1295,7 +1310,12 @@ class LiveSignalMonitor:
                     )
                     signal = replace(signal, signal_score=effective_score)
                     decision = validate_signal(signal, ledger, risk_cfg)
-                    would_push = bool(decision.accepted and effective_score >= 6.0 and self._quality_gate_allows_push)
+                    would_push = bool(
+                        decision.accepted
+                        and effective_score >= 6.0
+                        and self._quality_gate_allows_push
+                        and vote_ok
+                    )
                     signal_payload = {
                         "signal": asdict(signal),
                         "risk": asdict(decision),
@@ -1306,7 +1326,13 @@ class LiveSignalMonitor:
                         "trend_timeframe": self.api.trend_timeframe.key,
                         "selected_params": asdict(strategy_params),
                     }
-                    if would_push:
+                    if ensemble_result.final_side == "flat":
+                        health_reason = "vote_flat"
+                    elif ensemble_result.final_side != signal.side:
+                        health_reason = "vote_side_mismatch"
+                    elif ensemble_result.approval_rate < self._min_vote_approval_rate:
+                        health_reason = "vote_support_too_low"
+                    elif would_push:
                         health_reason = "ready"
                     elif not self._quality_gate_allows_push:
                         health_reason = "quality_gate_blocked"
@@ -1314,10 +1340,6 @@ class LiveSignalMonitor:
                         health_reason = f"risk_{decision.reason or 'rejected'}"
                     elif effective_score < 6.0:
                         health_reason = "score_below_6"
-                    elif ensemble_result.final_side == "flat":
-                        health_reason = "vote_flat"
-                    elif ensemble_result.final_side != signal.side:
-                        health_reason = "vote_side_mismatch"
                     else:
                         health_reason = "not_ready"
                     cycle_health.append(

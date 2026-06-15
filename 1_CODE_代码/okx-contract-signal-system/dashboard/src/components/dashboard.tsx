@@ -249,10 +249,15 @@ function SignalPanel({ data }: { data: DashboardPayload }) {
 function RuntimePanel({ data }: { data: DashboardPayload }) {
   const scan = data.latest_scan;
   const ws = scan?.websocket;
+  const modules = scan?.modules ?? {};
   const scanAge = minutesSince(scan?.generated_at);
   const scanFresh = typeof scanAge === "number" && scanAge <= 2;
   const wsHealthy = Boolean(ws?.running && ws?.connected && !ws?.degraded);
-  const tone = wsHealthy && scanFresh ? "green" : "red";
+  const closedHealthy = modules.closed_kline_backfill?.status === "healthy";
+  const signalGateHealthy = modules.signal_closed_bar_gate?.status === "healthy";
+  const learningStatus = String(modules.daily_learning_review?.status ?? "-");
+  const learningHealthy = ["healthy", "checking", "disabled"].includes(learningStatus);
+  const tone = wsHealthy && scanFresh && closedHealthy && signalGateHealthy && learningHealthy ? "green" : "red";
   return (
     <div className="rounded-lg border border-[#9be7e3] bg-white/90 p-4 shadow-sm">
       <div className="flex items-center justify-between gap-3">
@@ -267,6 +272,9 @@ function RuntimePanel({ data }: { data: DashboardPayload }) {
         <MetricTile label="扫描刷新" value={ageText(scanAge)} tone={scanFresh ? "green" : "red"} />
         <MetricTile label="重连次数" value={integerText(ws?.reconnect_count)} tone={(ws?.reconnect_count ?? 0) === 0 ? "green" : "amber"} />
         <MetricTile label="检查币种" value={integerText(scan?.symbols_checked)} />
+        <MetricTile label="闭合K线" value={closedHealthy ? "已补齐" : String(modules.closed_kline_backfill?.status ?? "-")} tone={closedHealthy ? "green" : "red"} />
+        <MetricTile label="信号门禁" value={signalGateHealthy ? "通过" : String(modules.signal_closed_bar_gate?.status ?? "-")} tone={signalGateHealthy ? "green" : "red"} />
+        <MetricTile label="学习复盘" value={learningStatus} tone={learningHealthy ? "green" : "amber"} />
       </div>
       {ws?.last_error || scan?.error ? (
         <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-700">
