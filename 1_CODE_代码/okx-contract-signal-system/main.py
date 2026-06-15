@@ -43,7 +43,7 @@ def safe_input(prompt=""):
         return ""
 
 # 添加 src/ 到 Python 路径
-APP_VERSION = "v3.22"
+APP_VERSION = "v3.23"
 _project_root = Path(__file__).parent
 _runtime_root = Path(sys.executable).parent if getattr(sys, "frozen", False) else _project_root
 _src_path = _project_root / "src"
@@ -349,9 +349,11 @@ async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -
                 margin_loss_pct=getattr(decision, 'margin_loss_pct', None),
                 kline_time=pd.Timestamp(signal.ts).isoformat(),
             )
-            logger.info("Feishu signal push handled: %s %s", signal.inst_id, signal.side)
+            if sent:
+                logger.info("Feishu signal push sent: %s %s", signal.inst_id, signal.side)
+            else:
+                logger.warning("Feishu signal push failed: %s %s", signal.inst_id, signal.side)
             return sent
-            logger.info(f"飞书推送: {signal.inst_id} {signal.side}")
         except Exception as e:
             logger.error(f"飞书推送失败: {e}")
 

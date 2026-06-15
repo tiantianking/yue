@@ -26,7 +26,7 @@ if str(_src_path) not in sys.path:
 
 log = logging.getLogger(__name__)
 
-APP_VERSION = "v3.22"
+APP_VERSION = "v3.23"
 DASHBOARD_HOST = "127.0.0.1"
 DASHBOARD_PORT = 3001
 DASHBOARD_URL = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}"
@@ -139,6 +139,7 @@ class OKXSignalGUI:
         self._startup_quality_report = None
         self._quality_gate_allows_push = False
         self._last_candidate_health_report_ts = 0.0
+        self._signal_notification_store = None
         self.dashboard_process = None
         
         # 创建界面
@@ -251,6 +252,35 @@ class OKXSignalGUI:
             self._last_candidate_health_report_ts = asyncio.get_event_loop().time()
             log.warning("Candidate health report failed: %s", e)
             self.message_queue.put(('log', (f"候选信号体检推送失败: {e}", "WARNING")))
+
+    def _notification_store(self):
+        if self._signal_notification_store is None:
+            from okx_signal_system.notify.signal_dedupe import SignalNotificationStore
+
+            self._signal_notification_store = SignalNotificationStore()
+        return self._signal_notification_store
+
+    def _signal_notification_key(self, signal) -> str:
+        from okx_signal_system.notify.signal_dedupe import signal_notification_key
+
+        return signal_notification_key(
+            signal,
+            signal_timeframe=self.api.timeframe.key if self.api else None,
+            trend_timeframe=self.api.trend_timeframe.key if self.api else None,
+        )
+
+    def _mark_signal_notified(self, key: str, signal, *, score: float | None = None) -> None:
+        self._notification_store().mark(
+            key,
+            {
+                "symbol": signal.inst_id,
+                "side": signal.side,
+                "kline_time": signal.ts.isoformat() if hasattr(signal.ts, "isoformat") else str(signal.ts),
+                "score": float(score) if score is not None else None,
+                "signal_timeframe": self.api.timeframe.key if self.api else None,
+                "trend_timeframe": self.api.trend_timeframe.key if self.api else None,
+            },
+        )
     
     def create_widgets(self):
         """创建所有界面组件"""
@@ -820,6 +850,7 @@ class OKXSignalGUI:
             last_signal_check = 0
             last_incremental_sync = asyncio.get_event_loop().time()
             health_interval = float(os.environ.get("SIGNAL_HEALTH_REPORT_INTERVAL_SECONDS", "3600"))
+            send_health_on_next_scan = True
             from okx_signal_system.data.gap_handler import IncrementalSyncer
             syncer = IncrementalSyncer(timeframe=self.api.timeframe.key, dataset=self.api.dataset)
             checked_bars: dict[str, str] = {}
@@ -834,12 +865,16 @@ class OKXSignalGUI:
                 
                 # 每30秒检查一次信号；每小时即使没有新K线也发一次候选体检
                 send_health_report = (
-                    health_interval > 0
-                    and current_time - self._last_candidate_health_report_ts >= health_interval
+                    send_health_on_next_scan
+                    or (
+                        health_interval > 0
+                        and current_time - self._last_candidate_health_report_ts >= health_interval
+                    )
                 )
                 if current_time - last_signal_check >= 30 or send_health_report:
                     await self._check_signals(checked_bars, send_health_report=send_health_report)
                     last_signal_check = current_time
+                    send_health_on_next_scan = False
                 
                 # 每1小时增量同步一次数据（防止WebSocket丢K线）
                 sync_interval_seconds = max(300, self.api.timeframe.hours * 3600)
@@ -1098,11 +1133,14 @@ class OKXSignalGUI:
                         f"| 杠杆{leverage_text} | 盈亏比{rr_text} | {status}", "INFO"
                     )))
                     
-                    # 推送飞书（仅风控通过 + 综合评分≥6的高质量信号才推送，减少噪音）
-                    if is_new_bar and would_push:
+                    notify_key = self._signal_notification_key(signal) if would_push else ""
+                    already_notified = bool(notify_key and self._notification_store().has(notify_key))
+
+                    # 推送飞书（风控通过 + 综合评分≥6；同一K线同一方向只推一次）
+                    if would_push and not already_notified:
                         try:
                             from okx_signal_system.notify.feishu import send_signal_alert
-                            send_signal_alert(
+                            sent = send_signal_alert(
                                 inst_id=signal.inst_id,
                                 side=signal.side,
                                 entry_ref=signal.entry_ref,
@@ -1121,11 +1159,17 @@ class OKXSignalGUI:
                                 signal_timeframe=self.api.timeframe.key,
                                 trend_timeframe=self.api.trend_timeframe.key,
                             )
-                            self.message_queue.put(('log', (f"📤 飞书推送已发送 (评分{effective_score:.1f}≥6)", "INFO")))
+                            if sent:
+                                self._mark_signal_notified(notify_key, signal, score=effective_score)
+                                self.message_queue.put(('log', (f"📤 飞书推送已发送 (评分{effective_score:.1f}≥6)", "INFO")))
+                            else:
+                                self.message_queue.put(('log', ("飞书推送未送达：飞书返回失败，稍后会重试", "WARNING")))
                         except Exception as e:
                             self.message_queue.put(('log', (f"飞书推送失败: {e}", "WARNING")))
                     elif decision.accepted and effective_score < 6.0:
                         self.message_queue.put(('log', (f"🔕 低分信号不推送飞书 (评分{effective_score:.1f}<6)", "INFO")))
+                    elif would_push and already_notified:
+                        self.message_queue.put(('log', (f"已通知过同一根K线信号，跳过重复推送: {signal.inst_id} {signal.side}", "INFO")))
                     elif decision.accepted and effective_score >= 6.0:
                         self.message_queue.put(('log', ("质量门未通过，高分候选信号暂不推送飞书", "WARNING")))
             if send_health_report:

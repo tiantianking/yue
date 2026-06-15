@@ -897,6 +897,10 @@ class LiveSignalMonitor:
         self._quality_gate_allows_push = False
         self._last_candidate_health_report_ts = 0.0
         self._last_ready_signal: dict[str, Any] | None = None
+        self._sent_startup_health_report = False
+        from okx_signal_system.notify.signal_dedupe import SignalNotificationStore
+
+        self._signal_notification_store = SignalNotificationStore()
         try:
             from okx_signal_system.config import project_paths
             self._scan_status_path = project_paths().output_dir / "latest_scan_status.json"
@@ -905,6 +909,28 @@ class LiveSignalMonitor:
 
         # --- 持仓追踪 (max_hold_bars) ---
         self._position_entries: dict[str, tuple[pd.Timestamp, StrategyParams]] = {}
+
+    def _signal_notification_key(self, signal: TradeSignal) -> str:
+        from okx_signal_system.notify.signal_dedupe import signal_notification_key
+
+        return signal_notification_key(
+            signal,
+            signal_timeframe=self.api.timeframe.key,
+            trend_timeframe=self.api.trend_timeframe.key,
+        )
+
+    def _mark_signal_notified(self, key: str, signal: TradeSignal, *, score: float | None = None) -> None:
+        self._signal_notification_store.mark(
+            key,
+            {
+                "symbol": signal.inst_id,
+                "side": signal.side,
+                "kline_time": pd.Timestamp(signal.ts).isoformat(),
+                "score": float(score) if score is not None else None,
+                "signal_timeframe": self.api.timeframe.key,
+                "trend_timeframe": self.api.trend_timeframe.key,
+            },
+        )
 
     async def start(self):
         """启动监控"""
@@ -1224,9 +1250,13 @@ class LiveSignalMonitor:
                         )
                     )
 
-                    if would_push:
+                    notify_key = self._signal_notification_key(signal) if would_push else ""
+                    already_notified = bool(
+                        notify_key and self._signal_notification_store.has(notify_key)
+                    )
+
+                    if would_push and not already_notified:
                         self._last_ready_signal = signal_payload
-                        _last_signal_time[inst_id] = time.time()
                         log.info(
                             f"✅ SIGNAL: {inst_id} {signal.side.upper()} "
                             f"@ {signal.entry_ref:.2f} | "
@@ -1245,6 +1275,7 @@ class LiveSignalMonitor:
                                     self._shadow_ledger.record_signal(signal, decision)
                             except Exception as cb_err:
                                 log.error(f"Signal callback error: {cb_err}")
+                                signal_recorded = False
                         # 内嵌飞书推送（callback 未设置时的 fallback）
                         else:
                             try:
@@ -1270,19 +1301,36 @@ class LiveSignalMonitor:
                                 )
                                 if signal_recorded:
                                     self._shadow_ledger.record_signal(signal, decision)
-                                log.info(f"飞书推送(fallback): {inst_id} {signal.side}")
+                                    log.info(f"飞书推送(fallback): {inst_id} {signal.side}")
+                                else:
+                                    log.warning("飞书推送未送达(fallback): %s %s", inst_id, signal.side)
                             except Exception as feishu_err:
                                 log.error(f"飞书推送失败: {feishu_err}")
+                                signal_recorded = False
+
+                        if signal_recorded:
+                            self._mark_signal_notified(notify_key, signal, score=effective_score)
+                            _last_signal_time[inst_id] = time.time()
+                        else:
+                            log.warning("Signal alert was not delivered; will retry: %s %s", inst_id, signal.side)
+                    elif would_push and already_notified:
+                        self._last_ready_signal = signal_payload
+                        _last_signal_time[inst_id] = time.time()
+                        log.info("Signal already notified; skipping duplicate push: %s %s", inst_id, signal.side)
 
                 # 持久化
                 self.api.persist_data()
                 self._write_latest_scan_status(cycle_health)
                 now_ts = time.time()
                 if (
-                    health_interval > 0
-                    and now_ts - self._last_candidate_health_report_ts >= health_interval
+                    not self._sent_startup_health_report
+                    or (
+                        health_interval > 0
+                        and now_ts - self._last_candidate_health_report_ts >= health_interval
+                    )
                 ):
                     self._last_candidate_health_report_ts = now_ts
+                    self._sent_startup_health_report = True
                     self._send_candidate_health_report(cycle_health)
 
                 await asyncio.sleep(10)

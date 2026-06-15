@@ -1,4 +1,14 @@
 from okx_signal_system.notify import feishu
+from okx_signal_system.notify.signal_dedupe import (
+    SignalNotificationStore,
+    signal_notification_key,
+)
+
+
+class DummySignal:
+    inst_id = "BTC-USDT-SWAP"
+    side = "long"
+    ts = "2026-06-16T00:00:00+00:00"
 
 
 def test_signal_alert_includes_target_rr_and_risk_fields(monkeypatch) -> None:
@@ -93,3 +103,22 @@ def test_candidate_health_report_sends_even_without_candidates(monkeypatch) -> N
     assert "symbols_checked: 0" in text
     assert "blocked_reasons: no_evaluable_candidates" in text
     assert "watchlist: none" in text
+
+
+def test_signal_notification_store_persists_dedupe_keys(tmp_path) -> None:
+    path = tmp_path / "signal_notifications.json"
+    key = signal_notification_key(
+        DummySignal(),
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+    )
+
+    store = SignalNotificationStore(path)
+    assert not store.has(key)
+    assert store.mark(key, {"symbol": "BTC-USDT-SWAP"})
+    assert store.has(key)
+    assert not store.mark(key, {"symbol": "BTC-USDT-SWAP"})
+
+    reloaded = SignalNotificationStore(path)
+    assert reloaded.has(key)
+    assert "|15m|1h" in key
