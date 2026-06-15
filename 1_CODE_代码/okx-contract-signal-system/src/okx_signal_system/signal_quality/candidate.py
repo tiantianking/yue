@@ -17,6 +17,7 @@ class SignalCandidate:
     raw_score: float
     tier: str | None = None
     rank: int | None = None
+    correlation_group: str | None = None
 
     @property
     def inst_id(self) -> str:

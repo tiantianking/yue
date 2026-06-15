@@ -4,11 +4,11 @@
 
 - Repository root: `D:\JIAOYI-CX`
 - Project path: `D:\JIAOYI-CX\1_CODE_代码\okx-contract-signal-system`
-- Current completed version: v3.30
+- Current completed version: v3.31
 - Latest completed commits:
-  - `bcf1be1 fix: enforce startup health gates and vote thresholds`
   - `62d7891 fix: harden signal push correctness`
   - `a26f0d9 feat: batch rank and tier signal pushes`
+  - `feat: add correlation-aware signal tiers`
 
 ## Completed Work
 
@@ -37,6 +37,13 @@
 - No trading logic changed.
 - Version metadata was bumped to v3.30.
 
+### v3.31
+- Added rolling return correlation grouping for ready signal candidates.
+- Realtime and GUI scans pass current closed 15m candle history into tier selection.
+- A-tier still caps at two candidates, with at most one A-tier candidate per correlation group.
+- Correlated but otherwise ready candidates remain B-tier and stay visible in status output.
+- Version metadata was bumped to v3.31.
+
 ## Absolute Constraints
 
 - Do not enable real orders.
@@ -55,33 +62,6 @@
 - Every code update must bump version and commit to git.
 
 ## Remaining Execution Plan
-
-### Phase 3: Correlation De-Duplication
-
-Goal: prevent highly correlated symbols from occupying all A-tier slots in the same candle cycle.
-
-Implement:
-- Add `src/okx_signal_system/signal_quality/correlation.py`.
-- Compute rolling return correlation from recent closed 15m candles.
-- Default window: 30 days, or the maximum available closed history when tests use smaller fixtures.
-- Default high-correlation threshold: `0.75`.
-- Assign candidates to dynamic correlation groups.
-- In `selector.py`, enforce:
-  - each group can have at most one A-tier candidate;
-  - total A-tier cap remains two by default;
-  - other ready candidates stay B-tier.
-
-Suggested tests:
-- Two candidates in same group: only the higher ranked candidate is A-tier.
-- Candidates in different groups: both can be A-tier if under cap.
-- All candidates remain present in ranked/tiered output.
-
-Primary files:
-- `src/okx_signal_system/signal_quality/correlation.py`
-- `src/okx_signal_system/signal_quality/selector.py`
-- `src/okx_signal_system/exchange/realtime.py`
-- `gui.py`
-- `tests/test_signal_quality.py`
 
 ### Phase 4: B-Tier Summary Push
 

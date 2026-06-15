@@ -41,6 +41,20 @@ def _candidate(symbol: str, score: float) -> SignalCandidate:
     )
 
 
+def _history(symbol: str, returns: list[float]) -> pd.DataFrame:
+    closes = [100.0]
+    for value in returns:
+        closes.append(closes[-1] * (1.0 + value))
+    return pd.DataFrame(
+        {
+            "ts": pd.date_range("2025-12-31T22:00:00Z", periods=len(closes), freq="15min"),
+            "close": closes,
+            "is_closed": True,
+            "symbol": symbol,
+        }
+    )
+
+
 def test_assign_tiers_keeps_all_candidates_and_limits_a_tier() -> None:
     selection = assign_tiers(
         [
@@ -60,3 +74,70 @@ def test_assign_tiers_keeps_all_candidates_and_limits_a_tier() -> None:
     assert [item.rank for item in selection.ranked] == [1, 2, 3]
     assert len(selection.tier_a) == 2
     assert len(selection.tier_b) == 1
+
+
+def test_assign_tiers_limits_a_tier_to_one_candidate_per_correlation_group() -> None:
+    shared_returns = [0.01, 0.02, -0.01, 0.015, -0.005, 0.02, -0.015, 0.01]
+    selection = assign_tiers(
+        [
+            _candidate("ETH-USDT-SWAP", 8.0),
+            _candidate("BTC-USDT-SWAP", 9.0),
+        ],
+        max_tier_a=2,
+        price_history={
+            "BTC-USDT-SWAP": _history("BTC-USDT-SWAP", shared_returns),
+            "ETH-USDT-SWAP": _history("ETH-USDT-SWAP", shared_returns),
+        },
+    )
+
+    assert [item.inst_id for item in selection.ranked] == ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]
+    assert [item.tier for item in selection.ranked] == ["A", "B"]
+    assert selection.ranked[0].correlation_group == selection.ranked[1].correlation_group
+    assert len(selection.tier_a) == 1
+    assert len(selection.tier_b) == 1
+
+
+def test_assign_tiers_allows_different_correlation_groups_under_a_tier_cap() -> None:
+    shared_returns = [0.01, 0.02, -0.01, 0.015, -0.005, 0.02, -0.015, 0.01]
+    different_returns = [-0.02, 0.01, 0.015, -0.005, 0.02, -0.01, 0.005, -0.015]
+    selection = assign_tiers(
+        [
+            _candidate("BTC-USDT-SWAP", 9.0),
+            _candidate("SOL-USDT-SWAP", 8.5),
+        ],
+        max_tier_a=2,
+        price_history={
+            "BTC-USDT-SWAP": _history("BTC-USDT-SWAP", shared_returns),
+            "SOL-USDT-SWAP": _history("SOL-USDT-SWAP", different_returns),
+        },
+    )
+
+    assert [item.tier for item in selection.ranked] == ["A", "A"]
+    assert selection.ranked[0].correlation_group != selection.ranked[1].correlation_group
+    assert len(selection.tier_a) == 2
+
+
+def test_assign_tiers_keeps_correlated_demoted_candidates_in_ranked_output() -> None:
+    shared_returns = [0.01, 0.02, -0.01, 0.015, -0.005, 0.02, -0.015, 0.01]
+    different_returns = [-0.02, 0.01, 0.015, -0.005, 0.02, -0.01, 0.005, -0.015]
+    selection = assign_tiers(
+        [
+            _candidate("ETH-USDT-SWAP", 8.8),
+            _candidate("BTC-USDT-SWAP", 9.0),
+            _candidate("SOL-USDT-SWAP", 8.0),
+        ],
+        max_tier_a=2,
+        price_history={
+            "BTC-USDT-SWAP": _history("BTC-USDT-SWAP", shared_returns),
+            "ETH-USDT-SWAP": _history("ETH-USDT-SWAP", shared_returns),
+            "SOL-USDT-SWAP": _history("SOL-USDT-SWAP", different_returns),
+        },
+    )
+
+    assert [item.inst_id for item in selection.ranked] == [
+        "BTC-USDT-SWAP",
+        "ETH-USDT-SWAP",
+        "SOL-USDT-SWAP",
+    ]
+    assert [item.tier for item in selection.ranked] == ["A", "B", "A"]
+    assert len(selection.ranked) == 3

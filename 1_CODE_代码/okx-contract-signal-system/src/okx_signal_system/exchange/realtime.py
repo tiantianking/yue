@@ -1177,12 +1177,18 @@ class LiveSignalMonitor:
         leverage = float(decision.leverage_used or 0.0)
         return float(final_score) + min(rr, 8.0) * 0.15 + float(shadow_adjustment or 0.0) - max(0.0, leverage - 5.0) * 0.05
 
-    async def _publish_tiered_candidates(self, candidates: list[SignalCandidate]) -> None:
-        selection = assign_tiers(candidates, max_tier_a=2)
+    async def _publish_tiered_candidates(
+        self,
+        candidates: list[SignalCandidate],
+        *,
+        price_history: dict[str, pd.DataFrame] | None = None,
+    ) -> None:
+        selection = assign_tiers(candidates, max_tier_a=2, price_history=price_history)
         for candidate in selection.ranked:
             candidate.health_item["tier"] = candidate.tier
             candidate.health_item["rank"] = candidate.rank
             candidate.health_item["rank_score"] = candidate.rank_score
+            candidate.health_item["correlation_group"] = candidate.correlation_group
         for candidate in selection.tier_a:
             if self._signal_notification_store.has(candidate.notify_key):
                 self._last_ready_signal = candidate.payload
@@ -1254,6 +1260,7 @@ class LiveSignalMonitor:
         while self._running:
             cycle_health: list[dict[str, Any]] = []
             ready_candidates: list[SignalCandidate] = []
+            candidate_history: dict[str, pd.DataFrame] = {}
             try:
                 # 获取持仓（模拟盘可能401，优雅降级）
                 positions = []
@@ -1298,6 +1305,7 @@ class LiveSignalMonitor:
                     if len(df) < 50:
                         cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="history_too_short"))
                         continue
+                    candidate_history[inst_id] = df
                     self._shadow_ledger.update_symbol(inst_id, df)
                     from okx_signal_system.training.startup_quality import is_latest_bar_fresh
                     from okx_signal_system.data.closed_backfill import latest_closed_candle_start
@@ -1458,7 +1466,7 @@ class LiveSignalMonitor:
                         )
 
                 # 持久化
-                await self._publish_tiered_candidates(ready_candidates)
+                await self._publish_tiered_candidates(ready_candidates, price_history=candidate_history)
                 self.api.persist_data()
                 self._write_latest_scan_status(cycle_health)
                 now_ts = time.time()

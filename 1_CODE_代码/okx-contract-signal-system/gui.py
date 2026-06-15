@@ -27,7 +27,7 @@ if str(_src_path) not in sys.path:
 
 log = logging.getLogger(__name__)
 
-APP_VERSION = "v3.30"
+APP_VERSION = "v3.31"
 DASHBOARD_HOST = "127.0.0.1"
 DASHBOARD_PORT = 3001
 DASHBOARD_URL = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}"
@@ -1186,6 +1186,7 @@ class OKXSignalGUI:
                 self._adaptive_manager = AdaptiveParamsManager()
             cycle_health: list[dict] = []
             ready_candidates: list[SignalCandidate] = []
+            candidate_history: dict[str, pd.DataFrame] = {}
             
             for inst_id in self._watched_symbols:
                 # 通过统一行情入口读取；WebSocket 不稳时会自动走 REST 兜底刷新。
@@ -1201,6 +1202,7 @@ class OKXSignalGUI:
                     cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="history_too_short"))
                     continue  # 数据不足（至少需要80根K线计算EMA60+突破位）
 
+                candidate_history[inst_id] = df
                 expected_closed = pd.Timestamp(latest_closed_candle_start(self.api.timeframe.key, settle_seconds=60))
                 latest_closed = pd.to_datetime(df["ts"].iloc[-1], utc=True)
                 if latest_closed < expected_closed:
@@ -1433,11 +1435,12 @@ class OKXSignalGUI:
                         self.message_queue.put(('log', (f"🔕 低分信号不推送飞书 (评分{effective_score:.1f}<6)", "INFO")))
                     elif decision.accepted and effective_score >= 6.0:
                         self.message_queue.put(('log', ("质量门未通过，高分候选信号暂不推送飞书", "WARNING")))
-            selection = assign_tiers(ready_candidates, max_tier_a=2)
+            selection = assign_tiers(ready_candidates, max_tier_a=2, price_history=candidate_history)
             for candidate in selection.ranked:
                 candidate.health_item["tier"] = candidate.tier
                 candidate.health_item["rank"] = candidate.rank
                 candidate.health_item["rank_score"] = candidate.rank_score
+                candidate.health_item["correlation_group"] = candidate.correlation_group
             for candidate in selection.tier_a:
                 signal = candidate.signal
                 decision = candidate.decision
