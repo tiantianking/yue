@@ -102,6 +102,15 @@ def test_rejects_without_breakout() -> None:
     assert signal.reject_reason == "no_breakout"
 
 
+def test_rejects_trend_strength_against_bias() -> None:
+    signal = build_signal(
+        base_row(ema_fast=108.0, ema_slow=112.0),
+        inst_id="BTC-USDT-SWAP",
+    )
+    assert not signal.accepted
+    assert signal.reject_reason == "trend_strength_wrong_direction"
+
+
 def test_strategy_rejects_target_rr_below_3_5() -> None:
     signal = build_signal(
         base_row(),

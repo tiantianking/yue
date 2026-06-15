@@ -51,6 +51,18 @@ def volume_features(frame: pd.DataFrame, sma_window: int = 20) -> pd.DataFrame:
     return df[["vol_ratio", "volume_sma"]]
 
 
+def trend_ema_spans(
+    fast_ema: int,
+    slow_ema: int,
+    *,
+    signal_timeframe: str,
+    trend_timeframe: str,
+) -> tuple[int, int]:
+    """Scale entry EMA spans to the higher trend timeframe."""
+    ratio = ratio_bars(trend_timeframe, signal_timeframe)
+    return max(2, int(round(fast_ema / ratio))), max(3, int(round(slow_ema / ratio)))
+
+
 def detect_extreme_volatility(frame: pd.DataFrame, atr_window: int = 14, threshold_multiplier: float = 3.0) -> pd.Series:
     """检测连续极端波动：最近 N 根 bar 中有 >= M 根 ATR 异常放大"""
     atr_series = atr(frame, atr_window)
@@ -205,6 +217,12 @@ def build_feature_frame(
 ) -> pd.DataFrame:
     signal_spec = timeframe_spec(signal_timeframe)
     trend_key = trend_timeframe or default_trend_timeframe(signal_spec.key)
+    trend_fast_ema, trend_slow_ema = trend_ema_spans(
+        fast_ema,
+        slow_ema,
+        signal_timeframe=signal_spec.key,
+        trend_timeframe=trend_key,
+    )
     one_h = add_1h_features(
         frame_1h,
         fast_ema=fast_ema,
@@ -215,8 +233,8 @@ def build_feature_frame(
     one_h["signal_timeframe"] = signal_spec.key
     four_h = add_trend_features(
         resample_trend(frame_1h, signal_timeframe=signal_spec.key, trend_timeframe=trend_key),
-        fast_ema=fast_ema,
-        slow_ema=slow_ema,
+        fast_ema=trend_fast_ema,
+        slow_ema=trend_slow_ema,
         trend_timeframe=trend_key,
     )
     aligned = align_completed_trend_to_base(one_h, four_h)

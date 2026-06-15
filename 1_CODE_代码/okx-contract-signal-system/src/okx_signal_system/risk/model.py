@@ -39,6 +39,7 @@ class Ledger:
     loss_streak: int = 0
     max_drawdown: float = 0.0
     cool_off_bars: int = 0
+    peak_equity: float | None = None
 
     @property
     def allow_new_entry(self) -> bool:

@@ -187,24 +187,24 @@ def cool_off_condition_mask(features: pd.DataFrame, atr_window: int = 14) -> np.
 
 def exit_trade(features: pd.DataFrame, entry_idx: int, signal, params: StrategyParams) -> tuple[int, float, str]:
     end_idx = min(entry_idx + params.max_hold_bars, len(features) - 1)
-    for idx in range(entry_idx + 1, end_idx + 1):
+    for idx in range(entry_idx, end_idx + 1):
         row = features.iloc[idx]
         if signal.side == "long":
             # 保守处理：同bar同时触及TP和SL时，默认先触发止损
             if row["low"] <= signal.stop_loss:
-                return idx, float(signal.stop_loss), "stop_loss"
+                return idx, min(float(signal.stop_loss), float(row["open"])), "stop_loss"
             if row["high"] >= signal.take_profit:
                 return idx, float(signal.take_profit), "take_profit"
             if row.get("trend_bias", row.get("bias_4h")) == "short" and idx + 1 < len(features):
                 return idx + 1, float(features.iloc[idx + 1]["open"]), "trend_reverse"
         if signal.side == "short":
             if row["high"] >= signal.stop_loss:
-                return idx, float(signal.stop_loss), "stop_loss"
+                return idx, max(float(signal.stop_loss), float(row["open"])), "stop_loss"
             if row["low"] <= signal.take_profit:
                 return idx, float(signal.take_profit), "take_profit"
             if row.get("trend_bias", row.get("bias_4h")) == "long" and idx + 1 < len(features):
                 return idx + 1, float(features.iloc[idx + 1]["open"]), "trend_reverse"
-    return end_idx, float(features.iloc[end_idx]["open"]), "max_hold"
+    return end_idx, float(features.iloc[end_idx]["close"]), "max_hold"
 
 
 def exit_trade_from_arrays(
@@ -212,6 +212,7 @@ def exit_trade_from_arrays(
     high: np.ndarray,
     low: np.ndarray,
     open_: np.ndarray,
+    close: np.ndarray,
     bias: np.ndarray,
     entry_idx: int,
     side: str,
@@ -220,23 +221,23 @@ def exit_trade_from_arrays(
     max_hold_bars: int,
 ) -> tuple[int, float, str]:
     end_idx = min(entry_idx + max_hold_bars, len(open_) - 1)
-    for idx in range(entry_idx + 1, end_idx + 1):
+    for idx in range(entry_idx, end_idx + 1):
         if side == "long":
             # 保守处理：同bar同时触及TP和SL时，默认先触发止损
             if low[idx] <= stop_loss:
-                return idx, float(stop_loss), "stop_loss"
+                return idx, min(float(stop_loss), float(open_[idx])), "stop_loss"
             if high[idx] >= take_profit:
                 return idx, float(take_profit), "take_profit"
             if bias[idx] == "short" and idx + 1 < len(open_):
                 return idx + 1, float(open_[idx + 1]), "trend_reverse"
         else:
             if high[idx] >= stop_loss:
-                return idx, float(stop_loss), "stop_loss"
+                return idx, max(float(stop_loss), float(open_[idx])), "stop_loss"
             if low[idx] <= take_profit:
                 return idx, float(take_profit), "take_profit"
             if bias[idx] == "long" and idx + 1 < len(open_):
                 return idx + 1, float(open_[idx + 1]), "trend_reverse"
-    return end_idx, float(open_[end_idx]), "max_hold"
+    return end_idx, float(close[end_idx]), "max_hold"
 
 
 def run_backtest(
@@ -282,6 +283,7 @@ def run_backtest_from_features(
     open_ = features["open"].to_numpy(dtype=float)
     high = features["high"].to_numpy(dtype=float)
     low = features["low"].to_numpy(dtype=float)
+    close = features["close"].to_numpy(dtype=float)
     volume = features["volume"].to_numpy(dtype=float)
     quote_volume = (
         features["quote_volume"].to_numpy(dtype=float)
@@ -310,6 +312,7 @@ def run_backtest_from_features(
                 loss_streak=ledger.loss_streak,
                 max_drawdown=ledger.max_drawdown,
                 cool_off_bars=ledger.cool_off_bars - 1,
+                peak_equity=ledger.peak_equity,
             )
             continue
 
@@ -325,6 +328,7 @@ def run_backtest_from_features(
                 loss_streak=ledger.loss_streak,
                 max_drawdown=ledger.max_drawdown,
                 cool_off_bars=COOL_OFF_BARS,  # 设置冷静期
+                peak_equity=ledger.peak_equity,
             )
             continue
 
@@ -369,6 +373,7 @@ def run_backtest_from_features(
             high=high,
             low=low,
             open_=open_,
+            close=close,
             bias=bias,
             entry_idx=entry_idx,
             side=side,
@@ -392,9 +397,11 @@ def run_backtest_from_features(
         # 更新ledger状态
         new_equity = ledger.equity + net_pnl
         new_loss_streak = ledger.loss_streak + 1 if net_pnl < 0 else 0
+        peak_equity = max(float(ledger.peak_equity or ledger.init_capital), float(new_equity))
+        current_drawdown = (peak_equity - float(new_equity)) / peak_equity if peak_equity > 0 else 0.0
         new_max_drawdown = max(
             ledger.max_drawdown,
-            max(0.0, (ledger.init_capital - new_equity) / ledger.init_capital),
+            max(0.0, current_drawdown),
         )
         # 交易后冷静期归零（无论盈亏）
         ledger = Ledger(
@@ -406,6 +413,7 @@ def run_backtest_from_features(
             loss_streak=new_loss_streak,
             max_drawdown=new_max_drawdown,
             cool_off_bars=0,
+            peak_equity=peak_equity,
         )
         trades.append(
             TradeRecord(

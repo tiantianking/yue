@@ -7,7 +7,7 @@ project:
 data:
   historical_dataset: okx_15m_extended
   timeframe: 15m
-  trend_timeframe: 15m
+  trend_timeframe: 1h
   symbols:
     - BTC-USDT-SWAP
     - ETH-USDT-SWAP

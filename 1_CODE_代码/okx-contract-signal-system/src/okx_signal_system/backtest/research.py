@@ -23,6 +23,10 @@ DEFAULT_SIGNAL_TIMEFRAME = "15m"
 DEFAULT_TREND_TIMEFRAME = "1h"
 
 
+class NoValidParameterSetError(RuntimeError):
+    """Raised when training cannot find a parameter set that passes gates."""
+
+
 def _prefixed(summary: dict, prefix: str) -> dict:
     return {f"{prefix}_{key}": value for key, value in summary.items()}
 
@@ -192,8 +196,7 @@ def select_shared_params(train_grid_results: pd.DataFrame) -> StrategyParams:
         raise ValueError("shared train grid is empty")
     candidates = train_grid_results[train_grid_results["passed_train_gate"]].copy()
     if candidates.empty:
-        # 如果没有通过门控，放宽条件选择最佳参数
-        candidates = train_grid_results.copy()
+        raise NoValidParameterSetError("NO_VALID_PARAMETER_SET")
 
     # 标准化PF用于排序（inf替换为一个大数）
     candidates["rank_pf"] = candidates["train_profit_factor"].replace(float("inf"), 999999)
@@ -375,7 +378,10 @@ def run_dataset_research_artifacts(
             signal_timeframe=signal_key,
             trend_timeframe=trend_key,
         )
-        selected = select_shared_params(train_grid_results)
+        try:
+            selected = select_shared_params(train_grid_results)
+        except NoValidParameterSetError:
+            selected = None
     else:
         train_grid_results = pd.DataFrame()
         selected = None
@@ -387,7 +393,36 @@ def run_dataset_research_artifacts(
 
     for symbol_data in symbols:
         if shared_params:
-            assert selected is not None
+            if selected is None:
+                selected_params: dict = {}
+                train_trades = pd.DataFrame()
+                valid_trades = pd.DataFrame()
+                train_summary = summarize_trades(train_trades)
+                valid_summary = summarize_trades(valid_trades)
+                evaluation = {
+                    "pass_fail": "failed",
+                    "reasons": "NO_VALID_PARAMETER_SET",
+                }
+                train_trades_by_symbol.append(train_trades)
+                valid_trades_by_symbol.append(valid_trades)
+                base_row = {
+                    "symbol": symbol_data.inst_id,
+                    **_prefixed(train_summary, "train"),
+                    **_prefixed(valid_summary, "valid"),
+                    "shared_params": bool(shared_params),
+                    "pass_fail": evaluation["pass_fail"],
+                    "fail_reasons": evaluation["reasons"],
+                }
+                rows.append(base_row)
+                validation_rows.append(
+                    {
+                        "symbol": symbol_data.inst_id,
+                        **_prefixed(valid_summary, "valid"),
+                        "pass_fail": evaluation["pass_fail"],
+                        "fail_reasons": evaluation["reasons"],
+                    }
+                )
+                continue
             train_frame, valid_frame = split_train_valid(symbol_data.frame, valid_fraction=0.25)
             train_trades = run_backtest(
                 train_frame,

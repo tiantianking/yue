@@ -35,7 +35,7 @@ SUPPORTED_TIMEFRAMES: dict[str, TimeframeSpec] = {
         okx_bar="15m",
         ws_channel="candle15m",
         file_suffix="15m",
-        fresh_lag_hours=1.00,
+        fresh_lag_hours=0.35,
     ),
     "1h": TimeframeSpec(
         key="1h",

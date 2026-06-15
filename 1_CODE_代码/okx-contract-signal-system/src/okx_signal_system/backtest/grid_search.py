@@ -11,7 +11,7 @@ from okx_signal_system.strategy.trend_breakout import StrategyParams
 from okx_signal_system.timeframe import normalize_timeframe
 
 
-def parameter_grid(timeframe: str = "1h") -> list[StrategyParams]:
+def parameter_grid(timeframe: str = "15m") -> list[StrategyParams]:
     tf = normalize_timeframe(timeframe)
     if tf == "15m":
         fast_values = [72, 96, 120]
@@ -59,7 +59,7 @@ def run_grid_search(
     *,
     inst_id: str,
     params_grid: list[StrategyParams] | None = None,
-    signal_timeframe: str = "1h",
+    signal_timeframe: str = "15m",
     trend_timeframe: str | None = None,
 ) -> pd.DataFrame:
     rows = []

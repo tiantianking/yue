@@ -40,7 +40,7 @@ def file_timeframe(path: Path, default: str = "1h") -> str:
 
 def list_parquet_files(dataset: str = "okx_15m_extended") -> list[Path]:
     root = find_lightweight_history(dataset)
-    return sorted(root.glob("*.parquet"))
+    return sorted(path for path in root.glob("*.parquet") if ".tmp" not in path.name)
 
 
 def normalize_ohlcv(frame: pd.DataFrame, *, inst_id: str, timeframe: str = "1h") -> pd.DataFrame:

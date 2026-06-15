@@ -219,7 +219,7 @@ def run_startup_quality_gate(
     config = load_config("base.yaml")
     data_cfg = config.get("data", {})
     dataset = dataset or data_cfg.get("historical_dataset", "okx_15m_extended")
-    signal_timeframe = timeframe_spec(signal_timeframe or data_cfg.get("timeframe", "1h")).key
+    signal_timeframe = timeframe_spec(signal_timeframe or data_cfg.get("timeframe", "15m")).key
     trend_timeframe = trend_timeframe or data_cfg.get("trend_timeframe") or default_trend_timeframe(signal_timeframe)
     trend_timeframe = timeframe_spec(trend_timeframe).key
     if history_tail is None:

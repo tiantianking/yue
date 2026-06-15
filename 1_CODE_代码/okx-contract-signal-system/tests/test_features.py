@@ -7,6 +7,7 @@ from okx_signal_system.features.indicators import (
     build_feature_frame,
     prior_breakout_levels,
     resample_4h,
+    trend_ema_spans,
 )
 from okx_signal_system.paths import find_lightweight_history
 
@@ -66,3 +67,7 @@ def test_build_feature_frame_supports_15m_signal_and_1h_trend() -> None:
     assert {"trend_bias", "trend_timeframe", "complete_trend", "signal_timeframe"}.issubset(features.columns)
     assert features["signal_timeframe"].dropna().iloc[-1] == "15m"
     assert features["trend_timeframe"].dropna().iloc[-1] == "1h"
+
+
+def test_trend_ema_spans_scale_15m_params_to_1h() -> None:
+    assert trend_ema_spans(120, 720, signal_timeframe="15m", trend_timeframe="1h") == (30, 180)

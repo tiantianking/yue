@@ -1,6 +1,7 @@
 import pandas as pd
 
 from okx_signal_system.backtest.runner import (
+    exit_trade_from_arrays,
     run_backtest,
     signal_candidate_indices,
     split_train_valid,
@@ -96,3 +97,35 @@ def test_signal_candidate_prefilter_includes_pullback_continuation() -> None:
 
     assert signal.accepted
     assert 9 in set(signal_candidate_indices(features))
+
+
+def test_exit_checks_entry_bar_and_gap_stop_conservatively() -> None:
+    exit_idx, exit_price, reason = exit_trade_from_arrays(
+        high=pd.Series([110.0, 101.0]).to_numpy(),
+        low=pd.Series([90.0, 94.0]).to_numpy(),
+        open_=pd.Series([100.0, 95.0]).to_numpy(),
+        close=pd.Series([100.0, 98.0]).to_numpy(),
+        bias=pd.Series(["long", "long"]).to_numpy(),
+        entry_idx=1,
+        side="long",
+        stop_loss=96.0,
+        take_profit=110.0,
+        max_hold_bars=5,
+    )
+    assert (exit_idx, exit_price, reason) == (1, 95.0, "stop_loss")
+
+
+def test_exit_max_hold_uses_close_after_checking_bar() -> None:
+    exit_idx, exit_price, reason = exit_trade_from_arrays(
+        high=pd.Series([101.0, 102.0]).to_numpy(),
+        low=pd.Series([99.0, 98.0]).to_numpy(),
+        open_=pd.Series([100.0, 101.0]).to_numpy(),
+        close=pd.Series([100.0, 100.5]).to_numpy(),
+        bias=pd.Series(["long", "long"]).to_numpy(),
+        entry_idx=1,
+        side="long",
+        stop_loss=90.0,
+        take_profit=120.0,
+        max_hold_bars=0,
+    )
+    assert (exit_idx, exit_price, reason) == (1, 100.5, "max_hold")

@@ -19,6 +19,16 @@ def test_file_symbol_maps_to_okx_inst_id() -> None:
     assert file_symbol_to_inst_id(find_lightweight_history("okx_1h_extended") / "BTC_USDT_USDT_1h.parquet") == "BTC-USDT-SWAP"
 
 
+def test_list_parquet_files_ignores_atomic_tmp_files(tmp_path, monkeypatch) -> None:
+    from okx_signal_system.data import loader
+
+    (tmp_path / "BTC_USDT_USDT_15m.parquet").write_text("")
+    (tmp_path / "BTC_USDT_USDT_15m.123.tmp.parquet").write_text("")
+    monkeypatch.setattr(loader, "find_lightweight_history", lambda _dataset: tmp_path)
+
+    assert [path.name for path in loader.list_parquet_files("x")] == ["BTC_USDT_USDT_15m.parquet"]
+
+
 def test_timeframe_helpers_support_15m_signal_mode() -> None:
     spec = timeframe_spec("15m")
     assert spec.okx_bar == "15m"

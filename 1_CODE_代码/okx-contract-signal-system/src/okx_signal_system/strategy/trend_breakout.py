@@ -340,6 +340,10 @@ def build_signal(
         return _reject(ts, inst_id, "VOL_LOW", "volume_too_low")
 
     trend_strength = _calculate_trend_strength(row)
+    if bias == "long" and trend_strength < TREND_STRENGTH_MIN:
+        return _reject(ts, inst_id, "TREND_WEAK", "trend_strength_wrong_direction")
+    if bias == "short" and trend_strength > -TREND_STRENGTH_MIN:
+        return _reject(ts, inst_id, "TREND_WEAK", "trend_strength_wrong_direction")
     if abs(trend_strength) < TREND_STRENGTH_MIN:
         return _reject(ts, inst_id, "TREND_WEAK", "trend_strength_too_weak")
 
