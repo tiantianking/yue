@@ -4,13 +4,14 @@
 
 - Repository root: `D:\JIAOYI-CX`
 - Project path: `D:\JIAOYI-CX\1_CODE_代码\okx-contract-signal-system`
-- Current completed version: v3.34
+- Current completed version: v3.35
 - Latest completed commits:
   - `a26f0d9 feat: batch rank and tier signal pushes`
   - `feat: add correlation-aware signal tiers`
   - `feat: summarize b tier signal candidates`
   - `feat: track signal lifecycle states`
   - `feat: label historical signal outcomes`
+  - `feat: build baseline signal quality model`
 
 ## Completed Work
 
@@ -67,6 +68,13 @@
 - Existing fee, slippage, and funding cost rules are applied to final net R.
 - Version metadata was bumped to v3.34.
 
+### v3.35
+- Added leakage-safe signal quality feature building for historical and candidate analysis.
+- Feature generation uses only signal-time and earlier closed K-lines.
+- Added a baseline signal quality ranking model with walk-forward purged validation.
+- Model output is ranking-only and includes `p_tp`, `p_sl`, `p_timeout`, `expected_net_r`, and uncertainty.
+- Version metadata was bumped to v3.35.
+
 ## Absolute Constraints
 
 - Do not enable real orders.
@@ -86,63 +94,22 @@
 
 ## Remaining Execution Plan
 
-### Phase 7: Safe Feature Builder
+### Phase 9: Candidate Model Shadow Scoring
 
-Goal: build quality-model features that only use data available at signal time.
-
-Implement:
-- Add `src/okx_signal_system/signal_quality/feature_builder.py`.
-- Include only signal-time or prior rolling features:
-  - trend spread;
-  - trend slope;
-  - 15m/1h trend alignment;
-  - breakout distance over ATR;
-  - candle close location value;
-  - volume percentile;
-  - ATR percentile;
-  - stop distance percent;
-  - breakout range compression.
-- Add prefix-invariance tests: features for a timestamp must not change when future rows are appended.
-
-Suggested tests:
-- Feature frame has no future leakage.
-- Prefix-invariance passes.
-- Missing optional columns degrade to null/default, not crash.
-
-Primary files:
-- `src/okx_signal_system/signal_quality/feature_builder.py`
-- `tests/test_signal_quality_features.py`
-
-### Phase 8: Baseline Quality Model
-
-Goal: train a simple ranking model for ordering only, not rejecting signals.
+Goal: connect the v3.35 quality model as shadow scoring only, so operators can compare model ranking with the existing A/B-tier flow before any behavior change.
 
 Implement:
-- Add `src/okx_signal_system/signal_quality/model.py`.
-- First model: scikit-learn logistic regression pipeline.
-- Use Purged Walk-forward validation.
-- Output:
-  - `p_tp`
-  - `p_sl`
-  - `p_timeout`
-  - `expected_net_r`
-  - uncertainty placeholder if ensemble/folds are available.
-- Model is only allowed to rank candidates initially.
-- Do not use model output as a hard reject gate.
-
-Suggested metrics:
-- Precision@1
-- Precision@3
-- Mean net R@K
-- PF@K
-- Lift@K
-- Brier Score
-- calibration error
+- Build signal quality features for ready candidates in realtime and GUI scans.
+- Apply the baseline model only when a trained model artifact exists.
+- Add model scores to health output, payloads, and dashboard-visible status.
+- Keep A-tier/B-tier selection and push decisions unchanged.
+- Do not use model output as a hard reject or promotion gate.
 
 Primary files:
-- `src/okx_signal_system/signal_quality/model.py`
-- `src/okx_signal_system/signal_quality/calibration.py`
-- `tests/test_signal_quality_model.py`
+- `src/okx_signal_system/exchange/realtime.py`
+- `gui.py`
+- dashboard status surfaces
+- focused integration tests for shadow-only scoring
 
 ## Required Verification For Every Phase
 
@@ -179,5 +146,4 @@ git diff --stat
   - `feat: summarize b tier signal candidates`
   - `feat: track signal lifecycle states`
   - `feat: label historical signal outcomes`
-  - `feat: build leakage-safe quality features`
-  - `feat: train baseline quality ranking model`
+  - `feat: score candidates with quality model shadow mode`

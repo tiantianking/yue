@@ -121,3 +121,31 @@
 - `docs/okx-signal-quality-next-steps.md`: moved Phase 6 into completed v3.34 work and left Phase 7 as the next execution phase.
 - `progress.md`: appended this task record.
 - Rollback method: revert the upcoming commit `feat: label historical signal outcomes`.
+
+## 2026-06-16 - Task: Build Baseline Signal Quality Model
+### What was done
+- Added Phase 7 leakage-safe signal quality features from signal-time and earlier closed K-lines.
+- Added Phase 8 baseline quality ranking for historical labels and candidate ordering research.
+- Added purged walk-forward validation for ordered time-series evaluation.
+- Kept model output as ranking-only; it is not wired into live reject or promotion decisions.
+- Bumped version metadata to v3.35.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m compileall gui.py main.py src` passed.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest` passed, 128 tests.
+- `npm.cmd run lint` passed from `D:\JIAOYI-CX\1_CODE_代码\okx-contract-signal-system\dashboard`.
+- `npm.cmd run build` passed from `D:\JIAOYI-CX\1_CODE_代码\okx-contract-signal-system\dashboard`.
+### Notes
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/signal_quality/feature_builder.py`: added signal-time quality feature construction.
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/signal_quality/model.py`: added the baseline ranking model and purged walk-forward validation.
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/signal_quality/__init__.py`: exported feature and model interfaces.
+- `1_CODE_代码/okx-contract-signal-system/tests/test_signal_quality_features.py`: covered future leakage, prefix invariance, and missing optional columns.
+- `1_CODE_代码/okx-contract-signal-system/tests/test_signal_quality_model.py`: covered ranking outputs, missing-feature fallback, no hard reject gate, and purged validation.
+- `1_CODE_代码/okx-contract-signal-system/gui.py`: bumped app version to v3.35.
+- `1_CODE_代码/okx-contract-signal-system/main.py`: bumped app version to v3.35.
+- `1_CODE_代码/okx-contract-signal-system/pyproject.toml`: bumped package version to 3.35.0.
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/__init__.py`: bumped package runtime version to 3.35.0.
+- `1_CODE_代码/okx-contract-signal-system/start.bat`: bumped launcher version text to v3.35.
+- `docs/okx-runtime-health-v3.35.md`: added the v3.35 runtime health note.
+- `docs/okx-signal-quality-next-steps.md`: moved Phase 7 and Phase 8 into completed v3.35 work and left Phase 9 as the next execution phase.
+- `progress.md`: appended this task record.
+- Rollback method: revert the upcoming commit `feat: build baseline signal quality model`.
