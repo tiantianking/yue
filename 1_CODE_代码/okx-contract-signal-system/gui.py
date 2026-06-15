@@ -8,6 +8,9 @@ import threading
 import queue
 import asyncio
 import logging
+import socket
+import subprocess
+import webbrowser
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,7 +26,10 @@ if str(_src_path) not in sys.path:
 
 log = logging.getLogger(__name__)
 
-APP_VERSION = "v3.20"
+APP_VERSION = "v3.22"
+DASHBOARD_HOST = "127.0.0.1"
+DASHBOARD_PORT = 3001
+DASHBOARD_URL = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}"
 
 
 COLORS = {
@@ -133,6 +139,7 @@ class OKXSignalGUI:
         self._startup_quality_report = None
         self._quality_gate_allows_push = False
         self._last_candidate_health_report_ts = 0.0
+        self.dashboard_process = None
         
         # 创建界面
         self.create_widgets()
@@ -319,6 +326,9 @@ class OKXSignalGUI:
         
         self.stop_btn = ttk.Button(toolbar, text="停止监控", command=self.stop_monitoring, state='disabled', style="Danger.TButton")
         self.stop_btn.pack(side='left', padx=4)
+
+        self.panel_btn = ttk.Button(toolbar, text="打开面板", command=self.open_dashboard)
+        self.panel_btn.pack(side='left', padx=4)
         
         # 右侧信息
         self.time_label = ttk.Label(toolbar, text="", foreground=COLORS["muted"], background=COLORS["panel_alt"])
@@ -568,6 +578,50 @@ class OKXSignalGUI:
             self.log(f"加载币种列表失败: {e}", "ERROR")
             # 使用默认值
             self.symbol_list.insert('end', 'BTC-USDT-SWAP  ✅')
+
+    def _dashboard_is_running(self) -> bool:
+        try:
+            with socket.create_connection((DASHBOARD_HOST, DASHBOARD_PORT), timeout=0.3):
+                return True
+        except OSError:
+            return False
+
+    def open_dashboard(self):
+        """打开本地面板；未启动时先拉起。"""
+        dashboard_dir = _project_root / "dashboard"
+        if not dashboard_dir.exists():
+            self.log(f"面板目录不存在: {dashboard_dir}", "ERROR")
+            return
+
+        if self._dashboard_is_running():
+            webbrowser.open(DASHBOARD_URL)
+            self.log("面板已打开", "INFO")
+            return
+
+        npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
+        try:
+            startupinfo = None
+            creationflags = 0
+            if sys.platform == "win32":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                creationflags = subprocess.CREATE_NO_WINDOW
+
+            self.dashboard_process = subprocess.Popen(
+                [npm_cmd, "run", "dev:local"],
+                cwd=dashboard_dir,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                startupinfo=startupinfo,
+                creationflags=creationflags,
+            )
+            self.log("正在启动面板...", "INFO")
+            self.root.after(2500, lambda: webbrowser.open(DASHBOARD_URL))
+        except FileNotFoundError:
+            self.log("未找到 npm，面板无法启动", "ERROR")
+        except Exception as e:
+            self.log(f"面板启动失败: {e}", "ERROR")
     
     def start_monitoring(self):
         """启动监控"""
