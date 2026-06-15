@@ -4,12 +4,13 @@
 
 - Repository root: `D:\JIAOYI-CX`
 - Project path: `D:\JIAOYI-CX\1_CODE_代码\okx-contract-signal-system`
-- Current completed version: v3.33
+- Current completed version: v3.34
 - Latest completed commits:
   - `a26f0d9 feat: batch rank and tier signal pushes`
   - `feat: add correlation-aware signal tiers`
   - `feat: summarize b tier signal candidates`
   - `feat: track signal lifecycle states`
+  - `feat: label historical signal outcomes`
 
 ## Completed Work
 
@@ -59,6 +60,13 @@
 - Realtime and GUI status output include lifecycle status and lifecycle summary counts.
 - Version metadata was bumped to v3.33.
 
+### v3.34
+- Added historical outcome labeling for signal candidates.
+- Labels include `TP`, `SL`, `TIMEOUT`, final net R, MAE, MFE, holding bars, exit time, and exit price.
+- Labeling uses only later closed K-lines and treats same-candle TP/SL as `SL`.
+- Existing fee, slippage, and funding cost rules are applied to final net R.
+- Version metadata was bumped to v3.34.
+
 ## Absolute Constraints
 
 - Do not enable real orders.
@@ -77,35 +85,6 @@
 - Every code update must bump version and commit to git.
 
 ## Remaining Execution Plan
-
-### Phase 6: Historical Candidate Labeling
-
-Goal: create training data for later quality ranking without future leakage.
-
-Implement:
-- Add `src/okx_signal_system/signal_quality/labeler.py`.
-- For every historical candidate signal, label:
-  - `TP`
-  - `SL`
-  - `TIMEOUT`
-  - final net R
-  - MAE
-  - MFE
-  - holding bars
-- Label using the same stop loss, take profit, max hold, fee, slippage rules as real strategy/backtest.
-- Same-candle TP and SL must be conservative: SL first.
-
-Suggested tests:
-- TP label.
-- SL label.
-- TIMEOUT label.
-- Same-candle TP/SL resolves to SL.
-- Features/labels never use bars before the signal time incorrectly.
-
-Primary files:
-- `src/okx_signal_system/signal_quality/labeler.py`
-- `src/okx_signal_system/backtest/runner.py`
-- `tests/test_signal_quality_labeler.py`
 
 ### Phase 7: Safe Feature Builder
 

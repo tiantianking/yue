@@ -96,3 +96,28 @@
 - `docs/okx-signal-quality-next-steps.md`: moved Phase 5 into completed v3.33 work and left Phase 6 as the next execution phase.
 - `progress.md`: appended this task record.
 - Rollback method: revert the upcoming commit `feat: track signal lifecycle states`.
+
+## 2026-06-16 - Task: Label Historical Signal Outcomes
+### What was done
+- Added Phase 6 historical outcome labeling for closed-candle signal analysis.
+- Labels now report `TP`, `SL`, `TIMEOUT`, net R after existing costs, MAE, MFE, holding bars, exit time, and exit price.
+- Same-candle TP/SL conflicts are handled conservatively as `SL`.
+- Labeling ignores bars at or before the signal time and filters to closed K-lines only.
+- Bumped version metadata to v3.34.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m compileall gui.py main.py src` passed.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest` passed, 120 tests.
+- `npm.cmd run lint` passed from `D:\JIAOYI-CX\1_CODE_代码\okx-contract-signal-system\dashboard`.
+- `npm.cmd run build` passed from `D:\JIAOYI-CX\1_CODE_代码\okx-contract-signal-system\dashboard`.
+### Notes
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/signal_quality/labeler.py`: added historical labeling and cost-adjusted net R output.
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/signal_quality/__init__.py`: exported labeler interfaces.
+- `1_CODE_代码/okx-contract-signal-system/tests/test_signal_quality_labeler.py`: covers TP, SL, TIMEOUT, same-candle stop-loss priority, and closed-candle boundaries.
+- `1_CODE_代码/okx-contract-signal-system/main.py`: bumped app version to v3.34.
+- `1_CODE_代码/okx-contract-signal-system/pyproject.toml`: bumped package version to 3.34.0.
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/__init__.py`: bumped package runtime version to 3.34.0.
+- `1_CODE_代码/okx-contract-signal-system/start.bat`: bumped launcher version text to v3.34.
+- `docs/okx-runtime-health-v3.34.md`: added the v3.34 runtime health note.
+- `docs/okx-signal-quality-next-steps.md`: moved Phase 6 into completed v3.34 work and left Phase 7 as the next execution phase.
+- `progress.md`: appended this task record.
+- Rollback method: revert the upcoming commit `feat: label historical signal outcomes`.
