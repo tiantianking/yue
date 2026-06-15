@@ -47,7 +47,13 @@ from okx_signal_system.signal_runtime import (
     seconds_until_next_signal_scan,
     signal_is_stale,
 )
-from okx_signal_system.signal_quality import SignalCandidate, SignalLifecycleStore, assign_tiers, lifecycle_payload
+from okx_signal_system.signal_quality import (
+    QualityModelShadowScorer,
+    SignalCandidate,
+    SignalLifecycleStore,
+    assign_tiers,
+    lifecycle_payload,
+)
 from okx_signal_system.timeframe import default_trend_timeframe, ratio_bars, timeframe_spec
 
 log = logging.getLogger(__name__)
@@ -987,6 +993,7 @@ class LiveSignalMonitor:
         self._shadow_score_min_closed = int(learning_cfg.get("shadow_score_min_closed_signals", 6))
         self._shadow_ledger = ShadowTradingLedger()
         self._lifecycle_store = SignalLifecycleStore()
+        self._quality_model_shadow = QualityModelShadowScorer()
         self._quality_gate_allows_push = False
         self._last_candidate_health_report_ts = 0.0
         self._last_ready_signal: dict[str, Any] | None = None
@@ -1116,6 +1123,7 @@ class LiveSignalMonitor:
         final_score: float | None = None,
         risk_reason: str | None = None,
         shadow_adjustment: float | None = None,
+        quality_model: dict[str, Any] | None = None,
         would_push: bool = False,
     ) -> dict[str, Any]:
         raw_score = signal.signal_score if signal and signal.signal_score is not None else None
@@ -1144,6 +1152,7 @@ class LiveSignalMonitor:
             "raw_score": float(raw_score) if raw_score is not None else None,
             "final_score": float(final_score) if final_score is not None else None,
             "shadow_adjustment": float(shadow_adjustment) if shadow_adjustment is not None else None,
+            "quality_model": quality_model,
             "breakout_gap_pct": self._breakout_gap_pct(row),
         }
 
@@ -1169,6 +1178,7 @@ class LiveSignalMonitor:
             "websocket": ws_status,
             "shadow_summary": shadow_summary,
             "lifecycle_summary": lifecycle_summary,
+            "quality_model": self._quality_model_shadow.status(),
             "symbols_checked": len(items),
             "ready_count": sum(1 for item in items if item.get("would_push")),
             "symbols": items,
@@ -1447,6 +1457,7 @@ class LiveSignalMonitor:
                     )
                     if shadow_adjustment:
                         effective_score = max(1.0, min(10.0, effective_score + shadow_adjustment))
+                    quality_model = self._quality_model_shadow.score(signal, features).as_dict()
 
                     # 风控校验
                     ledger = apply_halt_policy(self._ledger, self._risk_cfg)
@@ -1471,6 +1482,7 @@ class LiveSignalMonitor:
                         "signal_timeframe": self.api.timeframe.key,
                         "trend_timeframe": self.api.trend_timeframe.key,
                         "selected_params": asdict(strategy_params),
+                        "quality_model": quality_model,
                     }
                     if ensemble_result.final_side == "flat":
                         health_reason = "vote_flat"
@@ -1497,6 +1509,7 @@ class LiveSignalMonitor:
                         final_score=effective_score,
                         risk_reason=decision.reason,
                         shadow_adjustment=shadow_adjustment,
+                        quality_model=quality_model,
                         would_push=would_push,
                     )
                     cycle_health.append(health_item)

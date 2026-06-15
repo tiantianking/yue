@@ -12,14 +12,19 @@ from okx_signal_system.signal_quality.model import (
     QualityPrediction,
     fit_quality_model,
     infer_feature_columns,
+    load_quality_model,
     rank_signals,
+    save_quality_model,
     walk_forward_validate,
 )
+from okx_signal_system.signal_quality.quality_shadow import QualityModelShadowScore, QualityModelShadowScorer
 from okx_signal_system.signal_quality.ranker import rank_candidates
 from okx_signal_system.signal_quality.selector import TieredSelection, assign_tiers
 
 __all__ = [
     "BaselineQualityModel",
+    "QualityModelShadowScore",
+    "QualityModelShadowScorer",
     "QualityPrediction",
     "SignalCandidate",
     "SignalLabel",
@@ -36,7 +41,9 @@ __all__ = [
     "label_signal",
     "label_trade_signal",
     "lifecycle_payload",
+    "load_quality_model",
     "rank_candidates",
     "rank_signals",
+    "save_quality_model",
     "walk_forward_validate",
 ]

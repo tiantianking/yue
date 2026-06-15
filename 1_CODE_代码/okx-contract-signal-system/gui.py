@@ -27,7 +27,7 @@ if str(_src_path) not in sys.path:
 
 log = logging.getLogger(__name__)
 
-APP_VERSION = "v3.35"
+APP_VERSION = "v3.36"
 DASHBOARD_HOST = "127.0.0.1"
 DASHBOARD_PORT = 3001
 DASHBOARD_URL = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}"
@@ -143,6 +143,7 @@ class OKXSignalGUI:
         self._signal_notification_store = None
         self._b_tier_summary_store = None
         self._lifecycle_store = None
+        self._quality_model_shadow = None
         self._runtime_modules: dict[str, dict] = {}
         self._background_tasks: list[asyncio.Task] = []
         self.dashboard_process = None
@@ -229,6 +230,7 @@ class OKXSignalGUI:
         regime: str | None = None,
         final_score: float | None = None,
         risk_reason: str | None = None,
+        quality_model: dict | None = None,
         would_push: bool = False,
     ) -> dict:
         raw_score = signal.signal_score if signal and signal.signal_score is not None else None
@@ -245,6 +247,7 @@ class OKXSignalGUI:
             "regime": regime,
             "raw_score": float(raw_score) if raw_score is not None else None,
             "final_score": float(final_score) if final_score is not None else None,
+            "quality_model": quality_model,
             "breakout_gap_pct": self._breakout_gap_pct(row),
         }
 
@@ -263,6 +266,7 @@ class OKXSignalGUI:
             path = project_paths().output_dir / "latest_scan_status.json"
             ws_status = self.api._ws_client.status() if self.api and self.api._ws_client else None
             lifecycle_summary = self._signal_lifecycle_store().summary()
+            quality_model = self._quality_model_shadow_scorer().status()
             payload = {
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "status": "error" if error else "running",
@@ -274,6 +278,7 @@ class OKXSignalGUI:
                 "selected_params": asdict(params),
                 "websocket": ws_status,
                 "lifecycle_summary": lifecycle_summary,
+                "quality_model": quality_model,
                 "modules": self._runtime_modules,
                 "symbols_checked": len(items),
                 "ready_count": sum(1 for item in items if item.get("would_push")),
@@ -466,6 +471,13 @@ class OKXSignalGUI:
 
             self._lifecycle_store = SignalLifecycleStore()
         return self._lifecycle_store
+
+    def _quality_model_shadow_scorer(self):
+        if self._quality_model_shadow is None:
+            from okx_signal_system.signal_quality import QualityModelShadowScorer
+
+            self._quality_model_shadow = QualityModelShadowScorer()
+        return self._quality_model_shadow
 
     def _signal_notification_key(self, signal) -> str:
         from okx_signal_system.notify.signal_dedupe import signal_notification_key
@@ -1386,6 +1398,7 @@ class OKXSignalGUI:
                         min_vote_rate,
                     )
                     decision = validate_signal(signal, ledger, risk_config)
+                    quality_model = self._quality_model_shadow_scorer().score(signal, features).as_dict()
                     would_push = bool(
                         decision.accepted
                         and effective_score >= 6.0
@@ -1416,6 +1429,7 @@ class OKXSignalGUI:
                         regime=regime,
                         final_score=effective_score,
                         risk_reason=decision.reason,
+                        quality_model=quality_model,
                         would_push=would_push,
                     )
                     cycle_health.append(health_item)
@@ -1468,6 +1482,7 @@ class OKXSignalGUI:
                             "signal_timeframe": self.api.timeframe.key,
                             "trend_timeframe": self.api.trend_timeframe.key,
                             "selected_params": asdict(params),
+                            "quality_model": quality_model,
                         }
                         if lifecycle_record is not None:
                             lifecycle = lifecycle_payload(lifecycle_record)

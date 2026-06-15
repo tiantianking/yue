@@ -22,6 +22,20 @@ export type StrategyParams = {
   atr_window?: number;
 };
 
+export type QualityModelShadow = {
+  enabled?: boolean;
+  artifact_path?: string;
+  reason?: string | null;
+  p_tp?: number;
+  p_sl?: number;
+  p_timeout?: number;
+  expected_net_r?: number;
+  uncertainty?: number;
+  rank_score?: number;
+  support?: number;
+  feature_columns?: string[];
+};
+
 export type LatestSignal = {
   signal?: {
     ts?: string;
@@ -46,6 +60,7 @@ export type LatestSignal = {
   };
   live_order_enabled?: boolean;
   mode?: string;
+  quality_model?: QualityModelShadow;
 };
 
 export type LatestScanStatus = {
@@ -91,8 +106,10 @@ export type LatestScanStatus = {
     raw_score?: number | null;
     final_score?: number | null;
     shadow_adjustment?: number | null;
+    quality_model?: QualityModelShadow | null;
     breakout_gap_pct?: number | null;
   }>;
+  quality_model?: QualityModelShadow | null;
   last_signal?: LatestSignal | null;
 };
 

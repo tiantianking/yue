@@ -4,7 +4,7 @@
 
 - Repository root: `D:\JIAOYI-CX`
 - Project path: `D:\JIAOYI-CX\1_CODE_代码\okx-contract-signal-system`
-- Current completed version: v3.35
+- Current completed version: v3.36
 - Latest completed commits:
   - `a26f0d9 feat: batch rank and tier signal pushes`
   - `feat: add correlation-aware signal tiers`
@@ -75,6 +75,13 @@
 - Model output is ranking-only and includes `p_tp`, `p_sl`, `p_timeout`, `expected_net_r`, and uncertainty.
 - Version metadata was bumped to v3.35.
 
+### v3.36
+- Connected the v3.35 quality model as shadow scoring in realtime and GUI scans.
+- Shadow scores are written to candidate health output, ready-signal payloads, and dashboard status.
+- Model artifacts are optional and loaded from `outputs/signal_quality_model.json`.
+- Existing A/B-tier selection and push decisions remain unchanged.
+- Version metadata was bumped to v3.36.
+
 ## Absolute Constraints
 
 - Do not enable real orders.
@@ -92,24 +99,23 @@
 - Do not claim completion while tests fail.
 - Every code update must bump version and commit to git.
 
-## Remaining Execution Plan
+## Remaining Decision Point
 
-### Phase 9: Candidate Model Shadow Scoring
+### Phase 10: Optional Model-Assisted Ranking
 
-Goal: connect the v3.35 quality model as shadow scoring only, so operators can compare model ranking with the existing A/B-tier flow before any behavior change.
+Goal: decide whether the shadow model has enough evidence to affect ordering. This is a behavior change and should not be done automatically.
 
-Implement:
-- Build signal quality features for ready candidates in realtime and GUI scans.
-- Apply the baseline model only when a trained model artifact exists.
-- Add model scores to health output, payloads, and dashboard-visible status.
-- Keep A-tier/B-tier selection and push decisions unchanged.
-- Do not use model output as a hard reject or promotion gate.
+Possible implementation after explicit approval:
+- Use shadow score as a small ranking adjustment only after enough closed shadow outcomes exist.
+- Keep `min_signal_score=6.0` unchanged.
+- Do not use model output as a hard reject gate.
+- Add before/after ordering evidence to docs before changing push behavior.
 
 Primary files:
 - `src/okx_signal_system/exchange/realtime.py`
 - `gui.py`
 - dashboard status surfaces
-- focused integration tests for shadow-only scoring
+- focused ranking behavior tests
 
 ## Required Verification For Every Phase
 

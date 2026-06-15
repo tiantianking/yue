@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import math
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -173,6 +175,56 @@ class BaselineQualityModel:
         ranked["quality_rank"] = np.arange(1, len(ranked) + 1)
         return ranked
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "feature_columns": list(self.feature_columns),
+            "prior": _outcome_stats_to_dict(self.prior),
+            "profiles": [
+                {
+                    "feature": profile.feature,
+                    "first_cut": profile.first_cut,
+                    "second_cut": profile.second_cut,
+                    "buckets": {
+                        bucket: _outcome_stats_to_dict(stats)
+                        for bucket, stats in profile.buckets.items()
+                    },
+                }
+                for profile in self.profiles
+            ],
+            "min_bucket_support": self.min_bucket_support,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "BaselineQualityModel":
+        return cls(
+            feature_columns=[str(item) for item in data.get("feature_columns", [])],
+            prior=_outcome_stats_from_dict(data.get("prior", {})),
+            profiles=[
+                FeatureProfile(
+                    feature=str(item.get("feature", "")),
+                    first_cut=_optional_float(item.get("first_cut")),
+                    second_cut=_optional_float(item.get("second_cut")),
+                    buckets={
+                        str(bucket): _outcome_stats_from_dict(stats)
+                        for bucket, stats in (item.get("buckets", {}) or {}).items()
+                    },
+                )
+                for item in data.get("profiles", [])
+                if isinstance(item, Mapping) and item.get("feature")
+            ],
+            min_bucket_support=int(data.get("min_bucket_support", 2) or 2),
+        )
+
+    def save(self, path: str | Path) -> None:
+        Path(path).write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+
+    @classmethod
+    def load(cls, path: str | Path) -> "BaselineQualityModel":
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(data, Mapping):
+            raise ValueError("quality model artifact must be a mapping")
+        return cls.from_dict(data)
+
 
 def fit_quality_model(
     labeled_features: pd.DataFrame,
@@ -191,6 +243,14 @@ def fit_quality_model(
 
 def rank_signals(model: BaselineQualityModel, features: pd.DataFrame) -> pd.DataFrame:
     return model.rank_frame(features)
+
+
+def save_quality_model(model: BaselineQualityModel, path: str | Path) -> None:
+    model.save(path)
+
+
+def load_quality_model(path: str | Path) -> BaselineQualityModel:
+    return BaselineQualityModel.load(path)
 
 
 def walk_forward_validate(
@@ -434,11 +494,41 @@ def _empty_walk_forward_frame() -> pd.DataFrame:
     )
 
 
+def _outcome_stats_to_dict(stats: OutcomeStats) -> dict[str, Any]:
+    return asdict(stats)
+
+
+def _outcome_stats_from_dict(data: Any) -> OutcomeStats:
+    raw = data if isinstance(data, Mapping) else {}
+    probabilities = raw.get("probabilities", (1 / 3, 1 / 3, 1 / 3))
+    if not isinstance(probabilities, Sequence) or len(probabilities) != 3:
+        probabilities = (1 / 3, 1 / 3, 1 / 3)
+    values = np.asarray([_float_or_default(item, 1 / 3) for item in probabilities], dtype=float)
+    values = _normalize_probabilities(values)
+    return OutcomeStats(
+        probabilities=tuple(float(item) for item in values),
+        expected_net_r=_float_or_default(raw.get("expected_net_r"), 0.0),
+        support=max(0, int(raw.get("support", 0) or 0)),
+    )
+
+
+def _optional_float(value: Any) -> float | None:
+    number = _float_or_none(value)
+    return number if number is not None else None
+
+
+def _float_or_default(value: Any, default: float) -> float:
+    number = _float_or_none(value)
+    return default if number is None else number
+
+
 __all__ = [
     "BaselineQualityModel",
     "QualityPrediction",
     "fit_quality_model",
     "infer_feature_columns",
+    "load_quality_model",
     "rank_signals",
+    "save_quality_model",
     "walk_forward_validate",
 ]

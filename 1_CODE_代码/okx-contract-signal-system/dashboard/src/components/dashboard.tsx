@@ -201,6 +201,10 @@ function SignalPanel({ data }: { data: DashboardPayload }) {
   const scan = data.latest_scan;
   const signal = data.latest_signal?.signal;
   const risk = data.latest_signal?.risk;
+  const qualityModel =
+    data.latest_signal?.quality_model ??
+    scan?.symbols?.find((item) => item.quality_model?.enabled)?.quality_model ??
+    scan?.quality_model;
   const accepted = Boolean(risk?.accepted);
   const scanned = scan?.symbols_checked ?? scan?.symbols?.length ?? 0;
   const ready = scan?.ready_count ?? scan?.symbols?.filter((item) => item.would_push).length ?? 0;
@@ -231,6 +235,20 @@ function SignalPanel({ data }: { data: DashboardPayload }) {
         <MetricTile label="止盈" value={numberText(signal?.take_profit, 4)} />
         <MetricTile label="风险额" value={numberText(risk?.risk_amount, 2)} tone={accepted ? "green" : "neutral"} />
         <MetricTile label="扫描/可推" value={`${scanned}/${ready}`} tone={ready > 0 ? "green" : "neutral"} />
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-3">
+        <MetricTile
+          label="Model TP"
+          value={qualityModel?.enabled ? percent(qualityModel.p_tp, 1) : "disabled"}
+          hint={qualityModel?.enabled ? `support ${integerText(qualityModel.support)}` : qualityModel?.reason ?? "-"}
+          tone={qualityModel?.enabled ? "green" : "neutral"}
+        />
+        <MetricTile
+          label="Model R"
+          value={qualityModel?.enabled ? numberText(qualityModel.expected_net_r, 2) : "-"}
+          hint={qualityModel?.artifact_path ? "shadow only" : "-"}
+        />
       </div>
 
       <div className="mt-4 rounded-lg border border-[#c4f1ef] bg-[#f0fffe] p-3">

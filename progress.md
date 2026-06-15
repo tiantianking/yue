@@ -149,3 +149,34 @@
 - `docs/okx-signal-quality-next-steps.md`: moved Phase 7 and Phase 8 into completed v3.35 work and left Phase 9 as the next execution phase.
 - `progress.md`: appended this task record.
 - Rollback method: revert the upcoming commit `feat: build baseline signal quality model`.
+
+## 2026-06-16 - Task: Score Candidates With Quality Model Shadow Mode
+### What was done
+- Added optional Phase 9 quality model shadow scoring for realtime and GUI scans.
+- Wrote model scores into candidate health output, ready-signal payloads, and dashboard-visible status.
+- Kept A/B-tier selection, push decisions, and fixed strategy parameters unchanged.
+- Added model artifact save/load helpers and a disabled fallback when `outputs/signal_quality_model.json` is missing.
+- Bumped version metadata to v3.36.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m compileall gui.py main.py src` passed.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest` passed, 130 tests.
+- `npm.cmd run lint` passed from `D:\JIAOYI-CX\1_CODE_代码\okx-contract-signal-system\dashboard`.
+- `npm.cmd run build` passed from `D:\JIAOYI-CX\1_CODE_代码\okx-contract-signal-system\dashboard`.
+### Notes
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/signal_quality/model.py`: added quality model artifact save/load support.
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/signal_quality/quality_shadow.py`: added optional shadow scoring from `outputs/signal_quality_model.json`.
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/signal_quality/__init__.py`: exported shadow scoring interfaces.
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/exchange/realtime.py`: added shadow model output to realtime scan health and ready-signal payloads without changing decisions.
+- `1_CODE_代码/okx-contract-signal-system/gui.py`: added the same shadow model output for desktop scans.
+- `1_CODE_代码/okx-contract-signal-system/dashboard/src/lib/types.ts`: added dashboard types for quality model shadow output.
+- `1_CODE_代码/okx-contract-signal-system/dashboard/src/components/dashboard.tsx`: displayed model TP probability and expected R in shadow-only status.
+- `1_CODE_代码/okx-contract-signal-system/tests/test_signal_quality_shadow.py`: covered missing artifact fallback and optional artifact scoring.
+- `1_CODE_代码/okx-contract-signal-system/gui.py`: bumped app version to v3.36.
+- `1_CODE_代码/okx-contract-signal-system/main.py`: bumped app version to v3.36.
+- `1_CODE_代码/okx-contract-signal-system/pyproject.toml`: bumped package version to 3.36.0.
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/__init__.py`: bumped package runtime version to 3.36.0.
+- `1_CODE_代码/okx-contract-signal-system/start.bat`: bumped launcher version text to v3.36.
+- `docs/okx-runtime-health-v3.36.md`: added the v3.36 runtime health note.
+- `docs/okx-signal-quality-next-steps.md`: moved Phase 9 into completed v3.36 work and left Phase 10 as an explicit decision point.
+- `progress.md`: appended this task record.
+- Rollback method: revert the upcoming commit `feat: score candidates with quality model shadow mode`.
