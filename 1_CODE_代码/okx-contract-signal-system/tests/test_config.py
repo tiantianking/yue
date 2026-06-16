@@ -1,5 +1,5 @@
 from okx_signal_system.config import load_config
-from okx_signal_system.paths import find_lightweight_history
+from okx_signal_system.paths import find_lightweight_history, find_runtime_cache_root
 
 
 def test_base_config_locks_okx_and_disables_live_orders() -> None:
@@ -49,3 +49,24 @@ def test_find_history_uses_config_root_dir(tmp_path, monkeypatch) -> None:
     )
 
     assert find_lightweight_history(dataset) == expected
+
+
+def test_find_runtime_cache_uses_config_runtime_cache_root(tmp_path, monkeypatch) -> None:
+    dataset = "okx_15m_extended"
+    cache_root = tmp_path / "runtime_cache"
+    expected = cache_root / "lightweight_history" / dataset
+    config_dir = tmp_path / "project" / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "base.yaml").write_text(
+        f"data:\n  runtime_cache_root: {cache_root.as_posix()}\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.delenv("JIAOYI_RUNTIME_CACHE_DIR", raising=False)
+    monkeypatch.setattr(
+        "okx_signal_system.paths.package_project_root",
+        lambda start=None: tmp_path / "project",
+    )
+
+    assert find_runtime_cache_root(dataset) == expected
+    assert expected.is_dir()

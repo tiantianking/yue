@@ -32,9 +32,9 @@ def live_signal_history_limit(params: StrategyParams, *, signal_timeframe: str, 
     trend_spec = timeframe_spec(trend_timeframe)
     trend_ratio = max(1, trend_spec.minutes // signal_spec.minutes)
     return max(
-        600,
-        params.slow_ema + params.breakout_window + 120,
-        params.slow_ema * trend_ratio + 160,
+        3500,
+        params.slow_ema + params.breakout_window + params.max_hold_bars + 240,
+        params.slow_ema * trend_ratio + params.breakout_window + 240,
     )
 
 
@@ -61,6 +61,20 @@ def candidate_rank_score(*, final_score: float, decision: RiskDecision) -> float
     rr = float(decision.risk_reward_ratio or 0.0)
     stop_pct = float(decision.stop_distance_pct or 0.0)
     return float(final_score) + min(rr, 8.0) * 0.15 - min(stop_pct, 0.05) * 2.0
+
+
+def _signal_risk_payload(decision: RiskDecision) -> dict[str, Any]:
+    return {
+        "accepted": bool(decision.accepted),
+        "reason": decision.reason,
+        "stop_distance_pct": decision.stop_distance_pct,
+        "risk_reward_ratio": decision.risk_reward_ratio,
+        "cost_buffer_pct": decision.cost_buffer_pct,
+        "signal_score": decision.signal_score,
+        "stop_reason": decision.stop_reason,
+        "tp_reason": decision.tp_reason,
+        "near_liq_flag": bool(decision.near_liq_flag),
+    }
 
 
 @dataclass(frozen=True)
@@ -248,11 +262,7 @@ class SignalScanService:
                 quality_model = self._quality_model_scorer().score(signal, features).as_dict()
 
                 signal = replace(signal, signal_score=effective_score)
-                risk_cfg = replace(
-                    context.risk_config,
-                    max_leverage=max(1.0, min(10.0, context.risk_config.max_leverage * self._regime_mgr.get_leverage_factor())),
-                )
-                decision = validate_signal(signal, context.ledger, risk_cfg)
+                decision = validate_signal(signal, context.ledger, context.risk_config)
                 would_push = bool(
                     decision.accepted
                     and effective_score >= context.risk_config.min_signal_score
@@ -284,19 +294,19 @@ class SignalScanService:
                 )
                 cycle_health.append(health_item)
 
+                notify_key = self._notify_key(signal)
+                payload = {
+                    "signal": asdict(signal),
+                    "risk": _signal_risk_payload(decision),
+                    "live_order_enabled": False,
+                    "mode": context.mode,
+                    "dataset": context.dataset,
+                    "signal_timeframe": context.signal_timeframe,
+                    "trend_timeframe": context.trend_timeframe,
+                    "selected_params": asdict(context.strategy_params),
+                    "quality_model": quality_model,
+                }
                 if would_push:
-                    notify_key = self._notify_key(signal)
-                    payload = {
-                        "signal": asdict(signal),
-                        "risk": asdict(decision),
-                        "live_order_enabled": False,
-                        "mode": context.mode,
-                        "dataset": context.dataset,
-                        "signal_timeframe": context.signal_timeframe,
-                        "trend_timeframe": context.trend_timeframe,
-                        "selected_params": asdict(context.strategy_params),
-                        "quality_model": quality_model,
-                    }
                     if self._lifecycle_store is not None:
                         lifecycle_record = self._lifecycle_store.record_signal(
                             signal,
@@ -312,18 +322,15 @@ class SignalScanService:
                             health_item["invalidation_price"] = lifecycle_record.invalidation_price
                             health_item["lifecycle_status"] = lifecycle_record.status
                             health_item["lifecycle"] = lifecycle
+                if self._is_observable(signal):
                     ready_candidates.append(
-                        SignalCandidate(
+                        self._candidate(
                             signal=signal,
                             decision=decision,
                             notify_key=notify_key,
                             payload=payload,
                             health_item=health_item,
-                            rank_score=candidate_rank_score(
-                                final_score=effective_score,
-                                decision=decision,
-                            ),
-                            raw_score=effective_score,
+                            effective_score=effective_score,
                         )
                     )
             except Exception as exc:
@@ -443,6 +450,39 @@ class SignalScanService:
         if effective_score < min_signal_score:
             return "score_below_6"
         return "not_ready"
+
+    @staticmethod
+    def _candidate(
+        *,
+        signal: TradeSignal,
+        decision: RiskDecision,
+        notify_key: str,
+        payload: dict[str, Any],
+        health_item: dict[str, Any],
+        effective_score: float,
+    ) -> SignalCandidate:
+        return SignalCandidate(
+            signal=signal,
+            decision=decision,
+            notify_key=notify_key,
+            payload=payload,
+            health_item=health_item,
+            rank_score=candidate_rank_score(
+                final_score=effective_score,
+                decision=decision,
+            ),
+            raw_score=effective_score,
+        )
+
+    @staticmethod
+    def _is_observable(signal: TradeSignal) -> bool:
+        return bool(
+            signal.accepted
+            and signal.entry_ref is not None
+            and signal.stop_loss is not None
+            and signal.take_profit is not None
+            and signal.max_hold_bars is not None
+        )
 
     def _shadow_adjustment(self, inst_id: str, side: str, *, min_closed: int) -> float:
         if self._shadow_ledger is None:

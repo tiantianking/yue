@@ -5,47 +5,33 @@ OKX 合约信号系统 - 智能交易大脑
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
 from okx_signal_system.exchange.realtime import (
-    OKXRealtimeAPI,
-    LiveSignalMonitor,
     create_realtime_api,
 )
 from okx_signal_system.ml.online_learning import (
-    OnlineLearningEngine,
     TradeRecord,
     create_learning_engine,
 )
 from okx_signal_system.ml.reinforcement_learning import (
-    RLParameterOptimizer,
-    MarketRegimeDetector,
     create_rl_optimizer,
 )
 from okx_signal_system.ml.symbol_rotation import (
-    SymbolRotator,
     create_rotator,
 )
 from okx_signal_system.ml.regime_adaptive import (
     AdaptiveParamsManager,
-    RegimeDetector,
 )
-from okx_signal_system.ml.rolling_backtest import RollingBacktestValidator
-from okx_signal_system.ml.pattern_recognition import PatternRecognizer
-from okx_signal_system.notify.feishu import feishu_send_signal_card, send_text
+from okx_signal_system.notify.feishu import feishu_send_signal_card
 from okx_signal_system.data.gap_handler import IncrementalSyncer
-from okx_signal_system.paths import find_lightweight_history
-from okx_signal_system.risk.model import Ledger, RiskConfig, validate_signal
-from okx_signal_system.signal_runtime import (
-    DEFAULT_MAX_SIGNAL_LAG_MINUTES,
-    latest_closed_signal,
-    signal_is_stale,
-)
+from okx_signal_system.risk.model import Ledger, RiskConfig
+from okx_signal_system.signal_service import SignalScanContext, SignalScanService
 from okx_signal_system.strategy.trend_breakout import StrategyParams
+from okx_signal_system.strategy.vote_gate import min_vote_approval_rate
 from okx_signal_system.training.startup_quality import load_selected_strategy_params
 from okx_signal_system.timeframe import timeframe_spec
 
@@ -96,7 +82,7 @@ class TradingBrain:
         self.auto_stop = None  # 延迟初始化
 
         # 增量数据同步器
-        self.syncer = IncrementalSyncer(timeframe=self.signal_timeframe, dataset=self.dataset)
+        self.syncer: IncrementalSyncer | None = None
 
         # 当前参数
         self.current_params = load_selected_strategy_params()
@@ -104,8 +90,25 @@ class TradingBrain:
         # 运行状态
         self._running = False
         self._cycle_count = 0
+        self._regime_mgr = AdaptiveParamsManager()
+        self._risk_cfg = RiskConfig()
+        self._ledger = Ledger("trading_brain", init_capital=10000, equity=10000)
+        self._scan_service = SignalScanService(
+            candle_loader=self._load_signal_candles,
+            regime_manager=self._regime_mgr,
+        )
 
         log.info("TradingBrain initialized")
+
+    def _get_syncer(self) -> IncrementalSyncer | None:
+        if self.syncer is not None:
+            return self.syncer
+        try:
+            self.syncer = IncrementalSyncer(timeframe=self.signal_timeframe, dataset=self.dataset)
+        except FileNotFoundError as exc:
+            log.warning("Historical dataset unavailable; skipping TradingBrain history sync: %s", exc)
+            return None
+        return self.syncer
 
     async def start(self):
         """启动交易大脑"""
@@ -115,10 +118,12 @@ class TradingBrain:
 
         # 启动时同步数据（补足离线期间的数据空缺）
         log.info("Syncing data before startup...")
-        sync_results = self.syncer.sync_batch(self.symbol_rotator.available_symbols)
-        for sym, result in sync_results.items():
-            if result.bars_added > 0:
-                log.info(f"  {sym}: +{result.bars_added} bars filled")
+        syncer = self._get_syncer()
+        if syncer is not None:
+            sync_results = syncer.sync_batch(self.symbol_rotator.available_symbols)
+            for sym, result in sync_results.items():
+                if result.bars_added > 0:
+                    log.info(f"  {sym}: +{result.bars_added} bars filled")
 
         # 连接API
         await self.api.connect()
@@ -166,90 +171,43 @@ class TradingBrain:
         log.info(f"=== Cycle #{self._cycle_count} ===")
 
         # 增量同步最新数据
-        self.syncer.sync_batch(self.symbol_rotator.get_active_symbols())
+        syncer = self._get_syncer()
+        if syncer is not None:
+            syncer.sync_batch(self.symbol_rotator.get_active_symbols())
 
         active_symbols = self.symbol_rotator.get_active_symbols()
-        signals_generated = []
-
-        for inst_id in active_symbols:
-            try:
-                # 获取市场数据
-                market = await self.api.get_market_data(inst_id)
-                if not market:
-                    continue
-
-                # 生成信号
-                signal = self._generate_signal(inst_id, market)
-                if signal and signal.accepted:
-                    decision = validate_signal(
-                        signal,
-                        Ledger(inst_id=inst_id, init_capital=10000, equity=10000),
-                        RiskConfig(),
-                    )
-                    if not decision.accepted:
-                        continue
-                    signals_generated.append(signal)
-
-                    # 推送到飞书
-                    feishu_send_signal_card(
-                        inst_id=signal.inst_id,
-                        direction=signal.side,
-                        entry_price=signal.entry_ref or market.last_price,
-                        stop_loss=signal.stop_loss or 0,
-                        take_profit=signal.take_profit or 0,
-                        reason=str(signal.reason_codes),
-                    )
-
-            except Exception as e:
-                log.error(f"Error processing {inst_id}: {e}")
-
-        log.info(f"Cycle #{self._cycle_count} completed. Signals: {len(signals_generated)}")
-
-    def _generate_signal(self, inst_id: str, market):
-        """生成交易信号"""
-        # 从数据文件读取特征
         try:
-            from okx_signal_system.data.loader import load_symbol_file
-            from okx_signal_system.features.indicators import build_feature_frame
-
-            # 转换inst_id格式
-            inst_id_clean = inst_id.replace("-", "_").replace("_SWAP", "")
-            if inst_id_clean.count("USDT") == 1:
-                inst_id_clean = inst_id_clean + "_USDT"
-
-            suffix = timeframe_spec(self.signal_timeframe).file_suffix
-            fname = f"{inst_id_clean}_{suffix}.parquet"
-            path = find_lightweight_history(self.dataset) / fname
-
-            if not path.exists():
-                return None
-
-            data = load_symbol_file(path)
-            features = build_feature_frame(
-                data.frame,
-                fast_ema=self.current_params.fast_ema,
-                slow_ema=self.current_params.slow_ema,
-                breakout_window=self.current_params.breakout_window,
-                atr_window=self.current_params.atr_window,
-                signal_timeframe=self.signal_timeframe,
-                trend_timeframe=self.trend_timeframe,
+            result = await self._scan_service.scan_cycle(
+                active_symbols,
+                SignalScanContext(
+                    dataset=self.dataset,
+                    signal_timeframe=self.signal_timeframe,
+                    trend_timeframe=self.trend_timeframe,
+                    strategy_params=self.current_params,
+                    risk_config=self._risk_cfg,
+                    ledger=self._ledger,
+                    quality_gate_allows_push=False,
+                    min_vote_approval_rate=min_vote_approval_rate(self.config),
+                    mode="trading_brain_observation_only",
+                    min_history_bars=50,
+                    send_health_report=True,
+                ),
             )
-
-            signal = latest_closed_signal(features, inst_id=inst_id, params=self.current_params)
-            if signal is None:
-                return None
-            if signal_is_stale(
-                signal.ts,
-                timeframe=self.signal_timeframe,
-                max_lag_minutes=DEFAULT_MAX_SIGNAL_LAG_MINUTES,
-            ):
-                return None
-            return signal
-
         except Exception as e:
-            log.error(f"Signal generation error: {e}")
+            log.error("TradingBrain scan failed: %s", e)
+            return
 
-        return None
+        log.info(
+            "Cycle #%s completed. A=%s B=%s C=%s checked=%s",
+            self._cycle_count,
+            len(result.selection.tier_a),
+            len(result.selection.tier_b),
+            len(result.selection.tier_c),
+            len(result.cycle_health),
+        )
+
+    async def _load_signal_candles(self, inst_id: str, limit: int):
+        return await self.api.get_candles(inst_id, bar=self.signal_timeframe, limit=limit)
 
     def _record_param_suggestion(self, source: str, params: StrategyParams, reason: str) -> None:
         self.param_suggestions.append(

@@ -51,15 +51,15 @@ def _assert_exit_time(label, expected: str) -> None:
     assert pd.Timestamp(_field(label, "exit_time")) == pd.Timestamp(expected)
 
 
-def _expected_net_r(signal: TradeSignal, exit_price: float, exit_time: str) -> float:
-    entry = float(signal.entry_ref)
-    stop_dist = abs(entry - float(signal.stop_loss))
+def _expected_net_r(signal: TradeSignal, exit_price: float, exit_time: str, *, entry_price: float | None = None, entry_time: str | None = None) -> float:
+    entry = float(signal.entry_ref if entry_price is None else entry_price)
+    stop_dist = abs(float(signal.entry_ref) - float(signal.stop_loss))
     side_mult = 1.0 if signal.side == "long" else -1.0
     costs = estimate_costs(
         entry_price=entry,
         exit_price=exit_price,
         qty=1.0,
-        entry_time=pd.Timestamp(signal.ts),
+        entry_time=pd.Timestamp(signal.ts if entry_time is None else entry_time),
         exit_time=pd.Timestamp(exit_time),
         config=CostConfig(),
         slippage_bps=CostConfig().normal_slippage_bps,
@@ -230,14 +230,22 @@ def test_label_signal_only_uses_later_closed_candles() -> None:
 
     assert _outcome(label) == "TP"
     _assert_exit_time(label, "2026-01-01T01:00:00Z")
-    assert _field(label, "exit_price") == pytest.approx(110.0)
+    assert _field(label, "exit_price") == pytest.approx(111.0)
     assert _field(label, "holding_bars") == 1
-    assert _field(label, "final_net_r") == pytest.approx(_expected_net_r(signal, 110.0, "2026-01-01T01:00:00Z"))
-    assert _field(label, "mae") == pytest.approx(-0.2)
-    assert _field(label, "mfe") == pytest.approx(2.2)
+    assert _field(label, "final_net_r") == pytest.approx(
+        _expected_net_r(
+            signal,
+            111.0,
+            "2026-01-01T01:00:00Z",
+            entry_price=101.0,
+            entry_time="2026-01-01T01:00:00Z",
+        )
+    )
+    assert _field(label, "mae") == pytest.approx(-0.4)
+    assert _field(label, "mfe") == pytest.approx(2.0)
 
 
-def test_label_signal_uses_entry_ref_as_quality_reference() -> None:
+def test_label_signal_reanchors_to_next_closed_open_like_backtest() -> None:
     signal = _signal(entry_ref=103.0, stop_loss=98.0, take_profit=108.0)
     frame = _frame(
         [
@@ -264,10 +272,18 @@ def test_label_signal_uses_entry_ref_as_quality_reference() -> None:
 
     assert _outcome(label) == "TP"
     _assert_exit_time(label, "2026-01-01T00:30:00Z")
-    assert _field(label, "exit_price") == pytest.approx(108.0)
-    assert _field(label, "final_net_r") == pytest.approx(_expected_net_r(signal, 108.0, "2026-01-01T00:30:00Z"))
-    assert _field(label, "mae") == pytest.approx(-0.6)
-    assert _field(label, "mfe") == pytest.approx(1.2)
+    assert _field(label, "exit_price") == pytest.approx(105.0)
+    assert _field(label, "final_net_r") == pytest.approx(
+        _expected_net_r(
+            signal,
+            105.0,
+            "2026-01-01T00:30:00Z",
+            entry_price=100.0,
+            entry_time="2026-01-01T00:15:00Z",
+        )
+    )
+    assert _field(label, "mae") == pytest.approx(0.0)
+    assert _field(label, "mfe") == pytest.approx(1.8)
 
 
 def test_label_signal_matches_execution_simulator_result() -> None:

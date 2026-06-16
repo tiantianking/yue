@@ -47,7 +47,7 @@ def _packaged_roots() -> list[Path]:
     return roots
 
 
-def _data_root_from_config() -> Path | None:
+def _data_cfg_from_config() -> dict[str, Any]:
     config_dirs: list[Path] = []
     for packaged_root in _packaged_roots():
         config_dirs.append(packaged_root / "config")
@@ -64,10 +64,25 @@ def _data_root_from_config() -> Path | None:
         with config_path.open("r", encoding="utf-8") as handle:
             config = yaml.safe_load(handle) or {}
         data_cfg: Any = config.get("data", {}) if isinstance(config, dict) else {}
-        root_dir = data_cfg.get("root_dir") if isinstance(data_cfg, dict) else None
-        if root_dir:
-            return Path(str(root_dir)).expanduser()
+        if isinstance(data_cfg, dict):
+            return data_cfg
 
+    return {}
+
+
+def _data_root_from_config() -> Path | None:
+    data_cfg = _data_cfg_from_config()
+    root_dir = data_cfg.get("historical_data_root") or data_cfg.get("root_dir")
+    if root_dir:
+        return Path(str(root_dir)).expanduser()
+    return None
+
+
+def _runtime_cache_root_from_config() -> Path | None:
+    data_cfg = _data_cfg_from_config()
+    root_dir = data_cfg.get("runtime_cache_root")
+    if root_dir:
+        return Path(str(root_dir)).expanduser()
     return None
 
 
@@ -111,3 +126,22 @@ def find_lightweight_history(dataset: str, root_dir: Path | str | None = None) -
     if not existing:
         raise FileNotFoundError(f"dataset not found under workspace: {dataset}")
     return existing[0]
+
+
+def find_runtime_cache_root(dataset: str, root_dir: Path | str | None = None, *, create: bool = True) -> Path:
+    if root_dir is not None:
+        cache_root = Path(root_dir).expanduser()
+    else:
+        env_root = os.environ.get("JIAOYI_RUNTIME_CACHE_DIR")
+        configured = _runtime_cache_root_from_config()
+        if env_root:
+            cache_root = Path(env_root).expanduser()
+        elif configured is not None:
+            cache_root = configured
+        else:
+            cache_root = package_project_root() / "outputs" / "runtime_cache"
+
+    dataset_path = _dataset_under_data_root(cache_root, dataset)
+    if create:
+        dataset_path.mkdir(parents=True, exist_ok=True)
+    return dataset_path

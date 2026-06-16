@@ -208,6 +208,74 @@ def test_realtime_store_overwrites_same_bar_without_dtype_error(tmp_path) -> Non
     assert frame.iloc[-1]["volume"] == 90035.49768
 
 
+def test_realtime_store_writes_runtime_cache_without_mutating_history(tmp_path) -> None:
+    history = tmp_path / "history"
+    runtime = tmp_path / "runtime"
+    history.mkdir()
+    history_path = history / "BTC_USDT_USDT_15m.parquet"
+    pd.DataFrame(
+        {
+            "ts": [pd.Timestamp("2026-06-15T18:00:00Z")],
+            "open": [100.0],
+            "high": [101.0],
+            "low": [99.0],
+            "close": [100.0],
+            "volume": [10.0],
+            "quote_volume": [1000.0],
+        }
+    ).to_parquet(history_path, index=False)
+
+    store = RealtimeDataStore(
+        timeframe="15m",
+        historical_data_dir=history,
+        runtime_cache_dir=runtime,
+        max_cache_bars=3500,
+    )
+    store.append_candle(
+        "BTC-USDT-SWAP",
+        {
+            "ts": "2026-06-15T18:15:00Z",
+            "open": 101.0,
+            "high": 102.0,
+            "low": 100.0,
+            "close": 101.5,
+            "volume": 20.0,
+            "quote_volume": 2000.0,
+        },
+    )
+
+    assert store.save("BTC-USDT-SWAP")
+    history_frame = pd.read_parquet(history_path)
+    runtime_frame = pd.read_parquet(runtime / "BTC_USDT_USDT_15m.parquet")
+    assert len(history_frame) == 1
+    assert len(runtime_frame) == 2
+    assert pd.to_datetime(runtime_frame["ts"], utc=True).max() == pd.Timestamp("2026-06-15T18:15:00Z")
+
+
+def test_realtime_store_retains_at_least_3500_bars(tmp_path) -> None:
+    store = RealtimeDataStore(tmp_path, timeframe="15m")
+    inst_id = "ETH-USDT-SWAP"
+
+    for ts in pd.date_range("2026-01-01", periods=3600, freq="15min", tz="UTC"):
+        store.append_candle(
+            inst_id,
+            {
+                "ts": ts,
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 100.5,
+                "volume": 10.0,
+                "quote_volume": 1000.0,
+            },
+        )
+
+    frame = store.load(inst_id)
+    assert len(frame) == store.max_cache_bars
+    assert len(frame) >= 3500
+    assert frame["ts"].iloc[0] == pd.Timestamp("2026-01-02T00:00:00Z")
+
+
 def test_gap_sync_stops_batch_after_rest_unavailable(tmp_path, monkeypatch) -> None:
     stale = pd.DataFrame(
         {

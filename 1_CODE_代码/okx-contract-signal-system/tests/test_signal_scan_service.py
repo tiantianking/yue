@@ -297,6 +297,82 @@ def test_signal_scan_service_applies_shadow_adjustment_once(monkeypatch) -> None
     assert candidate.rank_score == candidate_rank_score(final_score=candidate.raw_score, decision=candidate.decision)
 
 
+def test_signal_scan_service_keeps_non_push_candidate_as_tier_c_observation(monkeypatch) -> None:
+    async def loader(_inst_id: str, _limit: int) -> pd.DataFrame:
+        return _frame()
+
+    def fake_build_feature_frame(frame, **_kwargs):
+        out = frame.copy()
+        out["atr"] = 2.0
+        out["atr_pct"] = 0.02
+        out["breakout_high"] = 99.0
+        out["breakout_low"] = 95.0
+        out["trend_bias"] = "long"
+        out["ema_fast"] = 101.0
+        out["ema_slow"] = 99.0
+        out["vol_ratio"] = 1.2
+        out["signal_timeframe"] = "15m"
+        out["trend_timeframe"] = "1h"
+        return out
+
+    def fake_build_signal(row, *, inst_id, params, frame, idx):
+        return TradeSignal(
+            ts=row["ts"],
+            inst_id=inst_id,
+            side="long",
+            entry_ref=100.0,
+            stop_loss=92.0,
+            take_profit=148.0,
+            max_hold_bars=params.max_hold_bars,
+            reason_codes=("TEST",),
+            signal_score=7.0,
+            risk_reward_ratio=6.0,
+        )
+
+    monkeypatch.setattr("okx_signal_system.signal_service.scan.build_feature_frame", fake_build_feature_frame)
+    monkeypatch.setattr("okx_signal_system.signal_service.scan.build_signal", fake_build_signal)
+    monkeypatch.setattr(
+        "okx_signal_system.signal_service.scan.ensemble_vote",
+        lambda *args, **kwargs: EnsembleResult("long", 8.0, [], 1.0, "test"),
+    )
+
+    lifecycle = FakeLifecycleStore()
+    service = SignalScanService(
+        candle_loader=loader,
+        regime_manager=FakeRegimeManager(),
+        quality_model_shadow=FakeQualityShadow(),
+        lifecycle_store=lifecycle,
+        shadow_ledger=FakeShadowLedger(),
+        notify_key_builder=lambda signal: f"{signal.inst_id}:{signal.side}",
+    )
+    context = SignalScanContext(
+        dataset="test",
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+        strategy_params=StrategyParams(),
+        risk_config=RiskConfig(min_signal_score=9.5),
+        ledger=Ledger("portfolio", init_capital=10000, equity=10000),
+        quality_gate_allows_push=True,
+        min_vote_approval_rate=0.4,
+        mode="test_manual_confirmation_only",
+        min_history_bars=5,
+        expected_latest_closed=pd.Timestamp("2026-01-01T02:45:00Z"),
+        now=pd.Timestamp("2026-01-01T03:05:00Z"),
+    )
+
+    result = asyncio.run(service.scan_cycle(["BTC-USDT-SWAP"], context))
+
+    assert result.cycle_health[0]["reason"] == "risk_signal_score_below_threshold"
+    assert result.cycle_health[0]["would_push"] is False
+    assert result.ready_candidates[0].tier == "C"
+    assert result.selection.tier_c == result.ready_candidates
+    assert lifecycle.recorded == []
+    risk_payload = result.ready_candidates[0].payload["risk"]
+    assert "leverage_cap" not in risk_payload
+    assert "qty" not in risk_payload
+    assert "risk_amount" not in risk_payload
+
+
 def test_signal_scan_service_respects_checked_bar_gate() -> None:
     frame = _frame()
     checked = {"BTC-USDT-SWAP": str(frame["ts"].iloc[-1])}

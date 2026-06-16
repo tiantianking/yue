@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-import numpy as np
 import pandas as pd
 
 from okx_signal_system.risk.costs import CostBreakdown, CostConfig, estimate_costs, participation_rate, slippage_bps_for_participation
+from okx_signal_system.signal_quality.outcome import SignalOutcomeSimulator
 from okx_signal_system.strategy.trend_breakout import TradeSignal
 
 LabelOutcome = Literal["TP", "SL", "TIMEOUT"]
@@ -26,99 +26,39 @@ class SignalExecutionResult:
 
 
 def simulate_signal_execution(signal: TradeSignal, future_bars: pd.DataFrame, *, cost_config: CostConfig = CostConfig()) -> SignalExecutionResult | None:
-    if not signal.accepted or signal.side not in {"long", "short"}:
-        return None
-    if (
-        signal.entry_ref is None
-        or signal.stop_loss is None
-        or signal.take_profit is None
-        or signal.max_hold_bars is None
-    ):
-        return None
-
-    entry_ref = float(signal.entry_ref)
-    stop_loss = float(signal.stop_loss)
-    take_profit = float(signal.take_profit)
-    max_hold_bars = int(signal.max_hold_bars)
-    stop_dist = abs(entry_ref - stop_loss)
-    if not all(np.isfinite(value) for value in [entry_ref, stop_loss, take_profit]) or stop_dist <= 0 or max_hold_bars <= 0:
-        return None
-
-    df = _future_closed_bars(signal.ts, future_bars)
-    if df.empty:
+    result = SignalOutcomeSimulator().simulate_signal(
+        signal,
+        future_bars,
+        include_entry_bar=False,
+        require_complete_timeout=True,
+    )
+    if result is None:
         return None
 
     side_mult = 1.0 if signal.side == "long" else -1.0
-    window = df.iloc[:max_hold_bars].reset_index(drop=True)
-    if window.empty:
+    df = _future_closed_bars(signal.ts, future_bars)
+    if df.empty or result.entry_idx >= len(df):
         return None
-    timeout_possible = len(df) >= max_hold_bars
-    outcome: LabelOutcome = "TIMEOUT"
-    exit_idx = len(window) - 1
-    exit_price = float(window.iloc[exit_idx]["close"])
-    exit_time = pd.Timestamp(window.iloc[exit_idx]["ts"])
-
-    for idx, row in window.iterrows():
-        high = float(row["high"])
-        low = float(row["low"])
-        if signal.side == "long":
-            if low <= stop_loss:
-                outcome = "SL"
-                exit_idx = int(idx)
-                exit_price = stop_loss
-                exit_time = pd.Timestamp(row["ts"])
-                break
-            if high >= take_profit:
-                outcome = "TP"
-                exit_idx = int(idx)
-                exit_price = take_profit
-                exit_time = pd.Timestamp(row["ts"])
-                break
-        else:
-            if high >= stop_loss:
-                outcome = "SL"
-                exit_idx = int(idx)
-                exit_price = stop_loss
-                exit_time = pd.Timestamp(row["ts"])
-                break
-            if low <= take_profit:
-                outcome = "TP"
-                exit_idx = int(idx)
-                exit_price = take_profit
-                exit_time = pd.Timestamp(row["ts"])
-                break
-
-    if outcome == "TIMEOUT" and not timeout_possible:
-        return None
-
-    observed = window.iloc[: exit_idx + 1]
-    if signal.side == "long":
-        mfe = float((observed["high"].max() - entry_ref) / stop_dist)
-        mae = float((observed["low"].min() - entry_ref) / stop_dist)
-    else:
-        mfe = float((entry_ref - observed["low"].min()) / stop_dist)
-        mae = float((entry_ref - observed["high"].max()) / stop_dist)
-
-    slippage_bps = _slippage_bps_for_row(window.iloc[0], entry_ref, cost_config=cost_config)
+    slippage_bps = _slippage_bps_for_row(df.iloc[result.entry_idx], result.entry_price, cost_config=cost_config)
     costs = estimate_costs(
-        entry_price=entry_ref,
-        exit_price=exit_price,
+        entry_price=result.entry_price,
+        exit_price=result.exit_price,
         qty=1.0,
-        entry_time=_utc_timestamp(signal.ts),
-        exit_time=_utc_timestamp(exit_time),
+        entry_time=_utc_timestamp(result.entry_time),
+        exit_time=_utc_timestamp(result.exit_time),
         config=cost_config,
         slippage_bps=slippage_bps,
     )
-    final_net_r = float((((exit_price - entry_ref) * side_mult) - costs.total) / stop_dist)
+    final_net_r = float((((result.exit_price - result.entry_price) * side_mult) - costs.total) / result.stop_dist)
     return SignalExecutionResult(
-        outcome=outcome,
+        outcome=result.outcome,
         final_net_r=final_net_r,
-        mae=mae,
-        mfe=mfe,
-        holding_bars=int(exit_idx) + 1,
-        exit_time=exit_time,
-        exit_price=float(exit_price),
-        stop_dist=stop_dist,
+        mae=result.mae,
+        mfe=result.mfe,
+        holding_bars=result.holding_bars,
+        exit_time=result.exit_time,
+        exit_price=result.exit_price,
+        stop_dist=result.stop_dist,
         costs=costs,
     )
 

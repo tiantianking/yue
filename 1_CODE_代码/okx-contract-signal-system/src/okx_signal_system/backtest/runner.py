@@ -14,6 +14,7 @@ from okx_signal_system.risk.model import (
     RiskConfig,
     validate_signal,
 )
+from okx_signal_system.signal_quality.outcome import SignalOutcomeLevels, SignalOutcomeSimulator
 from okx_signal_system.strategy.ensemble import ensemble_vote
 from okx_signal_system.strategy.vote_gate import DEFAULT_MIN_VOTE_APPROVAL_RATE, vote_gate_passed
 from okx_signal_system.strategy.trend_breakout import (
@@ -117,6 +118,9 @@ def _exit_reason_to_outcome(exit_reason: str) -> str:
     if exit_reason == "stop_loss":
         return "SL"
     return "TIMEOUT"
+
+
+_OUTCOME_SIMULATOR = SignalOutcomeSimulator()
 
 
 def _research_position_size(
@@ -257,25 +261,17 @@ def cool_off_condition_mask(features: pd.DataFrame, atr_window: int = 14) -> np.
 
 
 def exit_trade(features: pd.DataFrame, entry_idx: int, signal, params: StrategyParams) -> tuple[int, float, str]:
-    end_idx = min(entry_idx + params.max_hold_bars, len(features) - 1)
-    for idx in range(entry_idx, end_idx + 1):
-        row = features.iloc[idx]
-        if signal.side == "long":
-            # 保守处理：同bar同时触及TP和SL时，默认先触发止损
-            if row["low"] <= signal.stop_loss:
-                return idx, min(float(signal.stop_loss), float(row["open"])), "stop_loss"
-            if row["high"] >= signal.take_profit:
-                return idx, float(signal.take_profit), "take_profit"
-            if row.get("trend_bias", row.get("bias_4h")) == "short" and idx + 1 < len(features):
-                return idx + 1, float(features.iloc[idx + 1]["open"]), "trend_reverse"
-        if signal.side == "short":
-            if row["high"] >= signal.stop_loss:
-                return idx, max(float(signal.stop_loss), float(row["open"])), "stop_loss"
-            if row["low"] <= signal.take_profit:
-                return idx, float(signal.take_profit), "take_profit"
-            if row.get("trend_bias", row.get("bias_4h")) == "long" and idx + 1 < len(features):
-                return idx + 1, float(features.iloc[idx + 1]["open"]), "trend_reverse"
-    return end_idx, float(features.iloc[end_idx]["close"]), "max_hold"
+    result = _OUTCOME_SIMULATOR.simulate_signal(
+        replace(signal, max_hold_bars=params.max_hold_bars),
+        features,
+        start_idx=entry_idx,
+        after_signal_time=False,
+        include_trend_reverse=True,
+    )
+    if result is None:
+        end_idx = min(entry_idx + params.max_hold_bars, len(features) - 1)
+        return end_idx, float(features.iloc[end_idx]["close"]), "max_hold"
+    return result.exit_idx, result.exit_price, result.exit_reason
 
 
 def exit_trade_from_arrays(
@@ -291,24 +287,40 @@ def exit_trade_from_arrays(
     take_profit: float,
     max_hold_bars: int,
 ) -> tuple[int, float, str]:
-    end_idx = min(entry_idx + max_hold_bars, len(open_) - 1)
-    for idx in range(entry_idx, end_idx + 1):
-        if side == "long":
-            # 保守处理：同bar同时触及TP和SL时，默认先触发止损
-            if low[idx] <= stop_loss:
-                return idx, min(float(stop_loss), float(open_[idx])), "stop_loss"
-            if high[idx] >= take_profit:
-                return idx, float(take_profit), "take_profit"
-            if bias[idx] == "short" and idx + 1 < len(open_):
-                return idx + 1, float(open_[idx + 1]), "trend_reverse"
-        else:
-            if high[idx] >= stop_loss:
-                return idx, max(float(stop_loss), float(open_[idx])), "stop_loss"
-            if low[idx] <= take_profit:
-                return idx, float(take_profit), "take_profit"
-            if bias[idx] == "long" and idx + 1 < len(open_):
-                return idx + 1, float(open_[idx + 1]), "trend_reverse"
-    return end_idx, float(close[end_idx]), "max_hold"
+    frame = pd.DataFrame(
+        {
+            "ts": pd.RangeIndex(len(open_)),
+            "open": open_,
+            "high": high,
+            "low": low,
+            "close": close,
+            "trend_bias": bias,
+            "is_closed": True,
+        }
+    )
+    stop_dist = abs(float(open_[entry_idx]) - float(stop_loss))
+    if stop_dist <= 0:
+        end_idx = min(entry_idx + max_hold_bars, len(open_) - 1)
+        return end_idx, float(close[end_idx]), "max_hold"
+    levels = SignalOutcomeLevels(
+        entry_price=float(open_[entry_idx]),
+        stop_loss=float(stop_loss),
+        take_profit=float(take_profit),
+        stop_dist=stop_dist,
+        reward_to_risk=abs(float(take_profit) - float(open_[entry_idx])) / stop_dist,
+    )
+    result = _OUTCOME_SIMULATOR.simulate_levels(
+        side=side,
+        levels=levels,
+        frame=frame,
+        start_idx=entry_idx,
+        max_hold_bars=max_hold_bars,
+        include_trend_reverse=True,
+    )
+    if result is None:
+        end_idx = min(entry_idx + max_hold_bars, len(open_) - 1)
+        return end_idx, float(close[end_idx]), "max_hold"
+    return result.exit_idx, result.exit_price, result.exit_reason
 
 
 def run_backtest(
@@ -360,17 +372,12 @@ def run_backtest_from_features(
 
     ts = features["ts"].to_numpy()
     open_ = features["open"].to_numpy(dtype=float)
-    high = features["high"].to_numpy(dtype=float)
-    low = features["low"].to_numpy(dtype=float)
-    close = features["close"].to_numpy(dtype=float)
     volume = features["volume"].to_numpy(dtype=float)
     quote_volume = (
         features["quote_volume"].to_numpy(dtype=float)
         if "quote_volume" in features.columns
         else np.full(len(features), np.nan)
     )
-    bias = _trend_bias_series(features).to_numpy()
-
     candidate_indices = signal_candidate_indices(features)
     cool_off_mask = cool_off_condition_mask(features, params.atr_window)
 
@@ -426,14 +433,12 @@ def run_backtest_from_features(
             effective_score = max(1.0, effective_score - 1.5)
         else:
             effective_score = vote.final_score
-        side = signal.side
-        stop_dist = abs(float(signal.entry_ref) - float(signal.stop_loss))
-        if side == "long":
-            stop_loss = entry_price - stop_dist
-            take_profit = entry_price + stop_dist * params.take_profit_mult
-        else:
-            stop_loss = entry_price + stop_dist
-            take_profit = entry_price - stop_dist * params.take_profit_mult
+        levels = _OUTCOME_SIMULATOR.levels_from_signal(signal, entry_price=entry_price)
+        if levels is None:
+            continue
+        stop_dist = levels.stop_dist
+        stop_loss = levels.stop_loss
+        take_profit = levels.take_profit
         signal = replace(signal, entry_ref=entry_price, stop_loss=stop_loss, take_profit=take_profit, signal_score=effective_score)
         decision = validate_signal(signal, ledger, risk_config)
         if not decision.accepted:
@@ -464,18 +469,18 @@ def run_backtest_from_features(
             )
         except ValueError:
             continue
-        exit_idx, exit_price, exit_reason = exit_trade_from_arrays(
-            high=high,
-            low=low,
-            open_=open_,
-            close=close,
-            bias=bias,
-            entry_idx=entry_idx,
-            side=side,
-            stop_loss=stop_loss,
-            take_profit=take_profit,
-            max_hold_bars=params.max_hold_bars,
+        outcome = _OUTCOME_SIMULATOR.simulate_signal(
+            signal,
+            features,
+            start_idx=entry_idx,
+            after_signal_time=False,
+            include_trend_reverse=True,
         )
+        if outcome is None:
+            continue
+        exit_idx = outcome.exit_idx
+        exit_price = outcome.exit_price
+        exit_reason = outcome.exit_reason
 
         side_mult = 1 if signal.side == "long" else -1
         gross_pnl = (exit_price - entry_price) * qty * side_mult

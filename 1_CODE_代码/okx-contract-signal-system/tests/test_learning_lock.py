@@ -27,7 +27,12 @@ class DummyRLOptimizer:
         return {}
 
 
-def test_trading_brain_learning_lock_keeps_validated_live_params(tmp_path) -> None:
+def test_trading_brain_learning_lock_keeps_validated_live_params(tmp_path, monkeypatch) -> None:
+    def fail_history_lookup(*_args, **_kwargs):
+        raise FileNotFoundError("missing local history")
+
+    monkeypatch.setattr("okx_signal_system.data.gap_handler.find_lightweight_history", fail_history_lookup)
+
     brain = TradingBrain(
         tmp_path,
         config={

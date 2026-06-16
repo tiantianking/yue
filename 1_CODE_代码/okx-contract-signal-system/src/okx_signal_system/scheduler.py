@@ -5,6 +5,7 @@ OKX 合约信号系统 - 24小时自动调度器
 from __future__ import annotations
 
 import logging
+import asyncio
 from datetime import datetime, timedelta, timezone
 from threading import Event
 
@@ -12,14 +13,13 @@ import pandas as pd
 
 from okx_signal_system.config import load_config
 from okx_signal_system.data.loader import load_symbol_file
-from okx_signal_system.features.indicators import build_feature_frame
+from okx_signal_system.ml.regime_adaptive import AdaptiveParamsManager
 from okx_signal_system.paths import find_lightweight_history
 from okx_signal_system.notification import feishu
-from okx_signal_system.risk.model import Ledger, RiskConfig, validate_signal
+from okx_signal_system.risk.model import Ledger, RiskConfig
+from okx_signal_system.signal_service import SignalScanContext, SignalScanService
 from okx_signal_system.signal_runtime import (
     DEFAULT_MAX_SIGNAL_LAG_MINUTES,
-    latest_closed_signal,
-    signal_is_stale,
 )
 from okx_signal_system.strategy.trend_breakout import StrategyParams
 from okx_signal_system.timeframe import timeframe_spec
@@ -96,49 +96,15 @@ def scan_single_symbol(
     trend_timeframe: str = DEFAULT_TREND_TIMEFRAME,
 ) -> dict | None:
     """扫描单个币种，返回信号或None"""
-    try:
-        signal_timeframe = timeframe_spec(signal_timeframe).key
-        trend_timeframe = timeframe_spec(trend_timeframe).key
-        root = find_lightweight_history(dataset)
-        fname = inst_id_to_parquet_filename(inst_id, signal_timeframe)
-        path = root / fname
-        if not path.exists():
-            log.warning(f"数据文件不存在: {path}")
-            return None
-        symbol_data = load_symbol_file(path)
-        frame = symbol_data.frame
-        if len(frame) < 100:
-            log.warning(f"{inst_id} 数据不足")
-            return None
-        features = build_feature_frame(
-            frame,
-            fast_ema=params.fast_ema,
-            slow_ema=params.slow_ema,
-            breakout_window=params.breakout_window,
-            atr_window=params.atr_window,
-            signal_timeframe=signal_timeframe,
-            trend_timeframe=trend_timeframe,
-        )
-        signal = latest_closed_signal(features, inst_id=inst_id, params=params)
-        if signal is None:
-            return None
-        if signal_is_stale(
-            signal.ts,
-            timeframe=signal_timeframe,
-            max_lag_minutes=DEFAULT_MAX_SIGNAL_LAG_MINUTES,
-        ):
-            return None
-        risk_config = RiskConfig(initial_equity=GLOBAL_INITIAL_EQUITY)
-        decision = validate_signal(signal, ledger, risk_config)
-        return {
-            "inst_id": inst_id,
-            "signal": signal,
-            "decision": decision,
-            "ts": _now_utc().isoformat(),
-        }
-    except Exception as e:
-        log.error(f"扫描 {inst_id} 失败: {e}")
-        return None
+    results, _ = run_scan_cycle(
+        [inst_id],
+        ledger,
+        params,
+        dataset=dataset,
+        signal_timeframe=signal_timeframe,
+        trend_timeframe=trend_timeframe,
+    )
+    return results[0] if results else None
 
 
 def run_scan_cycle(
@@ -151,24 +117,61 @@ def run_scan_cycle(
     trend_timeframe: str = DEFAULT_TREND_TIMEFRAME,
 ) -> tuple[list[dict], Ledger]:
     """执行一次完整扫描，返回信号列表和兼容账本"""
-    results: list[dict] = []
-    for symbol in symbols:
-        inst_id = symbol_to_inst_id(symbol)
-        result = scan_single_symbol(
-            inst_id,
-            ledger,
-            params,
-            dataset=dataset,
-            signal_timeframe=signal_timeframe,
-            trend_timeframe=trend_timeframe,
-        )
-        if result and result["decision"].accepted:
-            results.append(result)
-    if not results:
-        log.info("本轮扫描无有效信号")
+    signal_timeframe = timeframe_spec(signal_timeframe).key
+    trend_timeframe = timeframe_spec(trend_timeframe).key
+
+    async def candle_loader(inst_id: str, limit: int) -> pd.DataFrame:
+        root = find_lightweight_history(dataset)
+        path = root / inst_id_to_parquet_filename(inst_id, signal_timeframe)
+        if not path.exists():
+            log.warning("数据文件不存在: %s", path)
+            return pd.DataFrame()
+        return load_symbol_file(path).frame.tail(limit).reset_index(drop=True)
+
+    service = SignalScanService(
+        candle_loader=candle_loader,
+        regime_manager=AdaptiveParamsManager(),
+    )
+    context = SignalScanContext(
+        dataset=dataset,
+        signal_timeframe=signal_timeframe,
+        trend_timeframe=trend_timeframe,
+        strategy_params=params,
+        risk_config=RiskConfig(initial_equity=GLOBAL_INITIAL_EQUITY),
+        ledger=ledger,
+        quality_gate_allows_push=True,
+        min_vote_approval_rate=0.4,
+        mode="scheduler_signal_only",
+        min_history_bars=100,
+        max_signal_lag_minutes=DEFAULT_MAX_SIGNAL_LAG_MINUTES,
+    )
+    try:
+        scan_result = asyncio.run(service.scan_cycle([symbol_to_inst_id(symbol) for symbol in symbols], context))
+    except Exception as e:
+        log.error("扫描周期失败: %s", e)
         return [], ledger
-    log.info(f"本轮扫描产出 {len(results)} 个有效信号")
-    return results, ledger
+
+    ready_results = [
+        {
+            "inst_id": candidate.inst_id,
+            "signal": candidate.signal,
+            "decision": candidate.decision,
+            "candidate": candidate,
+            "payload": candidate.payload,
+            "ts": _now_utc().isoformat(),
+        }
+        for candidate in scan_result.selection.tier_a
+    ]
+    if not ready_results:
+        log.info("本轮扫描无有效信号")
+    else:
+        log.info(f"本轮扫描产出 {len(ready_results)} 个有效信号")
+
+    if scan_result.selection.tier_b:
+        log.info("本轮保留 %s 个B级候选", len(scan_result.selection.tier_b))
+    if scan_result.selection.tier_c:
+        log.info("本轮观察 %s 个C级候选", len(scan_result.selection.tier_c))
+    return ready_results, ledger
 
 
 def format_signal_summary(signals: list[dict]) -> str:
@@ -251,6 +254,8 @@ class SignalScheduler:
         # 推送信号到飞书
         if results:
             for r in results:
+                if r.get("candidate") and r["candidate"].tier != "A":
+                    continue
                 sig = r["signal"]
                 feishu.feishu_send_signal_card(
                     inst_id=r["inst_id"],
@@ -266,7 +271,7 @@ class SignalScheduler:
             feishu.feishu_send_status_card(
                 status=self._ledger.status,
                 cycle_count=self._cycle,
-                last_signal_count=len(results),
+                last_signal_count=sum(1 for r in results if r.get("candidate") and r["candidate"].tier == "A"),
             )
 
         if self.status_callback:

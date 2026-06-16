@@ -28,7 +28,7 @@ from okx_signal_system.exchange.okx import (
     test_connection,
 )
 from okx_signal_system.io_atomic import read_parquet_with_retry, write_parquet_atomic
-from okx_signal_system.paths import find_lightweight_history
+from okx_signal_system.paths import find_lightweight_history, find_runtime_cache_root
 from okx_signal_system.strategy.trend_breakout import TradeSignal, StrategyParams
 from okx_signal_system.risk.model import (
     RiskConfig,
@@ -101,9 +101,9 @@ AI_PERSIST_INTERVAL = 60  # 每60秒写入磁盘
 def _live_signal_history_limit(params: StrategyParams, *, signal_timeframe: str, trend_timeframe: str) -> int:
     trend_ratio = ratio_bars(trend_timeframe, signal_timeframe)
     return max(
-        600,
-        params.slow_ema + params.breakout_window + 120,
-        params.slow_ema * trend_ratio + 160,
+        3500,
+        params.slow_ema + params.breakout_window + params.max_hold_bars + 240,
+        params.slow_ema * trend_ratio + params.breakout_window + 240,
     )
 
 
@@ -175,11 +175,24 @@ class RealtimeDataStore:
         *,
         timeframe: str = "15m",
         dataset: str | None = None,
+        historical_data_dir: Path | str | None = None,
+        runtime_cache_dir: Path | str | None = None,
+        max_cache_bars: int | None = None,
     ):
         self.timeframe = timeframe_spec(timeframe)
         self.dataset = dataset or f"okx_{self.timeframe.file_suffix}_extended"
-        self.data_dir = Path(data_dir) if data_dir is not None else None
+        if data_dir is not None and runtime_cache_dir is None:
+            runtime_cache_dir = data_dir
+        self.data_dir = Path(runtime_cache_dir) if runtime_cache_dir is not None else None
+        self.historical_data_dir = Path(historical_data_dir) if historical_data_dir is not None else None
+        self._auto_find_history = historical_data_dir is not None or data_dir is None
+        self.max_cache_bars = max_cache_bars or _live_signal_history_limit(
+            StrategyParams(),
+            signal_timeframe=self.timeframe.key,
+            trend_timeframe=default_trend_timeframe(self.timeframe.key),
+        )
         self._history_lookup_failed = False
+        self._runtime_cache_lookup_failed = False
         if self.data_dir is not None:
             self.data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -188,39 +201,70 @@ class RealtimeDataStore:
         # 最后写入时间
         self._last_write: dict[str, datetime] = {}
 
-    def _resolve_data_dir(self, *, create: bool = False) -> Path | None:
-        if self.data_dir is None:
+    def _resolve_history_dir(self) -> Path | None:
+        if not self._auto_find_history:
+            return None
+        if self.historical_data_dir is None:
             try:
-                self.data_dir = find_lightweight_history(self.dataset)
+                self.historical_data_dir = find_lightweight_history(self.dataset)
             except FileNotFoundError as exc:
                 if not self._history_lookup_failed:
-                    log.warning("Local history dataset unavailable; using in-memory cache only: %s", exc)
+                    log.warning("Local history dataset unavailable; reading runtime cache only: %s", exc)
                     self._history_lookup_failed = True
+                return None
+        return self.historical_data_dir
+
+    def _resolve_runtime_cache_dir(self, *, create: bool = False) -> Path | None:
+        if self.data_dir is None:
+            try:
+                self.data_dir = find_runtime_cache_root(self.dataset, create=create)
+            except Exception as exc:
+                if not self._runtime_cache_lookup_failed:
+                    log.warning("Runtime cache unavailable; using in-memory cache only: %s", exc)
+                    self._runtime_cache_lookup_failed = True
                 return None
         if create:
             self.data_dir.mkdir(parents=True, exist_ok=True)
         return self.data_dir
 
-    def _get_file_path(self, inst_id: str, *, create_dir: bool = False) -> Path | None:
-        """获取文件路径"""
-        data_dir = self._resolve_data_dir(create=create_dir)
-        if data_dir is None:
-            return None
+    def _filename(self, inst_id: str) -> str:
         normalized = inst_id.replace("-", "_").replace("_SWAP", "").upper()
-        # BTC-USDT-SWAP -> BTC_USDT_USDT_<timeframe>.parquet
         if normalized.count("USDT") == 1:
             normalized = f"{normalized}_USDT"
-        return data_dir / f"{normalized}_{self.timeframe.file_suffix}.parquet"
+        return f"{normalized}_{self.timeframe.file_suffix}.parquet"
+
+    def _get_file_path(self, inst_id: str, *, create_dir: bool = False) -> Path | None:
+        """获取文件路径"""
+        data_dir = self._resolve_runtime_cache_dir(create=create_dir)
+        if data_dir is None:
+            return None
+        return data_dir / self._filename(inst_id)
+
+    def _get_history_file_path(self, inst_id: str) -> Path | None:
+        data_dir = self._resolve_history_dir()
+        if data_dir is None:
+            return None
+        return data_dir / self._filename(inst_id)
 
     def load(self, inst_id: str) -> pd.DataFrame:
         """加载数据"""
         if inst_id in self._cache:
             return self._cache[inst_id]
 
-        path = self._get_file_path(inst_id)
-        if path is not None and path.exists():
+        frames: list[pd.DataFrame] = []
+        for path in (self._get_history_file_path(inst_id), self._get_file_path(inst_id)):
+            if path is None or not path.exists():
+                continue
             df = _read_parquet_with_retry(path)
             df["ts"] = pd.to_datetime(df["ts"], utc=True)
+            frames.append(df)
+
+        if frames:
+            df = pd.concat(frames, ignore_index=True)
+            df["ts"] = pd.to_datetime(df["ts"], utc=True)
+            df = df.drop_duplicates(subset=["ts"], keep="last").sort_values("ts").reset_index(drop=True)
+            if len(df) > self.max_cache_bars:
+                df = df.tail(self.max_cache_bars).reset_index(drop=True)
             self._cache[inst_id] = df
             return df
 
@@ -256,9 +300,9 @@ class RealtimeDataStore:
         df["ts"] = pd.to_datetime(df["ts"], utc=True)
         df = df.drop_duplicates(subset=["ts"], keep="last").sort_values("ts").reset_index(drop=True)
 
-        # 保持最新1000根K线在内存
-        if len(df) > 1000:
-            df = df.tail(1000).reset_index(drop=True)
+        # 保持足够的预热K线在内存
+        if len(df) > self.max_cache_bars:
+            df = df.tail(self.max_cache_bars).reset_index(drop=True)
 
         self._cache[inst_id] = df
         return True
@@ -299,9 +343,14 @@ class RealtimeDataStore:
                 df_combined = pd.concat([existing, df], ignore_index=True)
                 df_combined = df_combined.drop_duplicates(subset=["ts"], keep="last")
                 df_combined = df_combined.sort_values("ts").reset_index(drop=True)
+                if len(df_combined) > self.max_cache_bars:
+                    df_combined = df_combined.tail(self.max_cache_bars).reset_index(drop=True)
                 _write_parquet_atomic(df_combined, path)
                 self._cache[inst_id] = df_combined
             else:
+                if len(df) > self.max_cache_bars:
+                    df = df.tail(self.max_cache_bars).reset_index(drop=True)
+                    self._cache[inst_id] = df
                 _write_parquet_atomic(df, path)
 
             self._last_write[inst_id] = datetime.now(timezone.utc)
@@ -609,7 +658,18 @@ class OKXRealtimeAPI:
         self.dataset = data_cfg.get("historical_dataset") or f"okx_{self.timeframe.file_suffix}_extended"
         self._connected = False
         self._ws_client: OKXWebSocketClient | None = None
-        self._data_store = RealtimeDataStore(timeframe=self.timeframe.key, dataset=self.dataset)
+        cache_limit = _live_signal_history_limit(
+            StrategyParams(),
+            signal_timeframe=self.timeframe.key,
+            trend_timeframe=self.trend_timeframe.key,
+        )
+        self._data_store = RealtimeDataStore(
+            timeframe=self.timeframe.key,
+            dataset=self.dataset,
+            historical_data_dir=data_cfg.get("historical_data_root") or data_cfg.get("root_dir"),
+            runtime_cache_dir=data_cfg.get("runtime_cache_root"),
+            max_cache_bars=cache_limit,
+        )
 
         # 监控的币种列表
         self._watched_symbols: list[str] = []

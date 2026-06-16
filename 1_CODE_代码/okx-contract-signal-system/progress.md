@@ -180,3 +180,23 @@
 ### Notes
 - Modified files: `src/okx_signal_system/backtest/runner.py` maps all non-TP/SL exits to `TIMEOUT` and rejects unsupported result outcomes; `tests/test_backtest_signal_only.py` asserts the supported outcome set and rejection path; `src/okx_signal_system/notify/feishu.py` removes execution-style parameters from the legacy wrapper; `src/okx_signal_system/ml/trading_brain.py` stops passing those fields; `tests/test_feishu_notify.py` covers all Feishu signal signatures; `src/okx_signal_system/__init__.py`, `pyproject.toml`, and `src/okx_contract_signal_system.egg-info/PKG-INFO` bump the package metadata to v3.44; `tests/test_release_safety.py` covers the egg-info version; `docs/SYSTEM_ARCHITECTURE.md` documents the supported outcome classes; `progress.md` records this round.
 - Rollback: revert this commit after it is created, or before commit restore the listed files from the previous index state and remove this appended progress entry.
+
+## 2026-06-17 - Task: v3.45 SIGNAL_ONLY acceptance report follow-up
+### What was done
+- Upgraded release metadata to v3.45 so package metadata and version-derived GUI/CLI/launcher displays stay synchronized after this code change.
+- Added a shared `SignalOutcomeSimulator` and routed backtest exits plus quality labels through one entry anchoring, stop/target, timeout, MFE/MAE, and outcome simulation path.
+- Consolidated scheduler, report job, realtime monitor, and TradingBrain observation scanning onto `SignalScanService`; formal A-tier candidates remain the only candidates that create lifecycle records or formal Feishu signal pushes, while B/C candidates stay as summaries or observations.
+- Replaced formal scan payload risk output with signal-only risk fields and stopped applying leverage-factor semantics to formal signal risk evaluation.
+- Split historical data reads from runtime K-line cache writes and increased runtime cache retention to the strategy warm-up scale.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests/test_signal_quality_labeler.py tests/test_backtest.py tests/test_backtest_signal_only.py -q` -> passed with historical-data integration tests skipped.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests/test_signal_scan_service.py tests/test_learning_lock.py tests/test_reporting_signal.py -q` -> passed with historical-data integration tests skipped.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests/test_config.py tests/test_data_layer.py tests/test_desktop_runtime.py tests/test_release_safety.py -q` -> passed with historical-data integration tests skipped.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest -q` -> passed with historical-data integration tests skipped.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m compileall src tests main.py gui.py` -> passed.
+- `npm.cmd run check` in `dashboard` -> lint and production build passed.
+- `git diff --check` -> passed.
+### Notes
+- Modified files: `src/okx_signal_system/signal_quality/outcome.py` adds the shared outcome simulator; `src/okx_signal_system/signal_quality/execution.py` and `src/okx_signal_system/backtest/runner.py` use it for quality labels and backtest exits; `src/okx_signal_system/signal_service/scan.py`, `src/okx_signal_system/scheduler.py`, `src/okx_signal_system/signal_service/job.py`, and `src/okx_signal_system/ml/trading_brain.py` consolidate formal/observation scan paths through `SignalScanService`; `src/okx_signal_system/exchange/realtime.py` and `src/okx_signal_system/paths.py` separate historical reads from runtime cache writes; `tests/test_signal_quality_labeler.py`, `tests/test_signal_scan_service.py`, `tests/test_data_layer.py`, `tests/test_config.py`, and `tests/test_learning_lock.py` add focused regressions; `docs/SYSTEM_ARCHITECTURE.md`, `pyproject.toml`, `src/okx_signal_system/__init__.py`, and `src/okx_contract_signal_system.egg-info/PKG-INFO` document and version the v3.45 boundary.
+- SQLite lifecycle event/outbox tables were not added because they are a database schema change and need explicit approval before implementation.
+- Rollback: revert this commit after it is created, or before commit restore the listed source/test/doc/version files from the previous index state and remove this appended progress entry.

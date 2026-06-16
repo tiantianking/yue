@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import json
-from dataclasses import asdict
 from pathlib import Path
 
 from okx_signal_system.data.loader import load_symbol_file
-from okx_signal_system.features.indicators import build_feature_frame
+from okx_signal_system.ml.regime_adaptive import AdaptiveParamsManager
 from okx_signal_system.paths import find_lightweight_history
-from okx_signal_system.risk.model import Ledger, validate_signal
-from okx_signal_system.strategy.trend_breakout import StrategyParams, build_signal
+from okx_signal_system.risk.model import Ledger, RiskConfig
+from okx_signal_system.signal_service import SignalScanContext, SignalScanService
+from okx_signal_system.strategy.trend_breakout import StrategyParams
 from okx_signal_system.timeframe import timeframe_spec
 from okx_signal_system.training.startup_quality import load_selected_strategy_params
 
@@ -31,30 +32,51 @@ def latest_signal_payload(
     signal_timeframe = timeframe_spec(signal_timeframe).key
     trend_timeframe = timeframe_spec(trend_timeframe).key
     params = params or load_selected_strategy_params()
-    data = load_symbol_file(find_lightweight_history(dataset) / symbol_file)
-    features = build_feature_frame(
-        data.frame,
-        fast_ema=params.fast_ema,
-        slow_ema=params.slow_ema,
-        breakout_window=params.breakout_window,
-        atr_window=params.atr_window,
+
+    async def candle_loader(_inst_id: str, limit: int):
+        data = load_symbol_file(find_lightweight_history(dataset) / symbol_file)
+        return data.frame.tail(limit).reset_index(drop=True)
+
+    service = SignalScanService(
+        candle_loader=candle_loader,
+        regime_manager=AdaptiveParamsManager(),
+    )
+    context = SignalScanContext(
+        dataset=dataset,
         signal_timeframe=signal_timeframe,
         trend_timeframe=trend_timeframe,
-    ).reset_index(drop=True)
-    for idx, row in features.dropna(subset=["atr", "breakout_high", "breakout_low"]).iloc[::-1].iterrows():
-        signal = build_signal(row, inst_id=inst_id, params=params, frame=features, idx=int(idx))
-        decision = validate_signal(signal, Ledger(inst_id, init_capital=10000, equity=10000))
-        payload = {
-            "signal": asdict(signal),
-            "risk": asdict(decision),
+        strategy_params=params,
+        risk_config=RiskConfig(),
+        ledger=Ledger(inst_id, init_capital=10000, equity=10000),
+        quality_gate_allows_push=True,
+        min_vote_approval_rate=0.4,
+        mode="signal_only",
+        min_history_bars=50,
+        send_health_report=True,
+    )
+    result = asyncio.run(service.scan_cycle([inst_id], context))
+    if result.ready_candidates:
+        return result.ready_candidates[0].payload
+    if result.cycle_health:
+        return {
+            "signal": {"inst_id": inst_id, "side": None, "entry_ref": None, "stop_loss": None, "take_profit": None},
+            "risk": {"accepted": False, "reason": result.cycle_health[0].get("reason")},
             "live_order_enabled": False,
             "mode": "signal_only",
             "dataset": dataset,
             "signal_timeframe": signal_timeframe,
             "trend_timeframe": trend_timeframe,
-            "selected_params": asdict(params),
+            "selected_params": {
+                "fast_ema": params.fast_ema,
+                "slow_ema": params.slow_ema,
+                "breakout_window": params.breakout_window,
+                "atr_stop_mult": params.atr_stop_mult,
+                "take_profit_mult": params.take_profit_mult,
+                "max_hold_bars": params.max_hold_bars,
+                "atr_window": params.atr_window,
+            },
+            "cycle_health": result.cycle_health,
         }
-        return payload
     raise RuntimeError("no usable signal row")
 
 
