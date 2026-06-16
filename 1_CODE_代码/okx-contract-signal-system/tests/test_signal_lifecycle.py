@@ -5,7 +5,7 @@ import sqlite3
 
 import pandas as pd
 
-from okx_signal_system.signal_quality.lifecycle import SignalLifecycleStore, lifecycle_payload
+from okx_signal_system.signal_quality.lifecycle import LifecycleOutboxWorker, SignalLifecycleStore, lifecycle_payload
 from okx_signal_system.strategy.trend_breakout import TradeSignal
 
 
@@ -70,6 +70,38 @@ def test_lifecycle_target_reached_after_confirmation(tmp_path) -> None:
     assert summary["terminal"] == 1
     assert summary["latest_event_type"] == "TARGET_REACHED"
     assert summary["latest_event_at"] == "2026-01-01T00:30:00+00:00"
+
+
+def test_lifecycle_target_uses_high_when_close_stays_below_target(tmp_path) -> None:
+    store = SignalLifecycleStore(tmp_path / "lifecycle.json")
+    signal = _signal(take_profit=115.0, max_hold_bars=3)
+    store.record_signal(signal, signal_id="sig-high-target")
+
+    frame = _frame(
+        [
+            {
+                "ts": pd.Timestamp("2026-01-01T00:15:00Z"),
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 101.0,
+                "is_closed": True,
+            },
+            {
+                "ts": pd.Timestamp("2026-01-01T00:30:00Z"),
+                "open": 101.0,
+                "high": 116.0,
+                "low": 100.5,
+                "close": 112.0,
+                "is_closed": True,
+            },
+        ]
+    )
+
+    assert store.update_symbol("BTC-USDT-SWAP", frame) == 1
+    record = store.get("sig-high-target")
+    assert record.status == "TARGET_REACHED"
+    assert record.target_reached_at == "2026-01-01T00:30:00+00:00"
 
 
 def test_lifecycle_stop_reached_after_confirmation(tmp_path) -> None:
@@ -244,6 +276,36 @@ def test_lifecycle_sqlite_schema_records_events_and_outbox(tmp_path) -> None:
     pending = store.pending_notifications()
     assert [item["outbox_id"] for item in pending] == [row[0] for row in outbox]
     assert len({item["outbox_id"] for item in pending}) == len(pending)
+
+
+def test_lifecycle_outbox_worker_marks_sent_and_failed(tmp_path) -> None:
+    path = tmp_path / "lifecycle.sqlite3"
+    store = SignalLifecycleStore(path)
+    store.enqueue_notification(
+        "outbox-ok",
+        signal_id=None,
+        event_type="TARGET_REACHED",
+        payload={"status": "TARGET_REACHED", "symbol": "BTC-USDT-SWAP", "side": "long"},
+    )
+    store.enqueue_notification(
+        "outbox-fail",
+        signal_id=None,
+        event_type="STOP_REACHED",
+        payload={"status": "STOP_REACHED", "symbol": "ETH-USDT-SWAP", "side": "short"},
+    )
+
+    class DummyDispatcher:
+        def send_lifecycle_event(self, event: dict) -> bool:
+            return event["outbox_id"] == "outbox-ok"
+
+    result = LifecycleOutboxWorker(store, DummyDispatcher()).run_once()
+
+    assert result == {"sent": 1, "failed": 1}
+    pending = {item["outbox_id"]: item for item in store.pending_notifications()}
+    assert "outbox-ok" not in pending
+    assert pending["outbox-fail"]["status"] == "FAILED"
+    assert pending["outbox-fail"]["last_error"] == "send_lifecycle_event_returned_false"
+    assert pending["outbox-fail"]["attempt_count"] == 1
 
 
 def test_lifecycle_migrates_legacy_json_to_sqlite(tmp_path) -> None:

@@ -314,11 +314,15 @@ def run_backtest(
     *,
     inst_id: str,
     params: StrategyParams = StrategyParams(),
-    risk_config: RiskConfig = RiskConfig(),
+    risk_config: RiskConfig | None = None,
     signal_timeframe: str = "1h",
     trend_timeframe: str | None = None,
     min_vote_approval_rate: float = DEFAULT_MIN_VOTE_APPROVAL_RATE,
 ) -> pd.DataFrame:
+    if risk_config is None:
+        from okx_signal_system.config import load_runtime_config
+
+        risk_config = load_runtime_config().risk_config()
     features = build_feature_frame(
         frame_1h,
         fast_ema=params.fast_ema,
@@ -342,15 +346,19 @@ def run_backtest_from_features(
     *,
     inst_id: str,
     params: StrategyParams = StrategyParams(),
-    risk_config: RiskConfig = RiskConfig(),
+    risk_config: RiskConfig | None = None,
     min_vote_approval_rate: float = DEFAULT_MIN_VOTE_APPROVAL_RATE,
 ) -> pd.DataFrame:
+    if risk_config is None:
+        from okx_signal_system.config import load_runtime_config
+
+        risk_config = load_runtime_config().risk_config()
     features = features.reset_index(drop=True)
     ledger = Ledger(
         inst_id=inst_id,
         init_capital=risk_config.initial_equity,
         equity=risk_config.initial_equity,
-        cool_off_bars=0,  # 初始化冷静期计数器
+        cool_off_bars=0,
     )
     trades: list[TradeRecord] = []
     if len(features) < 3:
@@ -368,40 +376,16 @@ def run_backtest_from_features(
     cool_off_mask = cool_off_condition_mask(features, params.atr_window)
 
     cursor = 0
+    cooldown_until_index = -1
     for idx in candidate_indices:
         if idx < cursor:
             continue
 
-        # 冷静期检查：如果当前bar处于冷静期，跳过
-        if ledger.cool_off_bars > 0:
-            # 冷静期递减
-            ledger = Ledger(
-                inst_id=inst_id,
-                init_capital=ledger.init_capital,
-                equity=ledger.equity,
-                open_positions=ledger.open_positions,
-                status=ledger.status,
-                loss_streak=ledger.loss_streak,
-                max_drawdown=ledger.max_drawdown,
-                cool_off_bars=ledger.cool_off_bars - 1,
-                peak_equity=ledger.peak_equity,
-            )
+        if idx <= cooldown_until_index:
             continue
 
-        # 检测冷静期条件：最近3根bar有连续极端波动
         if bool(cool_off_mask[idx]):
-            # 进入冷静期，跳过这个信号
-            ledger = Ledger(
-                inst_id=inst_id,
-                init_capital=ledger.init_capital,
-                equity=ledger.equity,
-                open_positions=ledger.open_positions,
-                status=ledger.status,
-                loss_streak=ledger.loss_streak,
-                max_drawdown=ledger.max_drawdown,
-                cool_off_bars=COOL_OFF_BARS,  # 设置冷静期
-                peak_equity=ledger.peak_equity,
-            )
+            cooldown_until_index = idx + COOL_OFF_BARS
             continue
 
         signal = build_signal(features.iloc[idx], inst_id=inst_id, params=params, frame=features, idx=idx)

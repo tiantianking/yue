@@ -45,8 +45,50 @@ class RuntimeConfig:
             initial_equity=float(equity),
             halt_equity_ratio=_float_value(risk, "halt_equity_ratio", RiskConfig.halt_equity_ratio),
             max_leverage=_float_value(risk, "max_leverage", RiskConfig.max_leverage),
+            single_position_loss_pct=_float_value(
+                risk,
+                "single_position_loss_pct",
+                RiskConfig.single_position_loss_pct,
+                aliases=("max_single_position_loss_pct", "max_position_loss_pct"),
+            ),
+            risk_per_trade_pct=_float_value(risk, "risk_per_trade_pct", RiskConfig.risk_per_trade_pct),
             margin_mode=str(risk.get("margin_mode", RiskConfig.margin_mode)),
             position_mode=str(risk.get("position_mode", RiskConfig.position_mode)),
+            maintenance_margin_rate=_float_value(
+                risk,
+                "maintenance_margin_rate",
+                RiskConfig.maintenance_margin_rate,
+            ),
+            liquidation_cost_buffer_pct=_float_value(
+                risk,
+                "liquidation_cost_buffer_pct",
+                RiskConfig.liquidation_cost_buffer_pct,
+                aliases=("cost_buffer_pct",),
+            ),
+            min_stop_distance_pct=_float_value(
+                risk,
+                "min_stop_distance_pct",
+                RiskConfig.min_stop_distance_pct,
+                aliases=("min_stop_distance", "stop_distance_pct", "stop_distance"),
+            ),
+            min_take_profit_distance_pct=_float_value(
+                risk,
+                "min_take_profit_distance_pct",
+                RiskConfig.min_take_profit_distance_pct,
+                aliases=("min_take_profit_distance", "take_profit_distance_pct", "take_profit_distance"),
+            ),
+            min_reward_to_risk=_float_value(
+                risk,
+                "min_reward_to_risk",
+                RiskConfig.min_reward_to_risk,
+                aliases=("min_rr", "reward_to_risk_min"),
+            ),
+            min_signal_score=_float_value(
+                risk,
+                "min_signal_score",
+                RiskConfig.min_signal_score,
+                aliases=("min_score", "signal_score_min"),
+            ),
         )
 
     def cost_config(self) -> CostConfig:
@@ -55,21 +97,56 @@ class RuntimeConfig:
         funding = self.fees.get("funding", {}) if isinstance(self.fees.get("funding"), dict) else {}
         return CostConfig(
             taker_fee_rate=_float_value(fees, "taker_fee_rate", CostConfig.taker_fee_rate),
+            maker_fee_rate=_float_value(fees, "maker_fee_rate", CostConfig.maker_fee_rate),
+            default_use_taker=_bool_value(fees, "default_use_taker", CostConfig.default_use_taker),
             normal_slippage_bps=_float_value(slippage, "normal_bps", CostConfig.normal_slippage_bps),
             stress_slippage_bps=_float_value(slippage, "stress_bps", CostConfig.stress_slippage_bps),
+            participation_tiers=_tuple_of_dicts(slippage.get("participation_tiers"), CostConfig().participation_tiers),
             funding_rate=_float_value(funding, "baseline_rate", CostConfig.funding_rate),
             funding_interval_hours=int(_float_value(funding, "baseline_hours", CostConfig.funding_interval_hours)),
+            stress_funding_rates=_tuple_of_dicts(funding.get("stress_rates"), CostConfig().stress_funding_rates),
         )
 
 
-def _float_value(mapping: dict[str, Any], key: str, default: float) -> float:
-    value = mapping.get(key, default)
+def _value(mapping: dict[str, Any], key: str, default: Any, aliases: tuple[str, ...] = ()) -> Any:
+    for name in (key, *aliases):
+        if name in mapping:
+            return mapping[name]
+    return default
+
+
+def _float_value(mapping: dict[str, Any], key: str, default: float, *, aliases: tuple[str, ...] = ()) -> float:
+    value = _value(mapping, key, default, aliases)
     if isinstance(value, list):
         value = value[0] if value else default
     try:
         return float(value)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _bool_value(mapping: dict[str, Any], key: str, default: bool) -> bool:
+    value = mapping.get(key, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "y", "on"}:
+            return True
+        if lowered in {"false", "0", "no", "n", "off"}:
+            return False
+    return bool(default)
+
+
+def _tuple_of_dicts(value: Any, default: tuple[dict[str, float], ...]) -> tuple[dict[str, float], ...]:
+    if not isinstance(value, list):
+        return default
+    items: list[dict[str, float]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            return default
+        items.append(dict(item))
+    return tuple(items)
 
 
 def project_paths(start: Path | None = None) -> ProjectPaths:

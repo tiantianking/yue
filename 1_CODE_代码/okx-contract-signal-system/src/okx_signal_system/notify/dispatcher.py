@@ -14,6 +14,23 @@ from okx_signal_system.notify.feishu import (
 from okx_signal_system.signal_quality import SignalLifecycleStore, lifecycle_payload
 
 
+def _format_beijing_time(value: Any) -> str:
+    if value in (None, ""):
+        return "-"
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    return ts.tz_convert("Asia/Shanghai").strftime("%Y-%m-%d %H:%M:%S 北京时间")
+
+
+def _payload_value(payload: dict[str, Any], *names: str) -> Any:
+    for name in names:
+        value = payload.get(name)
+        if value is not None:
+            return value
+    return None
+
+
 class NotificationDispatcher:
     def __init__(self, lifecycle_store: SignalLifecycleStore | None = None):
         self._lifecycle_store = lifecycle_store
@@ -116,6 +133,38 @@ class NotificationDispatcher:
             selected_params=selected_params,
         )
 
+    def send_lifecycle_event(self, event: dict[str, Any]) -> bool:
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else event
+        lifecycle_event = payload.get("lifecycle_event") if isinstance(payload.get("lifecycle_event"), dict) else {}
+        status = _payload_value(payload, "status", "state") or event.get("event_type")
+        symbol = _payload_value(payload, "symbol", "inst_id") or event.get("signal_id") or "-"
+        side = _payload_value(payload, "side") or "-"
+        tier = _payload_value(payload, "tier", "level")
+        score = _payload_value(payload, "score", "signal_score")
+        signal_time = _payload_value(payload, "signal_time", "triggered_at")
+        send_time = _now_dispatch_time()
+        event_time = lifecycle_event.get("at") or event.get("available_at")
+        lines = [
+            "OKX signal lifecycle event",
+            f"status: {status}",
+            f"symbol: {symbol}",
+            f"side: {side}",
+            f"signal_time: {_format_beijing_time(signal_time)}",
+            f"send_time: {send_time}",
+        ]
+        if tier is not None:
+            lines.append(f"tier: {tier}")
+        if score is not None:
+            try:
+                lines.append(f"score: {float(score):.1f}")
+            except (TypeError, ValueError):
+                lines.append(f"score: {score}")
+        if event_time:
+            lines.append(f"event_time: {_format_beijing_time(event_time)}")
+        if event.get("outbox_id"):
+            lines.append(f"outbox_id: {event['outbox_id']}")
+        return send_text("\n".join(lines))
+
     def send_startup(self, *, symbol_count: int, environment: str) -> bool:
         return send_text(
             "\n".join(
@@ -129,6 +178,10 @@ class NotificationDispatcher:
                 ]
             )
         )
+
+
+def _now_dispatch_time() -> str:
+    return pd.Timestamp.now(tz="Asia/Shanghai").strftime("%Y-%m-%d %H:%M:%S 北京时间")
 
 
 __all__ = ["NotificationDispatcher"]

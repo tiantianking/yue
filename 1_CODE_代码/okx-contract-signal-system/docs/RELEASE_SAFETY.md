@@ -10,6 +10,7 @@ Release defaults:
 - `config/base.yaml` does not pin a local Windows data directory; runtime history is resolved from `JIAOYI_DATA_DIR` or workspace discovery.
 - `.env.example` contains only signal-only, read-only, and notification switch placeholders.
 - `.env.example` must not expose OKX private credential placeholders.
+- The release zip builder applies an internal denylist to both git-tracked files and non-git fallback traversal.
 
 Packaging rule:
 - Keep `.env.example` in the package as the only environment template.

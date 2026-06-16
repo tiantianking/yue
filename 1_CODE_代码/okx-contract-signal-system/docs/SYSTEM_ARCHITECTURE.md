@@ -356,3 +356,11 @@ src/okx_signal_system/
 - User-facing signal times are Beijing time. Signal cards show signal generation time from the signal K-line timestamp when available, plus a separate notification send time. Runtime status JSON also exposes Beijing display fields alongside UTC machine timestamps.
 - C-tier near-breakout observation is ATR-relative, and correlation grouping defaults to a 500-sample floor unless tests or research tools explicitly override it.
 - Research sizing and slippage use shared helpers in `risk.costs`, so backtest and quality-label paths use the same risk unit and cost assumptions.
+
+## v3.49 Research and Runtime Closure
+
+- Research parameter promotion now uses a common-calendar train/validation/blind split when data length allows it. The validation and blind windows are separated from training by purge/embargo bars, and the blind segment is reported but never fed back into parameter selection.
+- Shared parameter selection rejects infinite PF and enforces a parameter-neighborhood stability gate before a parameter set can pass the training gate. Walk-forward validation derives default windows from the warm-up requirement and trains/freezes parameters per fold before validation.
+- Research artifacts include `cost_stress.csv` with baseline, 1.5x, and 2x cost replay metrics: net R, PF, drawdown, trade counts, side split, symbol contribution, regime split, and funding sensitivity.
+- Runtime configuration is the dependency-injection source for backtest, quality-label execution, GUI scan, realtime scan, risk sizing, and cost estimation defaults. Direct `RiskConfig()` / `CostConfig()` construction remains acceptable in tests and explicit experimental utilities only.
+- Lifecycle terminal checks reuse OHLC outcome rules and lifecycle outbox delivery can be consumed by `LifecycleOutboxWorker` through `NotificationDispatcher.send_lifecycle_event()`.

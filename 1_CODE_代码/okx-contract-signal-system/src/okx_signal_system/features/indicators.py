@@ -68,7 +68,8 @@ def detect_extreme_volatility(frame: pd.DataFrame, atr_window: int = 14, thresho
     atr_series = atr(frame, atr_window)
     atr_pct = atr_series / frame["close"]
     rolling_extreme = atr_pct.rolling(window=3, min_periods=3).max()
-    return rolling_extreme > threshold_multiplier * atr_pct.mean() if atr_pct.mean() > 0 else pd.Series(False, index=frame.index)
+    historical_mean = atr_pct.shift(1).expanding(min_periods=atr_window).mean()
+    return (rolling_extreme > threshold_multiplier * historical_mean).fillna(False)
 
 
 def market_regime_features(frame: pd.DataFrame, lookback: int = 100) -> pd.Series:

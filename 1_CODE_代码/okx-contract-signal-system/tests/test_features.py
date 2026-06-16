@@ -7,6 +7,7 @@ from okx_signal_system.features.indicators import (
     add_1h_features,
     align_completed_4h_to_1h,
     build_feature_frame,
+    detect_extreme_volatility,
     prior_breakout_levels,
     resample_4h,
     resample_trend,
@@ -100,3 +101,29 @@ def test_build_feature_frame_supports_15m_signal_and_1h_trend() -> None:
 
 def test_trend_ema_spans_scale_15m_params_to_1h() -> None:
     assert trend_ema_spans(120, 720, signal_timeframe="15m", trend_timeframe="1h") == (30, 180)
+
+
+def test_detect_extreme_volatility_does_not_use_future_bars() -> None:
+    def frame_from_ranges(ranges: list[float]) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "high": [100.0 + value / 2 for value in ranges],
+                "low": [100.0 - value / 2 for value in ranges],
+                "close": [100.0] * len(ranges),
+            }
+        )
+
+    prefix_ranges = [1.0, 1.0, 1.0, 8.0, 8.0, 8.0]
+    prefix_result = detect_extreme_volatility(
+        frame_from_ranges(prefix_ranges),
+        atr_window=2,
+        threshold_multiplier=1.5,
+    )
+    full_result = detect_extreme_volatility(
+        frame_from_ranges(prefix_ranges + [200.0, 200.0, 200.0]),
+        atr_window=2,
+        threshold_multiplier=1.5,
+    )
+
+    pd.testing.assert_series_equal(prefix_result, full_result.iloc[: len(prefix_ranges)])
+    assert bool(prefix_result.iloc[4]) is True

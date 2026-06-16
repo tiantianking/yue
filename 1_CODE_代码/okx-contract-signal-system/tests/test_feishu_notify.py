@@ -356,6 +356,46 @@ def test_notification_dispatcher_wraps_startup_and_health_reports(monkeypatch) -
     )
 
 
+def test_notification_dispatcher_sends_lifecycle_event_with_beijing_times(monkeypatch) -> None:
+    from okx_signal_system.notify import dispatcher
+
+    sent: list[str] = []
+
+    def fake_send_text(text: str, *args, **kwargs) -> bool:
+        sent.append(text)
+        return True
+
+    monkeypatch.setattr(dispatcher, "send_text", fake_send_text)
+
+    notify = dispatcher.NotificationDispatcher()
+    assert notify.send_lifecycle_event(
+        {
+            "outbox_id": "sig-1:TARGET_REACHED:2026-06-16T00:15:00+00:00",
+            "event_type": "TARGET_REACHED",
+            "payload": {
+                "status": "TARGET_REACHED",
+                "symbol": "BTC-USDT-SWAP",
+                "side": "long",
+                "tier": "A",
+                "score": 8.2,
+                "signal_time": "2026-06-16T00:00:00+00:00",
+                "lifecycle_event": {"at": "2026-06-16T00:15:00+00:00"},
+            },
+        }
+    )
+
+    text = sent[0]
+    assert "status: TARGET_REACHED" in text
+    assert "symbol: BTC-USDT-SWAP" in text
+    assert "side: long" in text
+    assert "tier: A" in text
+    assert "score: 8.2" in text
+    assert "signal_time: 2026-06-16 08:00:00 北京时间" in text
+    assert "send_time:" in text
+    assert "北京时间" in text
+    assert "UTC" not in text
+
+
 def test_b_tier_summary_is_not_sent_without_candidates(monkeypatch) -> None:
     sent: list[str] = []
 

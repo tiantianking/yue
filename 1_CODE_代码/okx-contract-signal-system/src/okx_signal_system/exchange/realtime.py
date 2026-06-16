@@ -28,6 +28,7 @@ from okx_signal_system.exchange.okx import (
     test_connection,
 )
 from okx_signal_system.io_atomic import read_parquet_with_retry, write_parquet_atomic
+from okx_signal_system.config import load_runtime_config
 from okx_signal_system.paths import find_lightweight_history, find_runtime_cache_root
 from okx_signal_system.strategy.trend_breakout import TradeSignal, StrategyParams
 from okx_signal_system.risk.model import (
@@ -935,7 +936,7 @@ class LiveSignalMonitor:
 
         # --- 风控模型 ---
         initial_equity = float(os.environ.get("INITIAL_EQUITY", 10000))
-        self._risk_cfg = RiskConfig(initial_equity=initial_equity)
+        self._risk_cfg = load_runtime_config().risk_config(initial_equity=initial_equity)
         self._ledger = Ledger(
             inst_id="portfolio",
             init_capital=initial_equity,

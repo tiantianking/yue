@@ -1,11 +1,15 @@
 ﻿from __future__ import annotations
 
 import re
+import subprocess
 import tomllib
 from pathlib import Path
+from types import SimpleNamespace
 from zipfile import ZipFile
 
 import okx_signal_system
+import pytest
+import scripts.build_release_zip as release_zip_builder
 from scripts.build_release_zip import build_release_zip
 from okx_signal_system.config import load_config
 
@@ -175,6 +179,94 @@ def test_release_zip_entries_use_posix_paths(tmp_path: Path) -> None:
     assert names
     assert all("\\" not in name for name in names)
     assert any("/" in name for name in names)
+
+
+def test_release_zip_denylist_filters_explicit_paths(tmp_path: Path) -> None:
+    safe_file = tmp_path / "src" / "safe.py"
+    env_file = tmp_path / ".env"
+    db_file = tmp_path / "runtime.sqlite"
+    safe_file.parent.mkdir(parents=True)
+    safe_file.write_text("print('safe')", encoding="utf-8")
+    env_file.write_text("FEISHU_WEBHOOK_URL=secret", encoding="utf-8")
+    db_file.write_text("sqlite", encoding="utf-8")
+    output_zip = tmp_path / "release.zip"
+
+    build_release_zip(
+        tmp_path,
+        output_zip,
+        paths=[safe_file.relative_to(tmp_path), env_file.relative_to(tmp_path), db_file.relative_to(tmp_path)],
+    )
+
+    with ZipFile(output_zip) as archive:
+        names = archive.namelist()
+
+    assert names == ["src/safe.py"]
+
+
+def test_release_zip_denylist_filters_git_tracked_sensitive_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    tracked_paths = [
+        "src/safe.py",
+        ".env",
+        ".env.local",
+        ".env.example",
+        "data/runtime.db",
+        "cache/state.json",
+        "outputs/report.csv",
+        "__pycache__/module.pyc",
+        "build.log",
+    ]
+    for path in tracked_paths:
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(path, encoding="utf-8")
+
+    def fake_run(*args, **kwargs):
+        stdout = b"\0".join(path.encode("utf-8") for path in tracked_paths) + b"\0"
+        return SimpleNamespace(stdout=stdout)
+
+    monkeypatch.setattr(release_zip_builder.subprocess, "run", fake_run)
+    output_zip = tmp_path / "release.zip"
+
+    build_release_zip(tmp_path, output_zip)
+
+    with ZipFile(output_zip) as archive:
+        names = archive.namelist()
+
+    assert names == [".env.example", "src/safe.py"]
+
+
+def test_release_zip_denylist_filters_non_git_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    paths = [
+        "src/safe.py",
+        ".env",
+        ".env.secret",
+        ".env.example",
+        "outputs/output/report.csv",
+        "output/report.csv",
+        "cache/state.json",
+        "123codexnpm-cache/package.tgz",
+        "__pycache__/module.pyc",
+        "runtime.sqlite3-wal",
+        "runtime.db",
+        "build.log",
+    ]
+    for path in paths:
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(path, encoding="utf-8")
+
+    def fake_run(*args, **kwargs):
+        raise subprocess.CalledProcessError(1, args[0])
+
+    monkeypatch.setattr(release_zip_builder.subprocess, "run", fake_run)
+    output_zip = tmp_path / "release.zip"
+
+    build_release_zip(tmp_path, output_zip)
+
+    with ZipFile(output_zip) as archive:
+        names = archive.namelist()
+
+    assert names == [".env.example", "src/safe.py"]
 
 
 def test_release_docs_do_not_advertise_live_order_defaults() -> None:

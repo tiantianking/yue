@@ -1,20 +1,38 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 
 import pandas as pd
 
 from okx_signal_system.risk.model import RiskConfig
 
+DEFAULT_PARTICIPATION_TIERS = (
+    {"max_rate": 0.001, "bps_add": 0.0},
+    {"max_rate": 0.005, "bps_add": 5.0},
+    {"max_rate": 0.01, "bps_add": 10.0},
+)
+DEFAULT_STRESS_FUNDING_RATES = (
+    {"rate": 0.0003, "hours": 8},
+    {"rate": 0.0001, "hours": 4},
+)
+
 
 @dataclass(frozen=True)
 class CostConfig:
     taker_fee_rate: float = 0.0006
+    maker_fee_rate: float = 0.0002
+    default_use_taker: bool = True
     normal_slippage_bps: float = 5.0
     stress_slippage_bps: float = 10.0
+    participation_tiers: tuple[dict[str, float], ...] = field(
+        default_factory=lambda: tuple(dict(tier) for tier in DEFAULT_PARTICIPATION_TIERS)
+    )
     funding_rate: float = 0.0001
     funding_interval_hours: int = 8
+    stress_funding_rates: tuple[dict[str, float], ...] = field(
+        default_factory=lambda: tuple(dict(rate) for rate in DEFAULT_STRESS_FUNDING_RATES)
+    )
 
 
 @dataclass(frozen=True)
@@ -50,8 +68,12 @@ def research_position_size(
     *,
     entry_price: float,
     stop_distance: float,
-    config: RiskConfig = RiskConfig(),
+    config: RiskConfig | None = None,
 ) -> tuple[float, float, float]:
+    if config is None:
+        from okx_signal_system.config import load_runtime_config
+
+        config = load_runtime_config().risk_config()
     risk_unit = float(config.initial_equity) * float(config.risk_per_trade_pct)
     if entry_price <= 0 or stop_distance <= 0 or risk_unit <= 0:
         raise ValueError("invalid_research_position_size")
@@ -106,9 +128,13 @@ def estimate_costs(
     qty: float,
     entry_time: pd.Timestamp,
     exit_time: pd.Timestamp,
-    config: CostConfig = CostConfig(),
+    config: CostConfig | None = None,
     slippage_bps: float | None = None,
 ) -> CostBreakdown:
+    if config is None:
+        from okx_signal_system.config import load_runtime_config
+
+        config = load_runtime_config().cost_config()
     notional_entry = abs(entry_price * qty)
     notional_exit = abs(exit_price * qty)
     entry_fee = notional_entry * config.taker_fee_rate

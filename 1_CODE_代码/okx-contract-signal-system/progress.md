@@ -312,3 +312,44 @@
 ### Notes
 - Modified files: `scripts/build_release_zip.py` adds the reusable release ZIP builder; `docs/RELEASE_SAFETY.md` documents ZIP packaging rules; `docs/SYSTEM_ARCHITECTURE.md` documents the v3.48 acceptance boundaries; `gui.py` routes notifications through the dispatcher and exposes Beijing status timestamps; `main.py` routes startup and signal notifications through the dispatcher; `pyproject.toml`, `src/okx_signal_system/__init__.py`, and `src/okx_contract_signal_system.egg-info/PKG-INFO` bump metadata to v3.48; `src/okx_signal_system/backtest/runner.py`, `src/okx_signal_system/risk/costs.py`, and `src/okx_signal_system/signal_quality/execution.py` share research sizing/cost assumptions; `src/okx_signal_system/config.py`, `src/okx_signal_system/signal_service/job.py`, `src/okx_signal_system/scheduler.py`, and `src/okx_signal_system/ml/trading_brain.py` consume typed runtime config and dispatcher paths; `src/okx_signal_system/exchange/realtime.py` handles concat warnings, dispatcher notification routing, and Beijing status output; `src/okx_signal_system/notify/__init__.py`, `src/okx_signal_system/notify/dispatcher.py`, and `src/okx_signal_system/notify/feishu.py` add the dispatcher and Beijing signal/send time behavior; `src/okx_signal_system/signal_quality/candidate.py`, `src/okx_signal_system/signal_quality/observation.py`, and `src/okx_signal_system/signal_service/scan.py` carry ATR-relative C-tier observations; `src/okx_signal_system/signal_quality/correlation.py` and `src/okx_signal_system/signal_quality/selector.py` enforce the correlation sample floor and explicit overrides; `src/okx_signal_system/signal_quality/lifecycle.py` adds terminal result states, compatible SQLite columns, and outbox auto-enqueueing; tests under `tests/` cover the release ZIP, config helpers, cost helpers, realtime concat guard, Feishu dispatcher/time behavior, lifecycle terminal states/outbox, ATR observation, labeler consistency, and scan service behavior.
 - Rollback: revert this commit after it is created, or before commit restore the listed files from the previous index state, remove `scripts/build_release_zip.py` and `src/okx_signal_system/notify/dispatcher.py`, then remove this appended progress entry.
+
+## 2026-06-17 - Task: release denylist, cooldown index, and historical volatility guard
+### What was done
+- Hardened release ZIP packaging with an internal denylist that filters sensitive env files, SQLite/database artifacts, caches, pyc files, build logs, and outputs in both git-tracked and fallback traversal paths.
+- Changed backtest cooldown handling to track the real bar index cutoff instead of decrementing by candidate count.
+- Replaced the extreme-volatility detector's full-sequence average with a historical-only expanding mean to remove future leakage.
+- Added focused regressions for release packaging safety, cooldown progression, and volatility lookahead safety.
+### Testing
+- `pytest tests/test_release_safety.py tests/test_backtest_signal_only.py tests/test_features.py -q` -> passed (`28 passed, 3 skipped`).
+### Notes
+- Modified files: `scripts/build_release_zip.py` adds the internal denylist and path guard; `src/okx_signal_system/backtest/runner.py` switches cooldown to a real bar index cutoff; `src/okx_signal_system/features/indicators.py` uses historical-only expanding volatility baseline; `tests/test_release_safety.py`, `tests/test_backtest_signal_only.py`, and `tests/test_features.py` add the focused regressions; `docs/RELEASE_SAFETY.md` records the packaging rule; `progress.md` records this round.
+- Rollback: restore the listed files from the previous index state, then remove this appended progress entry.
+
+## 2026-06-17 - Task: v3.49 acceptance report closure
+### What was done
+- Implemented v3.48 acceptance follow-up closure for research promotion, runtime configuration injection, lifecycle notification consumption, release packaging safety, cooldown indexing, and volatility lookahead protection.
+- Added common-calendar train/validation/blind research splits with purge/embargo buffers, finite-PF filtering, parameter-neighborhood stability gates, per-fold train/freeze/validate walk-forward behavior, and three-scenario historical cost stress replay artifacts.
+- Routed backtest, quality-label execution, GUI scan, realtime scan, sizing, and cost defaults through `RuntimeConfig` while preserving explicit test overrides.
+- Updated lifecycle terminal evaluation to use OHLC outcome rules and added lifecycle outbox worker delivery through `NotificationDispatcher`; lifecycle notification times are Beijing time.
+- Bumped package and visible version sources to v3.49.0.
+### Testing
+- `python -m py_compile src\okx_signal_system\backtest\research.py src\okx_signal_system\backtest\runner.py tests\test_strict_research.py` -> passed.
+- `py -3.12 -m pytest tests\test_strict_research.py tests\test_backtest.py tests\test_backtest_signal_only.py tests\test_costs.py tests\test_config.py tests\test_signal_lifecycle.py tests\test_feishu_notify.py tests\test_release_safety.py tests\test_features.py -q` -> passed with expected historical-data skips.
+- Full compile, full pytest, dashboard check/build, release zip build, and git diff checks will be run before commit.
+### Notes
+- Modified files: `src/okx_signal_system/backtest/research.py` adds research split, stability, walk-forward, blind, and cost stress logic; `src/okx_signal_system/backtest/grid_search.py` rejects infinite/low-sample PF ranking; `src/okx_signal_system/backtest/runner.py` adds runtime risk injection, real-index cooldown, and regime trade metadata; `src/okx_signal_system/config.py`, `src/okx_signal_system/risk/costs.py`, `src/okx_signal_system/risk/model.py`, `src/okx_signal_system/signal_quality/execution.py`, `gui.py`, and `src/okx_signal_system/exchange/realtime.py` extend runtime config injection; `src/okx_signal_system/signal_quality/lifecycle.py` and `src/okx_signal_system/notify/dispatcher.py` close lifecycle outbox delivery; `scripts/build_release_zip.py` and `docs/RELEASE_SAFETY.md` harden release packaging; `src/okx_signal_system/features/indicators.py` removes lookahead volatility averaging; version metadata files and tests under `tests/` cover this round.
+- Rollback: revert the v3.49 commit after it is created, or before commit restore the listed files from the previous index state and remove this appended progress entry.
+
+## 2026-06-17 - Task: v3.49 final validation and package
+### What was done
+- Completed final validation for the v3.49 acceptance closure after integrating all parallel worker changes.
+- Built the desktop release ZIP at `C:\Users\26492\Desktop\okx-contract-signal-system-v3.49.0.zip` and verified its entries use POSIX separators and exclude sensitive/runtime artifacts while retaining `.env.example`.
+### Testing
+- `python -m compileall -q src main.py gui.py tests` -> passed.
+- `py -3.12 -m pytest -q` -> passed with expected historical-data skips.
+- `npm.cmd run check` in `dashboard` -> lint and production build passed.
+- `git diff --check` -> passed; Git reported LF-to-CRLF working-copy normalization warnings only.
+- Release ZIP verification -> 159 entries, 0 backslash entries, 0 denied sensitive/runtime artifacts, `.env.example` retained.
+### Notes
+- Modified files: same v3.49 acceptance closure files listed in the preceding progress entry; this entry records final verification and package generation only.
+- Rollback: revert the v3.49 commit after it is created, and delete `C:\Users\26492\Desktop\okx-contract-signal-system-v3.49.0.zip` if the packaged artifact should be removed.

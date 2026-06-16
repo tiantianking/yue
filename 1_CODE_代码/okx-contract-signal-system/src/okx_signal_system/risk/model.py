@@ -171,7 +171,11 @@ def smart_leverage_for_signal(signal: TradeSignal, ledger: Ledger, config: RiskC
     return float(max(1.0, min(target, cap, config.max_leverage, 10.0)))
 
 
-def estimated_liquidation_buffer_pct(leverage_used: float, config: RiskConfig = RiskConfig()) -> float:
+def estimated_liquidation_buffer_pct(leverage_used: float, config: RiskConfig | None = None) -> float:
+    if config is None:
+        from okx_signal_system.config import load_runtime_config
+
+        config = load_runtime_config().risk_config()
     if leverage_used <= 1:
         return 1.0
     return max(0.0, (1.0 / leverage_used) - config.maintenance_margin_rate - config.liquidation_cost_buffer_pct)
@@ -210,7 +214,15 @@ def _reject(
     )
 
 
-def validate_signal(signal: TradeSignal, ledger: Ledger | None = None, config: RiskConfig = RiskConfig()) -> SignalRiskAssessment:
+def validate_signal(
+    signal: TradeSignal,
+    ledger: Ledger | None = None,
+    config: RiskConfig | None = None,
+) -> SignalRiskAssessment:
+    if config is None:
+        from okx_signal_system.config import load_runtime_config
+
+        config = load_runtime_config().risk_config()
     if not signal.accepted:
         return _reject(signal.reject_reason or "signal_rejected", signal=signal)
     if signal.entry_ref is None or signal.stop_loss is None or signal.take_profit is None or signal.max_hold_bars is None:

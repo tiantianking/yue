@@ -12,6 +12,14 @@ from okx_signal_system.strategy.vote_gate import DEFAULT_MIN_VOTE_APPROVAL_RATE
 from okx_signal_system.timeframe import normalize_timeframe
 
 
+def _finite_metric(value: object) -> bool:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return False
+    return pd.notna(numeric) and numeric not in {float("inf"), float("-inf")}
+
+
 def parameter_grid(timeframe: str = "15m") -> list[StrategyParams]:
     tf = normalize_timeframe(timeframe)
     if tf == "15m":
@@ -95,7 +103,7 @@ def run_grid_search(
     return pd.DataFrame(rows)
 
 
-def select_best_params(grid_results: pd.DataFrame) -> StrategyParams:
+def select_best_params(grid_results: pd.DataFrame, *, min_total_trades: int = 1) -> StrategyParams:
     """
     参数选择策略：以盈亏比(Profit Factor)为主，胜率为辅助参考
 
@@ -107,9 +115,15 @@ def select_best_params(grid_results: pd.DataFrame) -> StrategyParams:
     if grid_results.empty:
         raise ValueError("grid results are empty")
     ranked = grid_results.copy()
+    ranked = ranked[
+        ranked["train_profit_factor"].map(_finite_metric)
+        & (ranked["train_total_trades"].fillna(0).astype(float) >= float(min_total_trades))
+    ].copy()
+    if ranked.empty:
+        raise ValueError("no finite grid result passed the selection gates")
 
     # 标准化盈亏比（处理inf情况）
-    ranked["rank_pf"] = ranked["train_profit_factor"].replace(float("inf"), 999999)
+    ranked["rank_pf"] = ranked["train_profit_factor"].astype(float)
 
     # 按盈亏比为主、胜率为辅排序
     ranked = ranked.sort_values(

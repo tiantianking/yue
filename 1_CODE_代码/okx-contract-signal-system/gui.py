@@ -796,7 +796,7 @@ class OKXSignalGUI:
     def load_symbols(self):
         """加载监控币种列表"""
         try:
-            from okx_signal_system.config import load_config
+            from okx_signal_system.config import load_config, load_runtime_config
             config = load_config("base.yaml")
             symbols = config.get('data', {}).get('symbols', ['BTC-USDT-SWAP'])
             
@@ -1145,7 +1145,7 @@ class OKXSignalGUI:
             from okx_signal_system.strategy.trend_breakout import StrategyParams
             from okx_signal_system.config import load_config
             from okx_signal_system.ml.regime_adaptive import AdaptiveParamsManager
-            from okx_signal_system.risk.model import Ledger, RiskConfig
+            from okx_signal_system.risk.model import Ledger
             from okx_signal_system.signal_quality import SignalCandidate
             from okx_signal_system.signal_service import SignalScanContext, SignalScanService
             from okx_signal_system.strategy.vote_gate import min_vote_approval_rate
@@ -1173,6 +1173,7 @@ class OKXSignalGUI:
             )
             trained_params = getattr(self, '_trained_params', None)
             base_params = trained_params if trained_params is not None else base_params
+            runtime_risk = load_runtime_config().risk_config()
 
             # 初始化自适应参数管理器（单例）
             if not hasattr(self, '_adaptive_manager'):
@@ -1198,8 +1199,8 @@ class OKXSignalGUI:
                     signal_timeframe=self.api.timeframe.key,
                     trend_timeframe=self.api.trend_timeframe.key,
                     strategy_params=base_params,
-                    risk_config=RiskConfig(max_leverage=float(_first_or_val(config.get('risk', {}).get('max_leverage'), 10.0))),
-                    ledger=Ledger(inst_id="desktop", init_capital=10000, equity=10000),
+                    risk_config=runtime_risk,
+                    ledger=Ledger(inst_id="desktop", init_capital=runtime_risk.initial_equity, equity=runtime_risk.initial_equity),
                     quality_gate_allows_push=getattr(self, '_quality_gate_allows_push', False),
                     min_vote_approval_rate=min_vote_rate,
                     mode="desktop_manual_confirmation_only",

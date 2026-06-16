@@ -39,9 +39,17 @@ def simulate_signal_execution(
     signal: TradeSignal,
     future_bars: pd.DataFrame,
     *,
-    risk_config: RiskConfig = RiskConfig(),
-    cost_config: CostConfig = CostConfig(),
+    risk_config: RiskConfig | None = None,
+    cost_config: CostConfig | None = None,
 ) -> SignalExecutionResult | None:
+    if risk_config is None or cost_config is None:
+        from okx_signal_system.config import load_runtime_config
+
+        runtime_config = load_runtime_config()
+        if risk_config is None:
+            risk_config = runtime_config.risk_config()
+        if cost_config is None:
+            cost_config = runtime_config.cost_config()
     result = SignalOutcomeSimulator().simulate_signal(
         signal,
         future_bars,
