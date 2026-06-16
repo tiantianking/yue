@@ -1,7 +1,15 @@
 import pandas as pd
 import pytest
 
-from okx_signal_system.risk.costs import estimate_costs, funding_events_crossed, participation_rate, slippage_bps_for_participation
+from okx_signal_system.risk.costs import (
+    estimate_costs,
+    funding_events_crossed,
+    participation_rate,
+    research_position_size,
+    research_slippage_bps,
+    slippage_bps_for_participation,
+)
+from okx_signal_system.risk.model import RiskConfig
 
 
 def test_participation_tiers_reject_over_one_percent() -> None:
@@ -38,6 +46,35 @@ def test_estimate_costs_includes_all_cost_layers() -> None:
     assert costs.slippage_cost > 0
     assert costs.funding_fee > 0
     assert costs.total == costs.entry_fee + costs.exit_fee + costs.slippage_cost + costs.funding_fee
+
+
+def test_research_position_size_uses_shared_risk_unit() -> None:
+    qty, risk_unit, notional = research_position_size(
+        entry_price=100,
+        stop_distance=5,
+        config=RiskConfig(initial_equity=10000, risk_per_trade_pct=0.01),
+    )
+
+    assert qty == 20.0
+    assert risk_unit == 100.0
+    assert notional == 2000.0
+
+
+def test_research_slippage_uses_research_notional_for_participation() -> None:
+    assert research_slippage_bps(
+        notional=2000,
+        close=100,
+        volume=1000,
+        quote_volume=1_000_000,
+    ) == 10.0
+
+    with pytest.raises(ValueError):
+        research_slippage_bps(
+            notional=2000,
+            close=100,
+            volume=1000,
+            quote_volume=100_000,
+        )
 
 
 def test_cost_module_has_no_exchange_execution_dependency() -> None:

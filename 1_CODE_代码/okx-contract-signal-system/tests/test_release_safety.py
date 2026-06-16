@@ -3,8 +3,10 @@
 import re
 import tomllib
 from pathlib import Path
+from zipfile import ZipFile
 
 import okx_signal_system
+from scripts.build_release_zip import build_release_zip
 from okx_signal_system.config import load_config
 
 
@@ -157,6 +159,22 @@ def test_source_archive_export_ignores_runtime_artifacts() -> None:
         "*.db export-ignore",
     ]:
         assert pattern in lines
+
+
+def test_release_zip_entries_use_posix_paths(tmp_path: Path) -> None:
+    nested_file = tmp_path / "nested" / "release" / "file.txt"
+    nested_file.parent.mkdir(parents=True)
+    nested_file.write_text("release", encoding="utf-8")
+    output_zip = tmp_path / "release.zip"
+
+    build_release_zip(tmp_path, output_zip, paths=[nested_file.relative_to(tmp_path)])
+
+    with ZipFile(output_zip) as archive:
+        names = archive.namelist()
+
+    assert names
+    assert all("\\" not in name for name in names)
+    assert any("/" in name for name in names)
 
 
 def test_release_docs_do_not_advertise_live_order_defaults() -> None:

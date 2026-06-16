@@ -3,7 +3,8 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from okx_signal_system.risk.costs import CostConfig, estimate_costs
+from okx_signal_system.risk.costs import CostConfig, estimate_costs, research_position_size
+from okx_signal_system.risk.model import RiskConfig
 from okx_signal_system.signal_quality.execution import simulate_signal_execution
 from okx_signal_system.signal_quality.labeler import label_signal
 from okx_signal_system.signal_quality.outcome import SIGNAL_OUTCOME_POLICY, SignalOutcomeSimulator
@@ -56,16 +57,21 @@ def _expected_net_r(signal: TradeSignal, exit_price: float, exit_time: str, *, e
     entry = float(signal.entry_ref if entry_price is None else entry_price)
     stop_dist = abs(float(signal.entry_ref) - float(signal.stop_loss))
     side_mult = 1.0 if signal.side == "long" else -1.0
+    qty, risk_unit, _notional = research_position_size(
+        entry_price=entry,
+        stop_distance=stop_dist,
+        config=RiskConfig(),
+    )
     costs = estimate_costs(
         entry_price=entry,
         exit_price=exit_price,
-        qty=1.0,
+        qty=qty,
         entry_time=pd.Timestamp(signal.ts if entry_time is None else entry_time),
         exit_time=pd.Timestamp(exit_time),
         config=CostConfig(),
         slippage_bps=CostConfig().normal_slippage_bps,
     )
-    return (((exit_price - entry) * side_mult) - costs.total) / stop_dist
+    return (((exit_price - entry) * qty * side_mult) - costs.total) / risk_unit
 
 
 def test_label_signal_exits_at_take_profit() -> None:

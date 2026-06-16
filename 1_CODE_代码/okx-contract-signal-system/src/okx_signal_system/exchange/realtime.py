@@ -42,6 +42,7 @@ from okx_signal_system.signal_quality import (
     TieredSelection,
 )
 from okx_signal_system.signal_service import SignalScanContext, SignalScanService
+from okx_signal_system.notify import NotificationDispatcher
 from okx_signal_system.timeframe import default_trend_timeframe, ratio_bars, timeframe_spec
 
 log = logging.getLogger(__name__)
@@ -115,12 +116,31 @@ def _write_parquet_atomic(frame: pd.DataFrame, path: Path) -> None:
     write_parquet_atomic(frame, path)
 
 
+def _concat_live_row(existing: pd.DataFrame, new_row: pd.DataFrame) -> pd.DataFrame:
+    columns = list(dict.fromkeys([*existing.columns, *new_row.columns]))
+    frames = [
+        frame.dropna(axis=1, how="all")
+        for frame in (existing, new_row)
+        if not frame.empty and not frame.isna().all(axis=None)
+    ]
+    if len(frames) == 1:
+        return frames[0].reindex(columns=columns)
+    return pd.concat(frames, ignore_index=True).reindex(columns=columns)
+
+
 def _json_default(value: Any) -> Any:
     if isinstance(value, (datetime, pd.Timestamp)):
         return value.isoformat()
     if hasattr(value, "item"):
         return value.item()
     return str(value)
+
+
+def _beijing_text(value: Any) -> str:
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    return ts.tz_convert("Asia/Shanghai").strftime("%Y-%m-%d %H:%M:%S 北京时间")
 
 
 def _write_json_atomic(payload: dict[str, Any], path: Path) -> None:
@@ -296,7 +316,7 @@ class RealtimeDataStore:
 
         # Merge then de-duplicate instead of assigning by row; old parquet
         # columns may have stricter dtypes than live float payloads.
-        df = pd.concat([df, new_row], ignore_index=True)
+        df = _concat_live_row(df, new_row)
         df["ts"] = pd.to_datetime(df["ts"], utc=True)
         df = df.drop_duplicates(subset=["ts"], keep="last").sort_values("ts").reset_index(drop=True)
 
@@ -951,6 +971,7 @@ class LiveSignalMonitor:
 
         self._signal_notification_store = SignalNotificationStore()
         self._b_tier_summary_store = BTierSummaryNotificationStore()
+        self._notification_dispatcher = NotificationDispatcher(self._lifecycle_store)
         try:
             from okx_signal_system.config import project_paths
             self._scan_status_path = project_paths().output_dir / "latest_scan_status.json"
@@ -1118,8 +1139,10 @@ class LiveSignalMonitor:
         except Exception:
             lifecycle_summary = {}
         ws_status = self.api._ws_client.status() if self.api._ws_client else None
+        generated_at = datetime.now(timezone.utc)
         payload = {
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": generated_at.isoformat(),
+            "generated_at_beijing": _beijing_text(generated_at),
             "status": "error" if error else "running",
             "error": error,
             "dataset": self.api.dataset,
@@ -1143,10 +1166,9 @@ class LiveSignalMonitor:
 
     def _send_candidate_health_report(self, items: list[dict[str, Any]]) -> None:
         try:
-            from okx_signal_system.notify.feishu import send_candidate_health_report
             shadow_summary = self._shadow_ledger.summary()
 
-            send_candidate_health_report(
+            self._notification_dispatcher.send_candidate_health_report(
                 items=items,
                 push_allowed=self._quality_gate_allows_push,
                 selected_params={
@@ -1210,31 +1232,11 @@ class LiveSignalMonitor:
                     signal_recorded = False
             else:
                 try:
-                    from okx_signal_system.notify.feishu import send_signal_observation
-
-                    signal_recorded = send_signal_observation(
-                        inst_id=signal.inst_id,
-                        side=signal.side,
-                        entry_ref=signal.entry_ref or 0,
-                        stop_loss=signal.stop_loss or 0,
-                        take_profit=signal.take_profit or 0,
-                        reason=", ".join(signal.reason_codes) if signal.reason_codes else "",
-                        signal_score=decision.signal_score,
-                        risk_reward_ratio=decision.risk_reward_ratio,
-                        stop_reason=decision.stop_reason or "",
-                        tp_reason=decision.tp_reason or "",
-                        kline_time=pd.Timestamp(signal.ts).isoformat(),
+                    candidate.health_item["total_candidates"] = len(selection.ranked)
+                    signal_recorded = self._notification_dispatcher.send_a_tier_signal(
+                        candidate,
                         signal_timeframe=self.api.timeframe.key,
                         trend_timeframe=self.api.trend_timeframe.key,
-                        tier=candidate.tier,
-                        rank=candidate.rank,
-                        total_candidates=len(selection.ranked),
-                        lifecycle_status=(candidate.payload.get("lifecycle") or {}).get("status"),
-                        invalidation_price=candidate.invalidation_price,
-                        quality_model=(
-                            candidate.payload.get("quality_model")
-                            or candidate.health_item.get("quality_model")
-                        ),
                     )
                     if signal_recorded:
                         self._lifecycle_store.mark_notification_sent(candidate.notify_key)
@@ -1257,9 +1259,7 @@ class LiveSignalMonitor:
                 log.info("B-tier summary already sent for this candle: %s", summary_key)
             else:
                 try:
-                    from okx_signal_system.notify.feishu import send_b_tier_summary
-
-                    summary_sent = send_b_tier_summary(
+                    summary_sent = self._notification_dispatcher.send_b_tier_summary(
                         selection.tier_b,
                         total_candidates=len(selection.ranked),
                         signal_timeframe=self.api.timeframe.key,

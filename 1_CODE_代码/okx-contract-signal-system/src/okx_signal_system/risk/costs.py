@@ -5,6 +5,8 @@ from datetime import timedelta
 
 import pandas as pd
 
+from okx_signal_system.risk.model import RiskConfig
+
 
 @dataclass(frozen=True)
 class CostConfig:
@@ -42,6 +44,37 @@ def slippage_bps_for_participation(rate: float, *, base_bps: float = 5.0) -> flo
     if rate <= 0.01:
         return base_bps + 10.0
     raise ValueError("participation rate exceeds 1 percent")
+
+
+def research_position_size(
+    *,
+    entry_price: float,
+    stop_distance: float,
+    config: RiskConfig = RiskConfig(),
+) -> tuple[float, float, float]:
+    risk_unit = float(config.initial_equity) * float(config.risk_per_trade_pct)
+    if entry_price <= 0 or stop_distance <= 0 or risk_unit <= 0:
+        raise ValueError("invalid_research_position_size")
+    qty = risk_unit / stop_distance
+    notional = abs(entry_price * qty)
+    return float(qty), float(risk_unit), float(notional)
+
+
+def research_slippage_bps(
+    *,
+    notional: float,
+    close: float,
+    volume: float,
+    quote_volume: float | None = None,
+    base_bps: float = 5.0,
+) -> float:
+    rate = participation_rate(
+        notional=notional,
+        close=close,
+        volume=volume,
+        quote_volume=quote_volume,
+    )
+    return slippage_bps_for_participation(rate, base_bps=base_bps)
 
 
 def funding_events_crossed(

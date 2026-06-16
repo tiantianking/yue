@@ -81,6 +81,10 @@ def test_runtime_config_merges_declared_config_files() -> None:
     assert "risk" in runtime_config.risk
     assert "fees" in runtime_config.fees
     assert len(runtime_config.sha256) == 64
+    assert runtime_config.risk_config().initial_equity == 10000
+    assert runtime_config.risk_config().max_leverage == 10
+    assert runtime_config.cost_config().normal_slippage_bps == 5
+    assert runtime_config.cost_config().funding_interval_hours == 8
 
 
 def test_effective_config_writes_hash_and_inputs(tmp_path) -> None:

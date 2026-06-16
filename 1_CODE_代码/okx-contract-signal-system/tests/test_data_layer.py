@@ -311,6 +311,52 @@ def test_realtime_store_overwrites_same_bar_without_dtype_error(tmp_path) -> Non
     assert frame.iloc[-1]["volume"] == 90035.49768
 
 
+@pytest.mark.parametrize(
+    "cached_frame",
+    [
+        pd.DataFrame(columns=["ts", "open", "high", "low", "close", "volume", "quote_volume"]),
+        pd.DataFrame(
+            {
+                "ts": [pd.NaT],
+                "open": [pd.NA],
+                "high": [pd.NA],
+                "low": [pd.NA],
+                "close": [pd.NA],
+                "volume": [pd.NA],
+                "quote_volume": [pd.NA],
+            }
+        ),
+    ],
+)
+def test_realtime_store_appends_to_empty_or_all_na_cache_without_concat(tmp_path, monkeypatch, cached_frame) -> None:
+    store = RealtimeDataStore(tmp_path, timeframe="15m")
+    inst_id = "SOL-USDT-SWAP"
+    if not cached_frame.empty or list(cached_frame.columns):
+        store._cache[inst_id] = cached_frame
+
+    def fail_concat(*args, **kwargs):
+        raise AssertionError("pd.concat should not be used for empty or all-NA live caches")
+
+    monkeypatch.setattr("okx_signal_system.exchange.realtime.pd.concat", fail_concat)
+
+    store.append_candle(
+        inst_id,
+        {
+            "ts": "2026-06-15T18:00:00Z",
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.5,
+            "volume": 10.0,
+            "quote_volume": 1000.0,
+        },
+    )
+
+    frame = store.load(inst_id)
+    assert len(frame) == 1
+    assert frame.iloc[-1]["close"] == 100.5
+
+
 def test_realtime_store_writes_runtime_cache_without_mutating_history(tmp_path) -> None:
     history = tmp_path / "history"
     runtime = tmp_path / "runtime"

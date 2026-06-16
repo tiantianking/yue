@@ -164,9 +164,11 @@ def send_signal_observation(
     tp_pct = abs(take_profit - entry_ref) / entry_ref * 100 if entry_ref else 0.0
     rr = risk_reward_ratio if risk_reward_ratio is not None else (tp_pct / stop_pct if stop_pct else 0.0)
     title = f"OKX {tier}级信号观察" if tier else "OKX 信号观察"
+    signal_time_text = _format_beijing_time(kline_time) if kline_time else _now_beijing_text()
     lines = [
         title,
-        f"信号生成时间: {_now_beijing_text()}",
+        f"信号生成时间: {signal_time_text}",
+        f"通知发送时间: {_now_beijing_text()}",
         f"币种: {inst_id}",
         f"方向: {'做多' if direction == 'LONG' else '做空'}",
         f"入场: {entry_ref:.8f}",

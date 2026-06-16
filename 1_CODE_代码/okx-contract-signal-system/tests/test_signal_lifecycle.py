@@ -5,7 +5,7 @@ import sqlite3
 
 import pandas as pd
 
-from okx_signal_system.signal_quality import SignalLifecycleStore, lifecycle_payload
+from okx_signal_system.signal_quality.lifecycle import SignalLifecycleStore, lifecycle_payload
 from okx_signal_system.strategy.trend_breakout import TradeSignal
 
 
@@ -28,9 +28,9 @@ def _frame(rows: list[dict]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def test_lifecycle_confirmed_after_later_closed_candle(tmp_path) -> None:
+def test_lifecycle_target_reached_after_confirmation(tmp_path) -> None:
     store = SignalLifecycleStore(tmp_path / "lifecycle.json")
-    signal = _signal()
+    signal = _signal(take_profit=115.0)
     record = store.record_signal(signal, signal_id="sig-1")
     assert record is not None
     assert record.status == "TRIGGERED"
@@ -46,51 +46,55 @@ def test_lifecycle_confirmed_after_later_closed_candle(tmp_path) -> None:
     second = _frame(
         [
             {"ts": pd.Timestamp("2026-01-01T00:15:00Z"), "close": 99.0, "is_closed": True},
-            {"ts": pd.Timestamp("2026-01-01T00:30:00Z"), "close": 101.0, "is_closed": True},
+            {"ts": pd.Timestamp("2026-01-01T00:30:00Z"), "close": 115.0, "is_closed": True},
         ]
     )
     assert store.update_symbol("BTC-USDT-SWAP", second) == 1
     record = store.get("sig-1")
-    assert record.status == "CONFIRMED"
+    assert record.status == "TARGET_REACHED"
     payload = lifecycle_payload(record)
-    assert payload["state"] == "CONFIRMED"
+    assert payload["state"] == "TARGET_REACHED"
     assert payload["lifecycle_event"] == {
-        "type": "CONFIRMED",
+        "type": "TARGET_REACHED",
         "at": "2026-01-01T00:30:00+00:00",
     }
+    assert payload["target_price"] == 115.0
+    assert payload["take_profit"] == 115.0
+    assert payload["target_reached_at"] == "2026-01-01T00:30:00+00:00"
     assert payload["last_updated_at"]
 
     summary = store.summary()
     assert summary["triggered"] == 0
-    assert summary["confirmed"] == 1
-    assert summary["active"] == 1
-    assert summary["terminal"] == 0
-    assert summary["latest_event_type"] == "CONFIRMED"
+    assert summary["target_reached"] == 1
+    assert summary["active"] == 0
+    assert summary["terminal"] == 1
+    assert summary["latest_event_type"] == "TARGET_REACHED"
     assert summary["latest_event_at"] == "2026-01-01T00:30:00+00:00"
 
 
-def test_lifecycle_invalidates_on_immediate_reversal(tmp_path) -> None:
+def test_lifecycle_stop_reached_after_confirmation(tmp_path) -> None:
     store = SignalLifecycleStore(tmp_path / "lifecycle.json")
-    signal = _signal(stop_loss=95.0)
+    signal = _signal(stop_loss=95.0, take_profit=115.0)
     store.record_signal(signal, signal_id="sig-2")
 
     frame = _frame(
         [
-            {"ts": pd.Timestamp("2026-01-01T00:15:00Z"), "close": 94.5, "is_closed": True},
+            {"ts": pd.Timestamp("2026-01-01T00:15:00Z"), "close": 101.0, "is_closed": True},
+            {"ts": pd.Timestamp("2026-01-01T00:30:00Z"), "close": 94.5, "is_closed": True},
         ]
     )
     assert store.update_symbol("BTC-USDT-SWAP", frame) == 1
     record = store.get("sig-2")
-    assert record.status == "INVALIDATED"
-    assert record.invalidated_at is not None
+    assert record.status == "STOP_REACHED"
+    assert record.stop_reached_at is not None
     payload = lifecycle_payload(record)
-    assert payload["lifecycle_event"]["type"] == "INVALIDATED"
-    assert payload["invalidated_at"] == "2026-01-01T00:15:00+00:00"
+    assert payload["lifecycle_event"]["type"] == "STOP_REACHED"
+    assert payload["stop_reached_at"] == "2026-01-01T00:30:00+00:00"
 
     summary = store.summary()
-    assert summary["invalidated"] == 1
+    assert summary["stop_reached"] == 1
     assert summary["terminal"] == 1
-    assert summary["latest_event_type"] == "INVALIDATED"
+    assert summary["latest_event_type"] == "STOP_REACHED"
 
 
 def test_lifecycle_ignores_unclosed_reversal(tmp_path) -> None:
@@ -135,6 +139,31 @@ def test_lifecycle_expires_after_hold_limit(tmp_path) -> None:
     assert summary["terminal"] == 1
 
 
+def test_lifecycle_timeout_result_after_confirmation(tmp_path) -> None:
+    store = SignalLifecycleStore(tmp_path / "lifecycle.json")
+    signal = _signal(max_hold_bars=2, take_profit=120.0)
+    store.record_signal(signal, signal_id="sig-timeout-result")
+
+    frame = _frame(
+        [
+            {"ts": pd.Timestamp("2026-01-01T00:15:00Z"), "close": 101.0, "is_closed": True},
+            {"ts": pd.Timestamp("2026-01-01T00:30:00Z"), "close": 102.0, "is_closed": True},
+        ]
+    )
+    assert store.update_symbol("BTC-USDT-SWAP", frame) == 1
+    record = store.get("sig-timeout-result")
+    assert record.status == "TIMEOUT_RESULT"
+    assert record.timeout_result_at == "2026-01-01T00:30:00+00:00"
+    payload = lifecycle_payload(record)
+    assert payload["lifecycle_event"] == {
+        "type": "TIMEOUT_RESULT",
+        "at": "2026-01-01T00:30:00+00:00",
+    }
+    summary = store.summary()
+    assert summary["timeout_result"] == 1
+    assert summary["terminal"] == 1
+
+
 def test_lifecycle_persists_records(tmp_path) -> None:
     path = tmp_path / "lifecycle.json"
     store = SignalLifecycleStore(path)
@@ -175,23 +204,16 @@ def test_lifecycle_record_signal_is_idempotent_and_persistence_is_stable(tmp_pat
 def test_lifecycle_sqlite_schema_records_events_and_outbox(tmp_path) -> None:
     path = tmp_path / "lifecycle.sqlite3"
     store = SignalLifecycleStore(path)
-    store.record_signal(_signal(), signal_id="sig-sqlite")
+    store.record_signal(_signal(take_profit=115.0), signal_id="sig-sqlite")
     store.update_symbol(
         "BTC-USDT-SWAP",
         _frame(
             [
                 {"ts": pd.Timestamp("2026-01-01T00:15:00Z"), "close": 101.0, "is_closed": True},
+                {"ts": pd.Timestamp("2026-01-01T00:30:00Z"), "close": 115.0, "is_closed": True},
             ]
         ),
     )
-    store.enqueue_notification(
-        "outbox-1",
-        signal_id="sig-sqlite",
-        event_type="A_TIER_SIGNAL",
-        payload={"symbol": "BTC-USDT-SWAP"},
-    )
-    assert store.pending_notifications()[0]["outbox_id"] == "outbox-1"
-    store.mark_notification_sent("outbox-1")
 
     with sqlite3.connect(path) as conn:
         tables = {
@@ -205,15 +227,23 @@ def test_lifecycle_sqlite_schema_records_events_and_outbox(tmp_path) -> None:
             ("sig-sqlite",),
         ).fetchall()
         outbox = conn.execute(
-            "SELECT status, sent_at FROM notification_outbox WHERE outbox_id = ?",
-            ("outbox-1",),
-        ).fetchone()
+            "SELECT outbox_id, status, payload_json FROM notification_outbox WHERE signal_id = ? ORDER BY created_at",
+            ("sig-sqlite",),
+        ).fetchall()
 
     assert {"lifecycle_records", "lifecycle_events", "notification_outbox"}.issubset(tables)
-    assert events == [("TRIGGERED", "TRIGGERED"), ("CONFIRMED", "CONFIRMED")]
-    assert outbox[0] == "SENT"
-    assert outbox[1]
-    assert store.summary()["outbox"]["sent"] == 1
+    assert events == [("TRIGGERED", "TRIGGERED"), ("CONFIRMED", "CONFIRMED"), ("TARGET_REACHED", "TARGET_REACHED")]
+    assert [row[0] for row in outbox] == [
+        "sig-sqlite:TRIGGERED:2026-01-01T00:00:00+00:00",
+        "sig-sqlite:CONFIRMED:2026-01-01T00:15:00+00:00",
+        "sig-sqlite:TARGET_REACHED:2026-01-01T00:30:00+00:00",
+    ]
+    assert [row[1] for row in outbox] == ["PENDING", "PENDING", "PENDING"]
+    assert json.loads(outbox[-1][2])["state"] == "TARGET_REACHED"
+    assert store.summary()["outbox"]["pending"] == 3
+    pending = store.pending_notifications()
+    assert [item["outbox_id"] for item in pending] == [row[0] for row in outbox]
+    assert len({item["outbox_id"] for item in pending}) == len(pending)
 
 
 def test_lifecycle_migrates_legacy_json_to_sqlite(tmp_path) -> None:
@@ -228,10 +258,12 @@ def test_lifecycle_migrates_legacy_json_to_sqlite(tmp_path) -> None:
                     "signal_time": "2026-01-01T00:00:00+00:00",
                     "entry_ref": 100.0,
                     "invalidation_price": 95.0,
+                    "take_profit": 115.0,
                     "max_hold_bars": 3,
-                    "status": "TRIGGERED",
-                    "last_event_type": "TRIGGERED",
-                    "last_event_at": "2026-01-01T00:00:00+00:00",
+                    "status": "TARGET_REACHED",
+                    "target_reached_at": "2026-01-01T00:30:00+00:00",
+                    "last_event_type": "TARGET_REACHED",
+                    "last_event_at": "2026-01-01T00:30:00+00:00",
                     "created_at": "2026-01-01T00:00:00+00:00",
                     "updated_at": "2026-01-01T00:00:00+00:00",
                 }
@@ -243,9 +275,11 @@ def test_lifecycle_migrates_legacy_json_to_sqlite(tmp_path) -> None:
     store = SignalLifecycleStore(tmp_path / "lifecycle.sqlite3")
 
     assert store.get("legacy-sig") is not None
+    assert store.get("legacy-sig").take_profit == 115.0
     with sqlite3.connect(tmp_path / "lifecycle.sqlite3") as conn:
         assert conn.execute("SELECT COUNT(*) FROM lifecycle_records").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM lifecycle_events").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM notification_outbox").fetchone()[0] == 1
 
 
 def test_gui_lifecycle_table_values_match_visible_columns(tmp_path) -> None:

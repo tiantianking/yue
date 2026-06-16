@@ -19,7 +19,12 @@ from okx_signal_system.signal_quality import (
     lifecycle_payload,
 )
 from okx_signal_system.signal_quality.candidate import CandidateLike, ObservationCandidate
-from okx_signal_system.signal_quality.observation import NEAR_BREAKOUT_GAP_PCT, near_breakout_observation
+from okx_signal_system.signal_quality.correlation import DEFAULT_MIN_CORRELATION_SAMPLES
+from okx_signal_system.signal_quality.observation import (
+    NEAR_BREAKOUT_DISTANCE_ATR,
+    breakout_distance_atr,
+    near_breakout_observation,
+)
 from okx_signal_system.signal_quality.selector import TieredSelection
 from okx_signal_system.signal_runtime import DEFAULT_MAX_SIGNAL_LAG_MINUTES, signal_is_stale
 from okx_signal_system.strategy.ensemble import ensemble_vote
@@ -98,6 +103,7 @@ class SignalScanContext:
     checked_bars: dict[str, str] | None = None
     send_health_report: bool = False
     shadow_score_min_closed: int = 6
+    correlation_min_samples: int = DEFAULT_MIN_CORRELATION_SAMPLES
 
 
 @dataclass(frozen=True)
@@ -366,6 +372,7 @@ class SignalScanService:
             observation_candidates=observation_candidates,
             max_tier_a=2,
             price_history=candidate_history,
+            min_correlation_samples=context.correlation_min_samples,
         )
         for candidate in selection.ranked:
             candidate.health_item["tier"] = candidate.tier
@@ -441,6 +448,7 @@ class SignalScanService:
             "shadow_adjustment": float(shadow_adjustment) if shadow_adjustment is not None else None,
             "quality_model": quality_model,
             "breakout_gap_pct": breakout_gap_pct(row),
+            "breakout_distance_atr": breakout_distance_atr(row),
         }
 
     @staticmethod
@@ -510,7 +518,7 @@ class SignalScanService:
         if observation is None:
             return None
 
-        side, close, breakout_level, gap_pct = observation
+        side, close, breakout_level, gap_pct, distance_atr = observation
         health_item = SignalScanService._candidate_health_item(
             inst_id=inst_id,
             reason="near_breakout_observation",
@@ -527,10 +535,11 @@ class SignalScanService:
                 "observation_status": "not_triggered",
                 "breakout_level": breakout_level,
                 "breakout_gap_pct": gap_pct,
+                "breakout_distance_atr": distance_atr,
             }
         )
         candle_time = pd.Timestamp(row.get("ts"))
-        score = max(0.0, 1.0 - gap_pct / NEAR_BREAKOUT_GAP_PCT)
+        score = max(0.0, 1.0 - distance_atr / NEAR_BREAKOUT_DISTANCE_ATR)
         payload = {
             "signal": {
                 "ts": candle_time.isoformat(),
@@ -552,6 +561,7 @@ class SignalScanService:
                 "close": close,
                 "breakout_level": breakout_level,
                 "breakout_gap_pct": gap_pct,
+                "breakout_distance_atr": distance_atr,
             },
             "live_order_enabled": False,
             "mode": context.mode,
@@ -571,6 +581,7 @@ class SignalScanService:
             health_item=health_item,
             rank_score=score,
             raw_score=score,
+            breakout_distance_atr=distance_atr,
         )
 
     @staticmethod

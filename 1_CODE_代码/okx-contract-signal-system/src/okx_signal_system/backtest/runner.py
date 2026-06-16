@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from okx_signal_system.features.indicators import build_feature_frame, atr
-from okx_signal_system.risk.costs import estimate_costs, participation_rate, slippage_bps_for_participation
+from okx_signal_system.risk.costs import estimate_costs, research_position_size, research_slippage_bps
 from okx_signal_system.risk.model import (
     COOL_OFF_BARS,
     EXTREME_VOLATILITY_THRESHOLD,
@@ -121,20 +121,6 @@ def _exit_reason_to_outcome(exit_reason: str) -> str:
 
 
 _OUTCOME_SIMULATOR = SignalOutcomeSimulator()
-
-
-def _research_position_size(
-    *,
-    entry_price: float,
-    stop_distance: float,
-    risk_config: RiskConfig,
-) -> tuple[float, float, float]:
-    risk_unit = float(risk_config.initial_equity) * float(risk_config.risk_per_trade_pct)
-    if entry_price <= 0 or stop_distance <= 0 or risk_unit <= 0:
-        raise ValueError("invalid_research_position_size")
-    qty = risk_unit / stop_distance
-    notional = abs(entry_price * qty)
-    return float(qty), float(risk_unit), float(notional)
 
 
 def split_train_valid(frame: pd.DataFrame, *, valid_fraction: float = 0.25) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -445,10 +431,10 @@ def run_backtest_from_features(
             continue
         if decision.qty is None:
             try:
-                qty, risk_unit, notional = _research_position_size(
+                qty, risk_unit, notional = research_position_size(
                     entry_price=entry_price,
                     stop_distance=stop_dist,
-                    risk_config=risk_config,
+                    config=risk_config,
                 )
             except ValueError:
                 continue
@@ -459,13 +445,11 @@ def run_backtest_from_features(
             notional = float(decision.notional or abs(entry_price * qty))
             sizing_mode = "risk_decision_qty"
         try:
-            slip_bps = slippage_bps_for_participation(
-                participation_rate(
-                    notional=notional,
-                    close=entry_price,
-                    volume=float(volume[entry_idx]),
-                    quote_volume=float(quote_volume[entry_idx]),
-                )
+            slip_bps = research_slippage_bps(
+                notional=notional,
+                close=entry_price,
+                volume=float(volume[entry_idx]),
+                quote_volume=float(quote_volume[entry_idx]),
             )
         except ValueError:
             continue

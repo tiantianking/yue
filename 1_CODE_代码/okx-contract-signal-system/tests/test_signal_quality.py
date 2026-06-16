@@ -3,10 +3,15 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pandas as pd
+import pytest
 
 from okx_signal_system.risk.model import RiskDecision
 from okx_signal_system.signal_quality import SignalCandidate, assign_tiers
 from okx_signal_system.signal_quality.candidate import ObservationCandidate
+from okx_signal_system.signal_quality.observation import (
+    breakout_distance_atr,
+    near_breakout_observation,
+)
 from okx_signal_system.strategy.trend_breakout import TradeSignal
 
 
@@ -97,6 +102,7 @@ def test_assign_tiers_limits_a_tier_to_one_candidate_per_correlation_group() -> 
             "BTC-USDT-SWAP": _history("BTC-USDT-SWAP", shared_returns),
             "ETH-USDT-SWAP": _history("ETH-USDT-SWAP", shared_returns),
         },
+        min_correlation_samples=8,
     )
 
     assert [item.inst_id for item in selection.ranked] == ["BTC-USDT-SWAP", "ETH-USDT-SWAP"]
@@ -119,6 +125,7 @@ def test_assign_tiers_allows_different_correlation_groups_under_a_tier_cap() -> 
             "BTC-USDT-SWAP": _history("BTC-USDT-SWAP", shared_returns),
             "SOL-USDT-SWAP": _history("SOL-USDT-SWAP", different_returns),
         },
+        min_correlation_samples=8,
     )
 
     assert [item.tier for item in selection.ranked] == ["A", "A"]
@@ -141,6 +148,7 @@ def test_assign_tiers_keeps_correlated_demoted_candidates_in_ranked_output() -> 
             "ETH-USDT-SWAP": _history("ETH-USDT-SWAP", shared_returns),
             "SOL-USDT-SWAP": _history("SOL-USDT-SWAP", different_returns),
         },
+        min_correlation_samples=8,
     )
 
     assert [item.inst_id for item in selection.ranked] == [
@@ -164,6 +172,7 @@ def test_assign_tiers_does_not_merge_opposite_side_high_correlation_candidates()
             "BTC-USDT-SWAP": _history("BTC-USDT-SWAP", shared_returns),
             "ETH-USDT-SWAP": _history("ETH-USDT-SWAP", shared_returns),
         },
+        min_correlation_samples=8,
     )
 
     assert [item.tier for item in selection.ranked] == ["A", "A"]
@@ -264,3 +273,30 @@ def test_assign_tiers_drops_non_push_formal_candidates_from_ranked_tiers() -> No
 
     assert [item.inst_id for item in selection.ranked] == ["BTC-USDT-SWAP"]
     assert selection.tier_c == []
+
+
+def test_near_breakout_observation_uses_atr_distance_across_price_levels() -> None:
+    long_low = pd.Series(
+        {"close": 100.0, "atr": 10.0, "breakout_high": 102.5, "trend_bias": "long"}
+    )
+    long_high = pd.Series(
+        {"close": 10000.0, "atr": 1000.0, "breakout_high": 10250.0, "trend_bias": "long"}
+    )
+
+    low_observation = near_breakout_observation(long_low)
+    high_observation = near_breakout_observation(long_high)
+
+    assert low_observation is not None
+    assert high_observation is not None
+    assert low_observation[4] == high_observation[4] == pytest.approx(0.25)
+    assert breakout_distance_atr(long_low) == pytest.approx(0.25)
+    assert breakout_distance_atr(long_high) == pytest.approx(0.25)
+    assert low_observation[3] == pytest.approx(0.025)
+    assert high_observation[3] == pytest.approx(0.025)
+
+
+def test_near_breakout_observation_rejects_distance_above_atr_threshold() -> None:
+    row = pd.Series({"close": 100.0, "atr": 10.0, "breakout_high": 103.2, "trend_bias": "long"})
+
+    assert breakout_distance_atr(row) == pytest.approx(0.32)
+    assert near_breakout_observation(row) is None

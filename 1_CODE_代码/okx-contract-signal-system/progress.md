@@ -246,3 +246,69 @@
 ### Notes
 - Modified files: `src/okx_signal_system/signal_quality/selector.py`, `src/okx_signal_system/signal_quality/observation.py`, `src/okx_signal_system/signal_service/scan.py`, `tests/test_signal_quality.py`, and `tests/test_signal_scan_service.py` tighten tiering/observation behavior; `src/okx_signal_system/notify/feishu.py`, `src/okx_signal_system/exchange/realtime.py`, `gui.py`, and `tests/test_feishu_notify.py` carry quality-model fields into A/B signal messages; `pyproject.toml`, `src/okx_signal_system/__init__.py`, `src/okx_contract_signal_system.egg-info/PKG-INFO`, and `docs/SYSTEM_ARCHITECTURE.md` sync version/doc release notes; `progress.md` records this round.
 - Rollback: restore the listed files from the previous index state and remove this appended progress entry; this round does not require database migration rollback or runtime-cache cleanup.
+
+## 2026-06-17 - Task: realtime pandas concat FutureWarning guard
+### What was done
+- Adjusted live K-line append merging so empty or all-NA realtime cache frames do not participate in pandas concat before the new candle row is applied.
+- Preserved the existing non-empty merge, duplicate timestamp overwrite, sort, and cache retention behavior for valid realtime rows.
+- Added a focused regression covering empty and all-NA realtime cache append paths.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests/test_data_layer.py::test_realtime_store_preserves_quote_volume tests/test_data_layer.py::test_realtime_store_overwrites_same_bar_without_dtype_error tests/test_data_layer.py::test_realtime_store_appends_to_empty_or_all_na_cache_without_concat tests/test_data_layer.py::test_realtime_store_writes_runtime_cache_without_mutating_history -q` -> `5 passed`.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests/test_data_layer.py::test_realtime_store_preserves_quote_volume tests/test_data_layer.py::test_realtime_store_overwrites_same_bar_without_dtype_error tests/test_data_layer.py::test_realtime_store_appends_to_empty_or_all_na_cache_without_concat tests/test_data_layer.py::test_realtime_store_writes_runtime_cache_without_mutating_history -W error::FutureWarning -q` -> `5 passed`.
+- `git diff --check -- src/okx_signal_system/exchange/realtime.py tests/test_data_layer.py` -> passed; Git reported existing LF-to-CRLF working-copy normalization warnings only.
+### Notes
+- Modified files: `src/okx_signal_system/exchange/realtime.py` adds the narrow live-row concat helper and uses it in `RealtimeDataStore.append_candle`; `tests/test_data_layer.py` adds the empty/all-NA realtime cache regression; `progress.md` records this round.
+- Rollback: restore `src/okx_signal_system/exchange/realtime.py` and `tests/test_data_layer.py` from the previous index state, then remove this appended progress entry.
+
+## 2026-06-17 - Task: reusable release zip packaging script
+### What was done
+- Added a reusable release zip builder that packages repository files and writes every zip entry with POSIX `/` separators.
+- Added a focused release safety regression proving generated zip entries do not contain backslashes and include a nested path.
+- Documented the release zip command in the release safety guide.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests/test_release_safety.py -q` -> `14 passed`.
+- `git diff --check` -> passed.
+### Notes
+- Modified files: `scripts/build_release_zip.py` adds the reusable zip generation entrypoint; `tests/test_release_safety.py` verifies release zip entry names use POSIX separators and include a nested path; `docs/RELEASE_SAFETY.md` documents the release zip command and separator rule; `progress.md` records this round.
+- Rollback: restore `scripts/build_release_zip.py`, `tests/test_release_safety.py`, and `docs/RELEASE_SAFETY.md` from the previous index state, then remove this appended progress entry.
+
+## 2026-06-17 - Task: v3.47 near-breakout ATR adaptive observation
+### What was done
+- Replaced the C-tier near-breakout watch threshold with ATR-based distance gating and propagated the ATR distance into scan health output and observation payloads.
+- Kept the existing public observation shape intact for current callers, while adding an optional ATR distance field to observation candidates.
+- Added focused regressions proving the observation gate behaves by ATR ratio rather than fixed price percentage across different price levels.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests\test_signal_quality.py tests\test_signal_scan_service.py -q` -> `23 passed`.
+### Notes
+- Modified files: `src/okx_signal_system/signal_quality/observation.py` now computes near-breakout eligibility from ATR distance and returns the ATR ratio alongside price gap; `src/okx_signal_system/signal_quality/candidate.py` adds optional `breakout_distance_atr` to `ObservationCandidate`; `src/okx_signal_system/signal_service/scan.py` includes ATR breakout distance in health payloads and observation payloads and scores observations from ATR distance; `tests/test_signal_quality.py` adds ATR-threshold regression coverage; `tests/test_signal_scan_service.py` verifies scan health and observation payload exposure; `docs/SYSTEM_ARCHITECTURE.md` documents the ATR-based C-tier observation rule; `progress.md` records this round.
+- Rollback: restore the listed source, test, and docs files from the previous index state, then remove this appended progress entry.
+
+## 2026-06-17 - Task: v3.47 lifecycle terminal states and outbox auto-enqueue
+### What was done
+- Extended lifecycle storage to persist target price and terminal result timestamps, and added compatibility columns to the SQLite store without rebuilding existing databases.
+- Added confirmed-state result transitions for target reached, stop reached, and hold-time timeout, while keeping pre-confirmation invalidated and expired behavior unchanged.
+- Wired lifecycle events to auto-create deterministic notification outbox rows from the event identity so each state change is queued once without sending network traffic.
+- Expanded focused lifecycle coverage for target, stop, timeout result, automatic outbox enqueueing, and legacy JSON migration.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests/test_signal_lifecycle.py -q` -> `10 passed`.
+### Notes
+- Modified files: `src/okx_signal_system/signal_quality/lifecycle.py` now stores `take_profit`, adds `TARGET_REACHED/STOP_REACHED/TIMEOUT_RESULT`, migrates missing SQLite columns, and auto-enqueues deterministic outbox records for lifecycle events; `tests/test_signal_lifecycle.py` covers target/stop/timeout transitions, outbox auto-enqueue, and legacy JSON migration; `progress.md` records this round.
+- Rollback: restore `src/okx_signal_system/signal_quality/lifecycle.py` and `tests/test_signal_lifecycle.py` from the previous index state, then remove this appended progress entry.
+
+## 2026-06-17 - Task: v3.48 acceptance optimization closure
+### What was done
+- Bumped package metadata and visible GUI/CLI/launcher version sources to v3.48 after this code change.
+- Completed the v3.47 follow-up closure that could be verified locally: ATR-relative C-tier observations, SQLite lifecycle terminal result states, deterministic lifecycle notification outbox enqueueing, shared research sizing/cost helpers, correlation sample floor, typed runtime config helpers, reusable release ZIP packaging, and pandas concat FutureWarning protection.
+- Routed runtime Feishu delivery through `NotificationDispatcher` for A-tier signals, B-tier summaries, status reports, startup notification, and candidate health reports, leaving legacy Feishu helpers only as compatibility functions.
+- Changed signal-card timing so user-facing signal generation time is Beijing time derived from the signal K-line timestamp when available, with a separate Beijing notification send time; runtime status JSON now also exposes Beijing display timestamps.
+- Documented the v3.48 lifecycle, dispatcher, Beijing-time, C-tier observation, correlation, and research sizing boundaries.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m compileall -q src main.py gui.py tests` -> passed.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests/test_feishu_notify.py tests/test_config.py tests/test_costs.py tests/test_signal_quality.py tests/test_signal_quality_labeler.py tests/test_signal_scan_service.py tests/test_signal_lifecycle.py tests/test_data_layer.py tests/test_release_safety.py -q` -> passed with expected historical-data skips.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest -q` -> passed with expected historical-data skips.
+- `npm.cmd run check` in `dashboard` -> lint and production build passed.
+- `git diff --check` -> passed; Git reported existing LF-to-CRLF working-copy normalization warnings only.
+- Direct `v347_acceptance_audit_cn.md` file lookup on Desktop/repo did not find the source report, so closure was based on the locally observable v3.47/v3.48 acceptance gaps and subagent read-only scans.
+### Notes
+- Modified files: `scripts/build_release_zip.py` adds the reusable release ZIP builder; `docs/RELEASE_SAFETY.md` documents ZIP packaging rules; `docs/SYSTEM_ARCHITECTURE.md` documents the v3.48 acceptance boundaries; `gui.py` routes notifications through the dispatcher and exposes Beijing status timestamps; `main.py` routes startup and signal notifications through the dispatcher; `pyproject.toml`, `src/okx_signal_system/__init__.py`, and `src/okx_contract_signal_system.egg-info/PKG-INFO` bump metadata to v3.48; `src/okx_signal_system/backtest/runner.py`, `src/okx_signal_system/risk/costs.py`, and `src/okx_signal_system/signal_quality/execution.py` share research sizing/cost assumptions; `src/okx_signal_system/config.py`, `src/okx_signal_system/signal_service/job.py`, `src/okx_signal_system/scheduler.py`, and `src/okx_signal_system/ml/trading_brain.py` consume typed runtime config and dispatcher paths; `src/okx_signal_system/exchange/realtime.py` handles concat warnings, dispatcher notification routing, and Beijing status output; `src/okx_signal_system/notify/__init__.py`, `src/okx_signal_system/notify/dispatcher.py`, and `src/okx_signal_system/notify/feishu.py` add the dispatcher and Beijing signal/send time behavior; `src/okx_signal_system/signal_quality/candidate.py`, `src/okx_signal_system/signal_quality/observation.py`, and `src/okx_signal_system/signal_service/scan.py` carry ATR-relative C-tier observations; `src/okx_signal_system/signal_quality/correlation.py` and `src/okx_signal_system/signal_quality/selector.py` enforce the correlation sample floor and explicit overrides; `src/okx_signal_system/signal_quality/lifecycle.py` adds terminal result states, compatible SQLite columns, and outbox auto-enqueueing; tests under `tests/` cover the release ZIP, config helpers, cost helpers, realtime concat guard, Feishu dispatcher/time behavior, lifecycle terminal states/outbox, ATR observation, labeler consistency, and scan service behavior.
+- Rollback: revert this commit after it is created, or before commit restore the listed files from the previous index state, remove `scripts/build_release_zip.py` and `src/okx_signal_system/notify/dispatcher.py`, then remove this appended progress entry.

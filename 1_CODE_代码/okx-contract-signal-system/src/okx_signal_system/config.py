@@ -10,6 +10,8 @@ from typing import Any
 import yaml
 
 from okx_signal_system.paths import package_project_root
+from okx_signal_system.risk.costs import CostConfig
+from okx_signal_system.risk.model import RiskConfig
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,41 @@ class RuntimeConfig:
             "fees": self.fees,
             "sha256": self.sha256,
         }
+
+    def risk_config(self, *, initial_equity: float | None = None) -> RiskConfig:
+        risk = self.risk.get("risk", {}) if isinstance(self.risk.get("risk"), dict) else {}
+        equity = initial_equity
+        if equity is None:
+            equity = _float_value(risk, "per_symbol_initial_equity", RiskConfig.initial_equity)
+        return RiskConfig(
+            initial_equity=float(equity),
+            halt_equity_ratio=_float_value(risk, "halt_equity_ratio", RiskConfig.halt_equity_ratio),
+            max_leverage=_float_value(risk, "max_leverage", RiskConfig.max_leverage),
+            margin_mode=str(risk.get("margin_mode", RiskConfig.margin_mode)),
+            position_mode=str(risk.get("position_mode", RiskConfig.position_mode)),
+        )
+
+    def cost_config(self) -> CostConfig:
+        fees = self.fees.get("fees", {}) if isinstance(self.fees.get("fees"), dict) else {}
+        slippage = self.fees.get("slippage", {}) if isinstance(self.fees.get("slippage"), dict) else {}
+        funding = self.fees.get("funding", {}) if isinstance(self.fees.get("funding"), dict) else {}
+        return CostConfig(
+            taker_fee_rate=_float_value(fees, "taker_fee_rate", CostConfig.taker_fee_rate),
+            normal_slippage_bps=_float_value(slippage, "normal_bps", CostConfig.normal_slippage_bps),
+            stress_slippage_bps=_float_value(slippage, "stress_bps", CostConfig.stress_slippage_bps),
+            funding_rate=_float_value(funding, "baseline_rate", CostConfig.funding_rate),
+            funding_interval_hours=int(_float_value(funding, "baseline_hours", CostConfig.funding_interval_hours)),
+        )
+
+
+def _float_value(mapping: dict[str, Any], key: str, default: float) -> float:
+    value = mapping.get(key, default)
+    if isinstance(value, list):
+        value = value[0] if value else default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
 
 
 def project_paths(start: Path | None = None) -> ProjectPaths:

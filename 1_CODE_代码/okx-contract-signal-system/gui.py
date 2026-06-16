@@ -175,6 +175,7 @@ class OKXSignalGUI:
         self._signal_notification_store = None
         self._b_tier_summary_store = None
         self._lifecycle_store = None
+        self._notification_dispatcher_instance = None
         self._quality_model_shadow = None
         self._shadow_ledger = None
         self._runtime_modules: dict[str, dict] = {}
@@ -285,9 +286,11 @@ class OKXSignalGUI:
         }
 
     def _update_runtime_module_status(self, name: str, status: str, **details) -> None:
+        updated_at = datetime.now(timezone.utc)
         payload = {
             "status": status,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": updated_at.isoformat(),
+            "updated_at_beijing": _format_beijing_time(updated_at, "%Y-%m-%d %H:%M:%S 北京时间"),
         }
         payload.update(details)
         self._runtime_modules[name] = payload
@@ -300,8 +303,10 @@ class OKXSignalGUI:
             ws_status = self.api._ws_client.status() if self.api and self.api._ws_client else None
             lifecycle_summary = self._signal_lifecycle_store().summary()
             quality_model = self._quality_model_shadow_scorer().status()
+            generated_at = datetime.now(timezone.utc)
             payload = {
-                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "generated_at": generated_at.isoformat(),
+                "generated_at_beijing": _format_beijing_time(generated_at, "%Y-%m-%d %H:%M:%S 北京时间"),
                 "status": "error" if error else "running",
                 "error": error,
                 "dataset": self.api.dataset if self.api else None,
@@ -461,9 +466,7 @@ class OKXSignalGUI:
 
     def _send_candidate_health_report(self, items: list[dict], params) -> None:
         try:
-            from okx_signal_system.notify.feishu import send_candidate_health_report
-
-            ok = send_candidate_health_report(
+            ok = self._notification_dispatcher().send_candidate_health_report(
                 items=items,
                 push_allowed=self._quality_gate_allows_push,
                 selected_params={
@@ -504,6 +507,13 @@ class OKXSignalGUI:
 
             self._lifecycle_store = SignalLifecycleStore()
         return self._lifecycle_store
+
+    def _notification_dispatcher(self):
+        if self._notification_dispatcher_instance is None:
+            from okx_signal_system.notify import NotificationDispatcher
+
+            self._notification_dispatcher_instance = NotificationDispatcher(self._signal_lifecycle_store())
+        return self._notification_dispatcher_instance
 
     def _quality_model_shadow_scorer(self):
         if self._quality_model_shadow is None:
@@ -1247,19 +1257,10 @@ class OKXSignalGUI:
                     payload=candidate.payload,
                 )
                 try:
-                    from okx_signal_system.notify.feishu import send_signal_observation
-                    sent = send_signal_observation(
-                        inst_id=signal.inst_id,
-                        side=signal.side,
-                        entry_ref=signal.entry_ref,
-                        stop_loss=signal.stop_loss,
-                        take_profit=signal.take_profit,
-                        reason=",".join(signal.reason_codes),
-                        signal_score=float(candidate.raw_score),
-                        risk_reward_ratio=decision.risk_reward_ratio,
-                        stop_reason=decision.stop_reason,
-                        tp_reason=decision.tp_reason,
-                        kline_time=signal.ts.isoformat() if hasattr(signal.ts, 'isoformat') else str(signal.ts),
+                    sent = self._notification_dispatcher().send_signal(
+                        signal,
+                        decision,
+                        notify_key=candidate.notify_key,
                         signal_timeframe=self.api.timeframe.key,
                         trend_timeframe=self.api.trend_timeframe.key,
                         tier=candidate.tier,
@@ -1271,16 +1272,14 @@ class OKXSignalGUI:
                             candidate.payload.get("quality_model")
                             or candidate.health_item.get("quality_model")
                         ),
+                        reason=",".join(signal.reason_codes),
                     )
                     if sent:
-                        self._signal_lifecycle_store().mark_notification_sent(candidate.notify_key)
                         self._mark_signal_notified(candidate.notify_key, signal, score=float(candidate.raw_score))
                         self.message_queue.put(('log', (f"📤 A级飞书推送已发送：排名 {candidate.rank}/{len(selection.ranked)}，评分{candidate.raw_score:.1f}", "INFO")))
                     else:
-                        self._signal_lifecycle_store().mark_notification_failed(candidate.notify_key, "send_signal_observation_returned_false")
                         self.message_queue.put(('log', ("A级飞书推送未送达：飞书返回失败，稍后会重试", "WARNING")))
                 except Exception as e:
-                    self._signal_lifecycle_store().mark_notification_failed(candidate.notify_key, str(e))
                     self.message_queue.put(('log', (f"A级飞书推送失败: {e}", "WARNING")))
             if selection.tier_b:
                 self.message_queue.put(('log', (f"B级候选已保留到体检/面板：{len(selection.tier_b)} 个", "INFO")))
@@ -1290,9 +1289,7 @@ class OKXSignalGUI:
                     self.message_queue.put(('log', ("B-tier summary already sent for this candle", "INFO")))
                 else:
                     try:
-                        from okx_signal_system.notify.feishu import send_b_tier_summary
-
-                        summary_sent = send_b_tier_summary(
+                        summary_sent = self._notification_dispatcher().send_b_tier_summary(
                             selection.tier_b,
                             total_candidates=len(selection.ranked),
                             signal_timeframe=self.api.timeframe.key if self.api else None,

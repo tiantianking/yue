@@ -6,7 +6,10 @@ from dataclasses import dataclass, replace
 import pandas as pd
 
 from okx_signal_system.signal_quality.candidate import CandidateLike, ObservationCandidate, SignalCandidate
-from okx_signal_system.signal_quality.correlation import assign_correlation_groups
+from okx_signal_system.signal_quality.correlation import (
+    DEFAULT_MIN_CORRELATION_SAMPLES,
+    assign_correlation_groups,
+)
 from okx_signal_system.signal_quality.ranker import rank_candidates
 
 
@@ -26,7 +29,7 @@ def assign_tiers(
     price_history: Mapping[str, pd.DataFrame] | None = None,
     high_correlation_threshold: float = 0.75,
     correlation_window_days: int = 30,
-    min_correlation_samples: int = 8,
+    min_correlation_samples: int = DEFAULT_MIN_CORRELATION_SAMPLES,
 ) -> TieredSelection:
     observations = observation_candidates or []
     formal_candidates = [candidate for candidate in candidates if bool(candidate.health_item.get("would_push"))]

@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass
 
 import pandas as pd
+import pytest
 
 from okx_signal_system.risk.model import Ledger, RiskConfig
 from okx_signal_system.signal_service.scan import SignalScanContext, SignalScanService, candidate_rank_score
@@ -435,6 +436,9 @@ def test_signal_scan_service_places_near_breakout_watch_item_in_tier_c(monkeypat
     assert observation.tier == "C"
     assert observation.inst_id == "BTC-USDT-SWAP"
     assert observation.payload["observation"]["status"] == "not_triggered"
+    assert observation.breakout_distance_atr == pytest.approx(0.2)
+    assert observation.health_item["breakout_distance_atr"] == pytest.approx(0.2)
+    assert result.cycle_health[0]["breakout_distance_atr"] == pytest.approx(0.2)
     assert result.selection.tier_c == [observation]
     assert result.cycle_health[0]["reason"] == "near_breakout_observation"
     assert result.cycle_health[0]["observation"] is True

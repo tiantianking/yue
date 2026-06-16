@@ -126,6 +126,8 @@ def test_signal_alert_includes_lifecycle_status(monkeypatch) -> None:
     assert ok
     assert "signal_status: TRIGGERED" in sent[0]
     assert "invalidation_price: 95.00000000" in sent[0]
+    assert "信号生成时间: 2026-06-16 08:00:00 北京时间" in sent[0]
+    assert "通知发送时间:" in sent[0]
     assert "K线时间: 2026-06-16 08:00:00 北京时间" in sent[0]
 
 
@@ -315,6 +317,43 @@ def test_status_and_health_reports_use_beijing_time(monkeypatch) -> None:
 
     assert all("北京时间" in text for text in sent)
     assert all("UTC" not in text for text in sent)
+
+
+def test_notification_dispatcher_wraps_startup_and_health_reports(monkeypatch) -> None:
+    from okx_signal_system.notify import dispatcher
+
+    calls: list[tuple[str, dict]] = []
+
+    def fake_send_text(text: str, *args, **kwargs) -> bool:
+        calls.append(("text", {"text": text}))
+        return True
+
+    def fake_health_report(**kwargs) -> bool:
+        calls.append(("health", kwargs))
+        return True
+
+    monkeypatch.setattr(dispatcher, "send_text", fake_send_text)
+    monkeypatch.setattr(dispatcher, "send_candidate_health_report", fake_health_report)
+
+    notify = dispatcher.NotificationDispatcher()
+    assert notify.send_startup(symbol_count=21, environment="simulation")
+    assert notify.send_candidate_health_report(
+        items=[{"symbol": "BTC-USDT-SWAP"}],
+        push_allowed=True,
+        selected_params={"signal_timeframe": "15m"},
+    )
+
+    assert calls[0][0] == "text"
+    assert "OKX signal observation platform started" in calls[0][1]["text"]
+    assert "北京时间" in calls[0][1]["text"]
+    assert calls[1] == (
+        "health",
+        {
+            "items": [{"symbol": "BTC-USDT-SWAP"}],
+            "push_allowed": True,
+            "selected_params": {"signal_timeframe": "15m"},
+        },
+    )
 
 
 def test_b_tier_summary_is_not_sent_without_candidates(monkeypatch) -> None:

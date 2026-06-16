@@ -326,9 +326,11 @@ async def start_realtime_monitor() -> object | None:
 async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -> None:
     """信号检测循环"""
     from okx_signal_system.exchange.realtime import LiveSignalMonitor
-    from okx_signal_system.notify.feishu import send_signal_observation, send_text
+    from okx_signal_system.notify import NotificationDispatcher
     from okx_signal_system.config import project_paths
     from okx_signal_system.data.closed_backfill import ClosedCandleBackfillService
+
+    dispatcher = NotificationDispatcher()
 
     # 构建信号回调：信号通过风控后自动推飞书
     def on_signal(signal, decision):
@@ -336,18 +338,12 @@ async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -
         try:
             if not feishu_enabled:
                 return False
-            sent = send_signal_observation(
-                inst_id=signal.inst_id,
-                side=signal.side,
-                entry_ref=signal.entry_ref or 0,
-                stop_loss=signal.stop_loss or 0,
-                take_profit=signal.take_profit or 0,
+            sent = dispatcher.send_signal(
+                signal,
+                decision,
+                signal_timeframe=api.timeframe.key,
+                trend_timeframe=api.trend_timeframe.key,
                 reason=", ".join(signal.reason_codes) if signal.reason_codes else "",
-                signal_score=getattr(decision, 'signal_score', None),
-                risk_reward_ratio=getattr(decision, 'risk_reward_ratio', None),
-                stop_reason=getattr(decision, 'stop_reason', None) or "",
-                tp_reason=getattr(decision, 'tp_reason', None) or "",
-                kline_time=pd.Timestamp(signal.ts).isoformat(),
             )
             if sent:
                 logger.info("Feishu signal push sent: %s %s", signal.inst_id, signal.side)
@@ -389,9 +385,8 @@ async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -
     # 推送启动通知到飞书
     if feishu_enabled:
         try:
-            from okx_signal_system.notify.feishu import send_text
-            env_label = "模拟数据环境" if os.environ.get('OKX_IS_SIMULATED', 'true').lower() != 'false' else "外部数据环境"
-            send_text(f"🟢 OKX信号观察平台已启动\n观察 {len(symbols)} 个币种\n用途: 信号观察 / 人工复核\n数据环境: {env_label}")
+            env_label = "simulation" if os.environ.get("OKX_IS_SIMULATED", "true").lower() != "false" else "external_data"
+            dispatcher.send_startup(symbol_count=len(symbols), environment=env_label)
         except Exception as e:
             logger.error(f"启动通知推送失败: {e}")
 

@@ -49,6 +49,7 @@ class ObservationCandidate:
     health_item: dict
     rank_score: float
     raw_score: float
+    breakout_distance_atr: float | None = None
     tier: str | None = None
     rank: int | None = None
     correlation_group: str | None = None

@@ -1,7 +1,4 @@
-"""
-OKX 合约信号系统 - 智能交易大脑
-整合所有模块：在线学习 + 强化学习 + 币种轮换 + 实时API + 环境自适应 + 多策略投票 + 滚动回测 + 模式识别
-"""
+"""Experimental signal-only research brain for OKX market data."""
 from __future__ import annotations
 
 import asyncio
@@ -13,6 +10,7 @@ from pathlib import Path
 from okx_signal_system.exchange.realtime import (
     create_realtime_api,
 )
+from okx_signal_system.config import load_runtime_config
 from okx_signal_system.ml.online_learning import (
     TradeRecord,
     create_learning_engine,
@@ -26,9 +24,9 @@ from okx_signal_system.ml.symbol_rotation import (
 from okx_signal_system.ml.regime_adaptive import (
     AdaptiveParamsManager,
 )
-from okx_signal_system.notify.feishu import feishu_send_signal_card
+from okx_signal_system.notify import NotificationDispatcher
 from okx_signal_system.data.gap_handler import IncrementalSyncer
-from okx_signal_system.risk.model import Ledger, RiskConfig
+from okx_signal_system.risk.model import Ledger
 from okx_signal_system.signal_service import SignalScanContext, SignalScanService
 from okx_signal_system.strategy.trend_breakout import StrategyParams
 from okx_signal_system.strategy.vote_gate import min_vote_approval_rate
@@ -39,10 +37,7 @@ log = logging.getLogger(__name__)
 
 
 class TradingBrain:
-    """
-    智能交易大脑
-    整合所有AI模块，自主运行
-    """
+    """Coordinate research-only learning, rotation, scanning, and notifications."""
 
     def __init__(
         self,
@@ -61,11 +56,9 @@ class TradingBrain:
         self.live_param_updates_enabled = bool(learning_cfg.get("live_param_updates_enabled", False))
         self.param_suggestions: list[dict] = []
 
-        # 初始化所有模块
         self.online_learning = create_learning_engine(self.data_dir / "online_learning")
         self.rl_optimizer = create_rl_optimizer(self.data_dir / "rl_optimizer")
 
-        # 币种列表
         available_symbols = self.config.get("symbols", [
             "BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP",
             "BNB-USDT-SWAP", "XRP-USDT-SWAP", "ADA-USDT-SWAP",
@@ -75,24 +68,20 @@ class TradingBrain:
             self.data_dir / "symbol_rotation",
         )
 
-        # 实时API
         api_config = self.config if "data" in self.config else self.config.get("api", {})
         self.api = create_realtime_api(api_config)
-        # 信号执行器（使用 position_monitor 替代）
-        self.auto_stop = None  # 延迟初始化
+        self.auto_stop = None
 
-        # 增量数据同步器
         self.syncer: IncrementalSyncer | None = None
 
-        # 当前参数
         self.current_params = load_selected_strategy_params()
 
-        # 运行状态
         self._running = False
         self._cycle_count = 0
         self._regime_mgr = AdaptiveParamsManager()
-        self._risk_cfg = RiskConfig()
+        self._risk_cfg = load_runtime_config().risk_config()
         self._ledger = Ledger("trading_brain", init_capital=10000, equity=10000)
+        self._notification_dispatcher = NotificationDispatcher()
         self._scan_service = SignalScanService(
             candle_loader=self._load_signal_candles,
             regime_manager=self._regime_mgr,
@@ -111,12 +100,11 @@ class TradingBrain:
         return self.syncer
 
     async def start(self):
-        """启动交易大脑"""
+        """Start the experimental trading brain loop."""
         log.info("=" * 60)
         log.info("Starting Trading Brain - AI Powered Trading System")
         log.info("=" * 60)
 
-        # 启动时同步数据（补足离线期间的数据空缺）
         log.info("Syncing data before startup...")
         syncer = self._get_syncer()
         if syncer is not None:
@@ -125,10 +113,8 @@ class TradingBrain:
                 if result.bars_added > 0:
                     log.info(f"  {sym}: +{result.bars_added} bars filled")
 
-        # 连接API
         await self.api.connect()
 
-        # 加载最佳参数
         learned_params = self.online_learning.get_current_params()
         learned_params = self.online_learning.get_current_params()
         if self.live_param_updates_enabled:
@@ -145,15 +131,12 @@ class TradingBrain:
                 self._cycle_count += 1
                 await self.run_cycle()
 
-                # 每30分钟评估一次
                 if self._cycle_count % 2 == 0:
                     await self.evaluate_and_adapt()
 
-                # 每小时轮换币种
                 if self._cycle_count % 4 == 0:
                     await self.rotate_symbols()
 
-                # 等待下一个周期（15分钟）
                 await asyncio.sleep(900)
 
             except Exception as e:
@@ -161,16 +144,15 @@ class TradingBrain:
                 await asyncio.sleep(60)
 
     async def stop(self):
-        """停止交易大脑"""
+        """Stop the experimental trading brain."""
         self._running = False
         await self.api.disconnect()
         log.info("TradingBrain stopped")
 
     async def run_cycle(self):
-        """执行一个扫描周期"""
+        """Run one scan cycle."""
         log.info(f"=== Cycle #{self._cycle_count} ===")
 
-        # 增量同步最新数据
         syncer = self._get_syncer()
         if syncer is not None:
             syncer.sync_batch(self.symbol_rotator.get_active_symbols())
@@ -221,10 +203,9 @@ class TradingBrain:
         self.param_suggestions = self.param_suggestions[-50:]
 
     async def evaluate_and_adapt(self):
-        """评估表现并自适应调整"""
+        """Evaluate experimental learning modules."""
         log.info("Evaluating and adapting...")
 
-        # 在线学习
         if self.online_learning.should_adapt():
             result = self.online_learning.adapt_params()
             if result:
@@ -235,7 +216,6 @@ class TradingBrain:
                 else:
                     log.info(f"Online learning suggested params; live updates locked: {result.new_params}")
 
-        # 强化学习
         from okx_signal_system.ml.reinforcement_learning import MarketRegimeDetector
         regime = MarketRegimeDetector.detect_regime(
             atr_pct=0.02,
@@ -261,30 +241,17 @@ class TradingBrain:
                 log.info(f"RL suggested params; live updates locked: {new_params}")
 
     async def rotate_symbols(self):
-        """轮换币种"""
+        """Rotate active research symbols."""
         log.info("Rotating symbols...")
 
-        # 更新各币种表现
         for inst_id in self.symbol_rotator.available_symbols:
-            # 这里应该从实际交易获取数据
-            # 简化处理：使用模拟数据
+            # Rotation performance can be updated here when research results are available.
             pass
 
-        # 执行轮换
         decision = self.symbol_rotator.evaluate_and_rotate()
 
         if decision.add_symbols or decision.remove_symbols:
             log.info(f"Symbol rotation: +{decision.add_symbols} -{decision.remove_symbols}")
-
-            # 推送轮换通知
-            feishu_send_signal_card(
-                inst_id="SYSTEM",
-                direction="rotation",
-                entry_price=0,
-                stop_loss=0,
-                take_profit=0,
-                reason=f"Add: {decision.add_symbols}, Remove: {decision.remove_symbols}",
-            )
 
     async def record_trade_result(
         self,
@@ -294,7 +261,7 @@ class TradingBrain:
         exit_price: float,
         pnl: float,
     ):
-        """记录交易结果用于学习"""
+        """Record one research trade result."""
         trade = TradeRecord(
             inst_id=inst_id,
             side=side,
@@ -311,7 +278,7 @@ class TradingBrain:
         self.online_learning.record_trade(trade)
 
     def get_status_report(self) -> dict:
-        """获取状态报告"""
+        """Return status."""
         return {
             "cycle_count": self._cycle_count,
             "is_running": self._running,
@@ -325,7 +292,7 @@ class TradingBrain:
 
 
 async def run_trading_brain():
-    """运行交易大脑"""
+    """Run TradingBrain."""
     from pathlib import Path
 
     brain = TradingBrain(

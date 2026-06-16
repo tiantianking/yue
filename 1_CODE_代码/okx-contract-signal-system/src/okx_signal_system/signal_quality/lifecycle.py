@@ -12,7 +12,15 @@ import pandas as pd
 
 from okx_signal_system.config import project_paths
 
-LifecycleStatus = Literal["TRIGGERED", "CONFIRMED", "INVALIDATED", "EXPIRED"]
+LifecycleStatus = Literal[
+    "TRIGGERED",
+    "CONFIRMED",
+    "INVALIDATED",
+    "EXPIRED",
+    "TARGET_REACHED",
+    "STOP_REACHED",
+    "TIMEOUT_RESULT",
+]
 
 
 @dataclass
@@ -24,6 +32,7 @@ class SignalLifecycleRecord:
     entry_ref: float
     invalidation_price: float
     max_hold_bars: int
+    take_profit: float | None = None
     status: LifecycleStatus = "TRIGGERED"
     bars_seen: int = 0
     last_closed_time: str | None = None
@@ -31,6 +40,9 @@ class SignalLifecycleRecord:
     confirmed_at: str | None = None
     invalidated_at: str | None = None
     expired_at: str | None = None
+    target_reached_at: str | None = None
+    stop_reached_at: str | None = None
+    timeout_result_at: str | None = None
     last_event_type: str = "TRIGGERED"
     last_event_at: str = ""
     signal_timeframe: str | None = None
@@ -72,12 +84,17 @@ def lifecycle_payload(record: SignalLifecycleRecord) -> dict[str, Any]:
         },
         "triggered_at": record.signal_time,
         "invalidation_price": record.invalidation_price,
+        "take_profit": record.take_profit,
+        "target_price": record.take_profit,
         "bars_seen": record.bars_seen,
         "last_closed_time": record.last_closed_time,
         "last_close": record.last_close,
         "confirmed_at": record.confirmed_at,
         "invalidated_at": record.invalidated_at,
         "expired_at": record.expired_at,
+        "target_reached_at": record.target_reached_at,
+        "stop_reached_at": record.stop_reached_at,
+        "timeout_result_at": record.timeout_result_at,
         "last_updated_at": record.updated_at,
     }
 
@@ -115,6 +132,7 @@ class SignalLifecycleStore:
                 signal_time TEXT NOT NULL,
                 entry_ref REAL NOT NULL,
                 invalidation_price REAL NOT NULL,
+                take_profit REAL,
                 max_hold_bars INTEGER NOT NULL,
                 status TEXT NOT NULL,
                 bars_seen INTEGER NOT NULL DEFAULT 0,
@@ -123,6 +141,9 @@ class SignalLifecycleStore:
                 confirmed_at TEXT,
                 invalidated_at TEXT,
                 expired_at TEXT,
+                target_reached_at TEXT,
+                stop_reached_at TEXT,
+                timeout_result_at TEXT,
                 last_event_type TEXT NOT NULL,
                 last_event_at TEXT NOT NULL,
                 signal_timeframe TEXT,
@@ -168,6 +189,7 @@ class SignalLifecycleStore:
             )
             """
         )
+        self._ensure_lifecycle_record_columns(conn)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_lifecycle_records_symbol_status ON lifecycle_records(inst_id, status)"
         )
@@ -178,6 +200,19 @@ class SignalLifecycleStore:
             "CREATE INDEX IF NOT EXISTS idx_notification_outbox_status ON notification_outbox(status, available_at)"
         )
         return conn
+
+    @staticmethod
+    def _ensure_lifecycle_record_columns(conn: sqlite3.Connection) -> None:
+        existing = {str(row["name"]) for row in conn.execute("PRAGMA table_info(lifecycle_records)").fetchall()}
+        columns = {
+            "take_profit": "REAL",
+            "target_reached_at": "TEXT",
+            "stop_reached_at": "TEXT",
+            "timeout_result_at": "TEXT",
+        }
+        for name, column_type in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE lifecycle_records ADD COLUMN {name} {column_type}")
 
     def _load(self) -> None:
         with self._connect() as conn:
@@ -226,6 +261,7 @@ class SignalLifecycleStore:
             signal_time=str(item.get("signal_time") or item.get("triggered_at") or ""),
             entry_ref=float(item.get("entry_ref", 0.0) or 0.0),
             invalidation_price=float(item.get("invalidation_price", 0.0) or 0.0),
+            take_profit=float(item["take_profit"]) if item.get("take_profit") is not None else None,
             max_hold_bars=int(item.get("max_hold_bars", 0) or 0),
             status=str(item.get("status", "TRIGGERED")),  # type: ignore[arg-type]
             bars_seen=int(item.get("bars_seen", 0) or 0),
@@ -234,6 +270,9 @@ class SignalLifecycleStore:
             confirmed_at=item.get("confirmed_at"),
             invalidated_at=item.get("invalidated_at"),
             expired_at=item.get("expired_at"),
+            target_reached_at=item.get("target_reached_at"),
+            stop_reached_at=item.get("stop_reached_at"),
+            timeout_result_at=item.get("timeout_result_at"),
             last_event_type=str(item.get("last_event_type") or item.get("status") or "TRIGGERED"),
             last_event_at=str(item.get("last_event_at") or item.get("updated_at") or item.get("signal_time") or ""),
             signal_timeframe=item.get("signal_timeframe"),
@@ -251,6 +290,7 @@ class SignalLifecycleStore:
             signal_time=str(row["signal_time"]),
             entry_ref=float(row["entry_ref"]),
             invalidation_price=float(row["invalidation_price"]),
+            take_profit=float(row["take_profit"]) if row["take_profit"] is not None else None,
             max_hold_bars=int(row["max_hold_bars"]),
             status=str(row["status"]),  # type: ignore[arg-type]
             bars_seen=int(row["bars_seen"]),
@@ -259,6 +299,9 @@ class SignalLifecycleStore:
             confirmed_at=row["confirmed_at"],
             invalidated_at=row["invalidated_at"],
             expired_at=row["expired_at"],
+            target_reached_at=row["target_reached_at"],
+            stop_reached_at=row["stop_reached_at"],
+            timeout_result_at=row["timeout_result_at"],
             last_event_type=str(row["last_event_type"]),
             last_event_at=str(row["last_event_at"]),
             signal_timeframe=row["signal_timeframe"],
@@ -287,16 +330,18 @@ class SignalLifecycleStore:
             """
             INSERT INTO lifecycle_records (
                 signal_id, inst_id, side, signal_time, entry_ref, invalidation_price,
-                max_hold_bars, status, bars_seen, last_closed_time, last_close,
-                confirmed_at, invalidated_at, expired_at, last_event_type, last_event_at,
-                signal_timeframe, trend_timeframe, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                take_profit, max_hold_bars, status, bars_seen, last_closed_time, last_close,
+                confirmed_at, invalidated_at, expired_at, target_reached_at, stop_reached_at,
+                timeout_result_at, last_event_type, last_event_at, signal_timeframe,
+                trend_timeframe, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(signal_id) DO UPDATE SET
                 inst_id = excluded.inst_id,
                 side = excluded.side,
                 signal_time = excluded.signal_time,
                 entry_ref = excluded.entry_ref,
                 invalidation_price = excluded.invalidation_price,
+                take_profit = excluded.take_profit,
                 max_hold_bars = excluded.max_hold_bars,
                 status = excluded.status,
                 bars_seen = excluded.bars_seen,
@@ -305,6 +350,9 @@ class SignalLifecycleStore:
                 confirmed_at = excluded.confirmed_at,
                 invalidated_at = excluded.invalidated_at,
                 expired_at = excluded.expired_at,
+                target_reached_at = excluded.target_reached_at,
+                stop_reached_at = excluded.stop_reached_at,
+                timeout_result_at = excluded.timeout_result_at,
                 last_event_type = excluded.last_event_type,
                 last_event_at = excluded.last_event_at,
                 signal_timeframe = excluded.signal_timeframe,
@@ -319,6 +367,7 @@ class SignalLifecycleStore:
                 record.signal_time,
                 record.entry_ref,
                 record.invalidation_price,
+                record.take_profit,
                 record.max_hold_bars,
                 record.status,
                 record.bars_seen,
@@ -327,6 +376,9 @@ class SignalLifecycleStore:
                 record.confirmed_at,
                 record.invalidated_at,
                 record.expired_at,
+                record.target_reached_at,
+                record.stop_reached_at,
+                record.timeout_result_at,
                 record.last_event_type,
                 record.last_event_at,
                 record.signal_timeframe,
@@ -350,6 +402,7 @@ class SignalLifecycleStore:
         payload["state"] = event_status
         payload["status"] = event_status
         payload["lifecycle_event"] = {"type": event_type, "at": event_at}
+        payload_json = json.dumps(payload, ensure_ascii=False)
         conn.execute(
             """
             INSERT OR IGNORE INTO lifecycle_events (
@@ -363,7 +416,41 @@ class SignalLifecycleStore:
                 event_status,
                 record.inst_id,
                 record.side,
-                json.dumps(payload, ensure_ascii=False),
+                payload_json,
+                _now_text(),
+            ),
+        )
+        outbox_id = f"{record.signal_id}:{event_type}:{event_at}"
+        conn.execute(
+            """
+            INSERT INTO notification_outbox (
+                outbox_id, signal_id, channel, event_type, status, available_at,
+                attempt_count, sent_at, last_error, payload_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, 'PENDING', ?, 0, NULL, NULL, ?, ?, ?)
+            ON CONFLICT(outbox_id) DO UPDATE SET
+                signal_id = excluded.signal_id,
+                channel = excluded.channel,
+                event_type = excluded.event_type,
+                status = CASE
+                    WHEN notification_outbox.status = 'SENT' THEN notification_outbox.status
+                    ELSE 'PENDING'
+                END,
+                available_at = excluded.available_at,
+                last_error = CASE
+                    WHEN notification_outbox.status = 'SENT' THEN notification_outbox.last_error
+                    ELSE NULL
+                END,
+                payload_json = excluded.payload_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                outbox_id,
+                record.signal_id,
+                "feishu",
+                event_type,
+                event_at,
+                payload_json,
+                _now_text(),
                 _now_text(),
             ),
         )
@@ -374,6 +461,7 @@ class SignalLifecycleStore:
         *,
         signal_id: str | None = None,
         invalidation_price: float | None = None,
+        take_profit: float | None = None,
         signal_timeframe: str | None = None,
         trend_timeframe: str | None = None,
     ) -> SignalLifecycleRecord | None:
@@ -392,6 +480,7 @@ class SignalLifecycleStore:
             return existing
         now = _now_text()
         signal_time = _timestamp_text(getattr(signal, "ts"))
+        target_price = take_profit if take_profit is not None else getattr(signal, "take_profit", None)
         record = SignalLifecycleRecord(
             signal_id=sid,
             inst_id=str(getattr(signal, "inst_id", "")),
@@ -399,6 +488,7 @@ class SignalLifecycleStore:
             signal_time=signal_time,
             entry_ref=float(entry_ref),
             invalidation_price=float(invalidation),
+            take_profit=float(target_price) if target_price is not None else None,
             max_hold_bars=int(getattr(signal, "max_hold_bars", 0) or 0),
             signal_timeframe=signal_timeframe,
             trend_timeframe=trend_timeframe,
@@ -588,8 +678,17 @@ class SignalLifecycleStore:
             "confirmed": counts.get("CONFIRMED", 0),
             "invalidated": counts.get("INVALIDATED", 0),
             "expired": counts.get("EXPIRED", 0),
+            "target_reached": counts.get("TARGET_REACHED", 0),
+            "stop_reached": counts.get("STOP_REACHED", 0),
+            "timeout_result": counts.get("TIMEOUT_RESULT", 0),
             "active": counts.get("TRIGGERED", 0) + counts.get("CONFIRMED", 0),
-            "terminal": counts.get("INVALIDATED", 0) + counts.get("EXPIRED", 0),
+            "terminal": (
+                counts.get("INVALIDATED", 0)
+                + counts.get("EXPIRED", 0)
+                + counts.get("TARGET_REACHED", 0)
+                + counts.get("STOP_REACHED", 0)
+                + counts.get("TIMEOUT_RESULT", 0)
+            ),
             "latest_event_type": latest_event_type,
             "latest_event_at": latest_event_at,
             "outbox": outbox,
@@ -636,7 +735,7 @@ class SignalLifecycleStore:
                 record.last_close = close
                 changed = True
 
-            if self._invalidates(record, close):
+            if record.status == "TRIGGERED" and self._invalidates(record, close):
                 record.status = "INVALIDATED"
                 record.invalidated_at = closed_time
                 record.last_event_type = "INVALIDATED"
@@ -655,7 +754,29 @@ class SignalLifecycleStore:
                 if lifecycle_events is not None:
                     lifecycle_events.append((record, "CONFIRMED", closed_time, record.status))
 
-            if record.max_hold_bars > 0 and bars_seen >= record.max_hold_bars:
+            if record.status == "CONFIRMED":
+                result_event = self._confirmed_result_event(record, close)
+                if result_event is not None:
+                    event_type, attr_name = result_event
+                    record.status = event_type
+                    setattr(record, attr_name, closed_time)
+                    record.last_event_type = event_type
+                    record.last_event_at = closed_time
+                    record.updated_at = _now_text()
+                    if lifecycle_events is not None:
+                        lifecycle_events.append((record, event_type, closed_time, record.status))
+                    return True
+                if record.max_hold_bars > 0 and bars_seen >= record.max_hold_bars:
+                    record.status = "TIMEOUT_RESULT"
+                    record.timeout_result_at = closed_time
+                    record.last_event_type = "TIMEOUT_RESULT"
+                    record.last_event_at = closed_time
+                    record.updated_at = _now_text()
+                    if lifecycle_events is not None:
+                        lifecycle_events.append((record, "TIMEOUT_RESULT", closed_time, record.status))
+                    return True
+
+            if record.status == "TRIGGERED" and record.max_hold_bars > 0 and bars_seen >= record.max_hold_bars:
                 record.status = "EXPIRED"
                 record.expired_at = closed_time
                 record.last_event_type = "EXPIRED"
@@ -680,6 +801,27 @@ class SignalLifecycleStore:
         if record.side == "long":
             return close <= record.invalidation_price
         return close >= record.invalidation_price
+
+    @staticmethod
+    def _target_reached(record: SignalLifecycleRecord, close: float) -> bool:
+        if record.take_profit is None:
+            return False
+        if record.side == "long":
+            return close >= record.take_profit
+        return close <= record.take_profit
+
+    @staticmethod
+    def _stop_reached(record: SignalLifecycleRecord, close: float) -> bool:
+        if record.side == "long":
+            return close <= record.invalidation_price
+        return close >= record.invalidation_price
+
+    def _confirmed_result_event(self, record: SignalLifecycleRecord, close: float) -> tuple[str, str] | None:
+        if self._target_reached(record, close):
+            return "TARGET_REACHED", "target_reached_at"
+        if self._stop_reached(record, close):
+            return "STOP_REACHED", "stop_reached_at"
+        return None
 
 
 __all__ = [

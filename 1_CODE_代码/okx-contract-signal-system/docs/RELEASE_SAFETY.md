@@ -15,5 +15,6 @@ Packaging rule:
 - Keep `.env.example` in the package as the only environment template.
 - Do not package `.env`, real Feishu webhook URLs, or OKX private credentials.
 - Exclude local runtime artifacts from formal source archives and Python source distributions: `build.log`, cache folders, pyc files, `output/`, `outputs/`, and SQLite/database files.
+- Build reusable release zip artifacts with `python scripts/build_release_zip.py --output dist/okx-contract-signal-system-release.zip`; zip entry names must use POSIX `/` separators so releases unpack consistently across platforms.
 - Keep release-facing product behavior limited to signal research, read-only data, and notification delivery.
 - Do not add release-facing copy, config examples, or package data that describe order submission, automatic closes, position polling, or account balance reads as available product behavior.

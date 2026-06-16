@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from okx_signal_system.data.loader import load_symbol_file
+from okx_signal_system.config import load_runtime_config
 from okx_signal_system.ml.regime_adaptive import AdaptiveParamsManager
 from okx_signal_system.paths import find_lightweight_history
 from okx_signal_system.risk.model import Ledger, RiskConfig
@@ -46,7 +47,7 @@ def latest_signal_payload(
         signal_timeframe=signal_timeframe,
         trend_timeframe=trend_timeframe,
         strategy_params=params,
-        risk_config=RiskConfig(),
+        risk_config=load_runtime_config().risk_config(),
         ledger=Ledger(inst_id, init_capital=10000, equity=10000),
         quality_gate_allows_push=True,
         min_vote_approval_rate=0.4,

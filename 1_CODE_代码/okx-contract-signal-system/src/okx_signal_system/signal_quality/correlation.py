@@ -9,7 +9,7 @@ from okx_signal_system.signal_quality.candidate import SignalCandidate
 
 DEFAULT_CORRELATION_WINDOW_DAYS = 30
 DEFAULT_HIGH_CORRELATION_THRESHOLD = 0.75
-DEFAULT_MIN_CORRELATION_SAMPLES = 8
+DEFAULT_MIN_CORRELATION_SAMPLES = 500
 
 
 def assign_correlation_groups(

@@ -5,7 +5,14 @@ from typing import Literal
 
 import pandas as pd
 
-from okx_signal_system.risk.costs import CostBreakdown, CostConfig, estimate_costs, participation_rate, slippage_bps_for_participation
+from okx_signal_system.risk.costs import (
+    CostBreakdown,
+    CostConfig,
+    estimate_costs,
+    research_position_size,
+    research_slippage_bps,
+)
+from okx_signal_system.risk.model import RiskConfig
 from okx_signal_system.signal_quality.outcome import SIGNAL_OUTCOME_POLICY, ExitReason, SignalOutcomeSimulator
 from okx_signal_system.strategy.trend_breakout import TradeSignal
 
@@ -28,7 +35,13 @@ class SignalExecutionResult:
     costs: CostBreakdown
 
 
-def simulate_signal_execution(signal: TradeSignal, future_bars: pd.DataFrame, *, cost_config: CostConfig = CostConfig()) -> SignalExecutionResult | None:
+def simulate_signal_execution(
+    signal: TradeSignal,
+    future_bars: pd.DataFrame,
+    *,
+    risk_config: RiskConfig = RiskConfig(),
+    cost_config: CostConfig = CostConfig(),
+) -> SignalExecutionResult | None:
     result = SignalOutcomeSimulator().simulate_signal(
         signal,
         future_bars,
@@ -45,17 +58,31 @@ def simulate_signal_execution(signal: TradeSignal, future_bars: pd.DataFrame, *,
     entry_rows = df[df["ts"] == _utc_timestamp(result.entry_time)]
     if entry_rows.empty:
         return None
-    slippage_bps = _slippage_bps_for_row(entry_rows.iloc[0], result.entry_price, cost_config=cost_config)
+    try:
+        qty, risk_unit, notional = research_position_size(
+            entry_price=result.entry_price,
+            stop_distance=result.stop_dist,
+            config=risk_config,
+        )
+        slippage_bps = _slippage_bps_for_row(
+            entry_rows.iloc[0],
+            notional=notional,
+            entry_price=result.entry_price,
+            cost_config=cost_config,
+        )
+    except ValueError:
+        return None
     costs = estimate_costs(
         entry_price=result.entry_price,
         exit_price=result.exit_price,
-        qty=1.0,
+        qty=qty,
         entry_time=_utc_timestamp(result.entry_time),
         exit_time=_utc_timestamp(result.exit_time),
         config=cost_config,
         slippage_bps=slippage_bps,
     )
-    final_net_r = float((((result.exit_price - result.entry_price) * side_mult) - costs.total) / result.stop_dist)
+    gross_pnl = (result.exit_price - result.entry_price) * qty * side_mult
+    final_net_r = float((gross_pnl - costs.total) / risk_unit)
     return SignalExecutionResult(
         outcome=result.outcome,
         exit_reason=result.exit_reason,
@@ -108,7 +135,13 @@ def _is_closed_value(value: object) -> bool:
     return bool(value)
 
 
-def _slippage_bps_for_row(row: pd.Series, entry_price: float, *, cost_config: CostConfig) -> float:
+def _slippage_bps_for_row(
+    row: pd.Series,
+    *,
+    notional: float,
+    entry_price: float,
+    cost_config: CostConfig,
+) -> float:
     volume = pd.to_numeric(pd.Series([row.get("volume")]), errors="coerce").iloc[0]
     if pd.isna(volume) or float(volume) <= 0:
         return cost_config.normal_slippage_bps
@@ -116,12 +149,14 @@ def _slippage_bps_for_row(row: pd.Series, entry_price: float, *, cost_config: Co
     if pd.isna(quote_volume) or float(quote_volume) <= 0:
         quote_volume = None
     try:
-        rate = participation_rate(
-            notional=abs(float(entry_price)),
+        return research_slippage_bps(
+            notional=abs(float(notional)),
             close=float(entry_price),
             volume=float(volume),
             quote_volume=float(quote_volume) if quote_volume is not None else None,
+            base_bps=cost_config.normal_slippage_bps,
         )
-        return slippage_bps_for_participation(rate, base_bps=cost_config.normal_slippage_bps)
+    except ValueError:
+        raise
     except Exception:
         return cost_config.normal_slippage_bps
