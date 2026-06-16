@@ -13,7 +13,7 @@ class DummySignal:
     ts = "2026-06-16T00:00:00+00:00"
 
 
-def test_signal_alert_includes_target_rr_and_risk_fields(monkeypatch) -> None:
+def test_signal_alert_includes_target_rr_without_account_fields(monkeypatch) -> None:
     sent: list[str] = []
 
     def fake_send_text(text: str, *args, **kwargs) -> bool:
@@ -40,7 +40,7 @@ def test_signal_alert_includes_target_rr_and_risk_fields(monkeypatch) -> None:
     text = sent[0]
     assert "OKX 信号观察" in text
     assert "目标盈亏比: 3.50R" in text
-    assert "账户止损风险: 1.00%" in text
+    assert "账户止损风险" not in text
     assert "仓位" not in text
     assert "杠杆" not in text
     assert "保证金" not in text

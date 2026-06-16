@@ -27,6 +27,7 @@ from okx_signal_system.exchange.okx import (
     get_candles,
     test_connection,
 )
+from okx_signal_system.io_atomic import read_parquet_with_retry, write_parquet_atomic
 from okx_signal_system.paths import find_lightweight_history
 from okx_signal_system.strategy.trend_breakout import TradeSignal, StrategyParams
 from okx_signal_system.risk.model import (
@@ -107,22 +108,11 @@ def _live_signal_history_limit(params: StrategyParams, *, signal_timeframe: str,
 
 
 def _read_parquet_with_retry(path: Path, attempts: int = 3) -> pd.DataFrame:
-    last_error: Exception | None = None
-    for attempt in range(attempts):
-        try:
-            return pd.read_parquet(path)
-        except Exception as exc:
-            last_error = exc
-            if attempt < attempts - 1:
-                time.sleep(0.2 * (attempt + 1))
-    assert last_error is not None
-    raise last_error
+    return read_parquet_with_retry(path, attempts=attempts)
 
 
 def _write_parquet_atomic(frame: pd.DataFrame, path: Path) -> None:
-    tmp_path = path.with_name(f"{path.stem}.{os.getpid()}.tmp{path.suffix}")
-    frame.to_parquet(tmp_path, index=False)
-    tmp_path.replace(path)
+    write_parquet_atomic(frame, path)
 
 
 def _json_default(value: Any) -> Any:
@@ -161,34 +151,8 @@ class MarketData:
 
 
 @dataclass
-class OrderRequest:
-    """订单请求"""
-    inst_id: str
-    side: Literal["open_long", "open_short", "close_long", "close_short"]
-    size: float
-    price: float | None = None  # None = 市价单
-    reduce_only: bool = False
-    stop_loss: float | None = None
-    take_profit: float | None = None
-
-
-@dataclass
-class OrderResponse:
-    """订单响应"""
-    order_id: str
-    inst_id: str
-    side: str
-    size: float
-    price: float
-    filled_size: float
-    avg_price: float
-    status: Literal["live", "filled", "cancelled", "rejected"]
-    timestamp: datetime
-
-
-@dataclass
 class Position:
-    """持仓信息"""
+    """Historical signal observation state; not an exchange position."""
     inst_id: str
     side: Literal["long", "short", "net"]
     size: float
@@ -197,16 +161,6 @@ class Position:
     margin: float
     leverage: float
     liquidation_price: float | None
-
-
-@dataclass
-class AccountBalance:
-    """账户余额"""
-    total_equity: float
-    available: float
-    margin_used: float
-    total_pnl: float
-    margin_ratio: float
 
 
 class RealtimeDataStore:
@@ -1234,8 +1188,6 @@ class LiveSignalMonitor:
         while self._running:
             cycle_health: list[dict[str, Any]] = []
             try:
-                pos_inst_ids: set[str] = set()
-
                 scan_result = await self._scan_service.scan_cycle(
                     self.api._watched_symbols,
                     SignalScanContext(
@@ -1249,7 +1201,6 @@ class LiveSignalMonitor:
                         min_vote_approval_rate=self._min_vote_approval_rate,
                         mode="live_scan_manual_confirmation_only",
                         min_history_bars=50,
-                        position_symbols=frozenset(pos_inst_ids),
                         shadow_score_min_closed=self._shadow_score_min_closed,
                     ),
                 )

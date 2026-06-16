@@ -50,6 +50,7 @@ OKX 行情数据 -> 信号研究 -> 信号质量复核 -> 飞书推送
 - 不轮询真实持仓，不读取账户余额。
 - 不提供可切换为自动化交易的配置示例。
 - 止损、止盈、持有时长和风险值只作为研究标注，仅供人工复核。
+- 本地历史数据通过 `JIAOYI_DATA_DIR` 或工作区发现载入，发布默认配置不绑定个人机器路径。
 
 ## 自进化能力详解
 
@@ -246,8 +247,9 @@ src/okx_signal_system/
 │   ├── loader.py             # 数据加载
 │   └── gap_handler.py        # 数据回补
 ├── exchange/
-│   ├── okx.py                # OKX API基础接口
-│   └── realtime.py           # 行情实时接口
+│   ├── okx_public.py         # OKX 公开行情只读适配器
+│   ├── okx.py                # 只读适配器兼容导出
+│   └── realtime.py           # 行情实时接口与信号扫描联动
 └── notification/
     └── feishu.py              # 飞书推送
 ```

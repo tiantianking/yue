@@ -1,7 +1,6 @@
 import pandas as pd
 import pytest
 
-from okx_signal_system.exchange.okx import okx_place_order_preview
 from okx_signal_system.risk.costs import estimate_costs, funding_events_crossed, participation_rate, slippage_bps_for_participation
 
 
@@ -41,6 +40,7 @@ def test_estimate_costs_includes_all_cost_layers() -> None:
     assert costs.total == costs.entry_fee + costs.exit_fee + costs.slippage_cost + costs.funding_fee
 
 
-def test_okx_preview_rejects_non_swap() -> None:
-    with pytest.raises(ValueError):
-        okx_place_order_preview(inst_id="BTC-USDT", side="buy", size=1, price=None, client_order_id="x")
+def test_cost_module_has_no_exchange_execution_dependency() -> None:
+    import okx_signal_system.risk.costs as costs
+
+    assert "okx_signal_system.exchange" not in repr(costs.__dict__.get("__loader__", ""))

@@ -1,6 +1,6 @@
 """
 OKX 合约信号系统 - 24小时自动调度器
-每15分钟扫描15个币种，产出交易信号
+每15分钟扫描配置币种，产出人工复核信号
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 
 SCAN_INTERVAL_SECONDS = 15 * 60  # 15分钟
 STATUS_INTERVAL_SECONDS = 30 * 60  # 30分钟状态推送
-GLOBAL_INITIAL_EQUITY = 10000.0  # 总初始本金
+GLOBAL_INITIAL_EQUITY = 10000.0  # 兼容历史风险配置；正式输出不展示账户资金
 DEFAULT_DATASET = "okx_15m_extended"
 DEFAULT_SIGNAL_TIMEFRAME = "15m"
 DEFAULT_TREND_TIMEFRAME = "1h"
@@ -144,7 +144,7 @@ def run_scan_cycle(
     signal_timeframe: str = DEFAULT_SIGNAL_TIMEFRAME,
     trend_timeframe: str = DEFAULT_TREND_TIMEFRAME,
 ) -> tuple[list[dict], Ledger]:
-    """执行一次完整扫描，返回信号列表和更新后的账本"""
+    """执行一次完整扫描，返回信号列表和兼容账本"""
     results: list[dict] = []
     for symbol in symbols:
         inst_id = symbol_to_inst_id(symbol)
@@ -174,12 +174,14 @@ def format_signal_summary(signals: list[dict]) -> str:
     for s in signals:
         d = s["decision"]
         sig = s["signal"]
+        rr = d.risk_reward_ratio if d.risk_reward_ratio is not None else sig.risk_reward_ratio
+        score = d.signal_score if d.signal_score is not None else sig.signal_score
         lines.append(
             f"✅ {s['inst_id']}: "
             f"方向={sig.side} | "
-            f"qty={d.qty:.4f} | "
-            f"杠杆={d.leverage_used:.1f}x | "
-            f"止盈={sig.take_profit:.4f}"
+            f"评分={float(score or 0):.1f} | "
+            f"目标盈亏比={float(rr or 0):.2f}R | "
+            f"分析目标={float(sig.take_profit or 0):.4f}"
         )
     return "\n".join(lines)
 
@@ -190,11 +192,9 @@ def format_status_message(ledger: Ledger, cycle_count: int) -> str:
         f"🔔 系统状态报告\n"
         f"时间: {_now_utc().strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
         f"扫描周期: #{cycle_count}\n"
-        f"账户 equity: ${ledger.equity:.2f}\n"
-        f"持仓数: {ledger.open_positions}\n"
+        f"模式: SIGNAL_ONLY\n"
         f"状态: {ledger.status}\n"
-        f"连续亏损: {ledger.loss_streak}\n"
-        f"最大回撤: {ledger.max_drawdown:.2%}"
+        f"说明: 只做信号研究和人工复核通知"
     )
 
 
@@ -246,12 +246,9 @@ class SignalScheduler:
         if results:
             for r in results:
                 sig = r["signal"]
-                dec = r["decision"]
                 feishu.feishu_send_signal_card(
                     inst_id=r["inst_id"],
                     direction=sig.side,
-                    qty=dec.qty or 0,
-                    leverage=dec.leverage_used or 0,
                     entry_price=sig.entry_ref or 0,
                     stop_loss=sig.stop_loss or 0,
                     take_profit=sig.take_profit or 0,
@@ -261,11 +258,7 @@ class SignalScheduler:
         # 每30分钟推送状态到飞书
         if self._cycle % 2 == 0:
             feishu.feishu_send_status_card(
-                equity=self._ledger.equity,
-                tracked_items=self._ledger.open_positions,
                 status=self._ledger.status,
-                loss_streak=self._ledger.loss_streak,
-                max_drawdown=self._ledger.max_drawdown,
                 cycle_count=self._cycle,
                 last_signal_count=len(results),
             )

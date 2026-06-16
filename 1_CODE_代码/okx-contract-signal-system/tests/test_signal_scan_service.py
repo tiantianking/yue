@@ -36,8 +36,10 @@ class FakeQualityShadow:
 class FakeLifecycleStore:
     def __init__(self):
         self.recorded = []
+        self.updated = []
 
-    def update_symbol(self, _inst_id, _frame):
+    def update_symbol(self, inst_id, _frame):
+        self.updated.append(inst_id)
         return 0
 
     def record_signal(self, signal, **kwargs):
@@ -48,8 +50,10 @@ class FakeLifecycleStore:
 class FakeShadowLedger:
     def __init__(self):
         self.min_closed_values = []
+        self.updated = []
 
-    def update_symbol(self, _inst_id, _frame):
+    def update_symbol(self, inst_id, _frame):
+        self.updated.append(inst_id)
         return 0
 
     def score_adjustment(self, _inst_id, _side, *, min_closed=6):
@@ -152,6 +156,74 @@ def test_signal_scan_service_returns_ranked_ready_candidate(monkeypatch) -> None
     assert result.ready_candidates[0].payload["mode"] == "test_manual_confirmation_only"
     assert shadow_ledger.min_closed_values == [9]
     assert lifecycle.recorded
+
+
+def test_signal_scan_service_does_not_suppress_signal_for_account_position(monkeypatch) -> None:
+    async def loader(_inst_id: str, _limit: int) -> pd.DataFrame:
+        return _frame()
+
+    def fake_build_feature_frame(frame, **_kwargs):
+        out = frame.copy()
+        out["atr"] = 2.0
+        out["atr_pct"] = 0.02
+        out["breakout_high"] = 99.0
+        out["breakout_low"] = 95.0
+        out["trend_bias"] = "long"
+        out["ema_fast"] = 101.0
+        out["ema_slow"] = 99.0
+        out["vol_ratio"] = 1.2
+        out["signal_timeframe"] = "15m"
+        out["trend_timeframe"] = "1h"
+        return out
+
+    def fake_build_signal(row, *, inst_id, params, frame, idx):
+        return TradeSignal(
+            ts=row["ts"],
+            inst_id=inst_id,
+            side="long",
+            entry_ref=100.0,
+            stop_loss=92.0,
+            take_profit=148.0,
+            max_hold_bars=params.max_hold_bars,
+            reason_codes=("TEST",),
+            signal_score=7.0,
+            risk_reward_ratio=6.0,
+        )
+
+    monkeypatch.setattr("okx_signal_system.signal_service.scan.build_feature_frame", fake_build_feature_frame)
+    monkeypatch.setattr("okx_signal_system.signal_service.scan.build_signal", fake_build_signal)
+    monkeypatch.setattr(
+        "okx_signal_system.signal_service.scan.ensemble_vote",
+        lambda *args, **kwargs: EnsembleResult("long", 8.0, [], 1.0, "test"),
+    )
+
+    service = SignalScanService(
+        candle_loader=loader,
+        regime_manager=FakeRegimeManager(),
+        quality_model_shadow=FakeQualityShadow(),
+        lifecycle_store=FakeLifecycleStore(),
+        shadow_ledger=FakeShadowLedger(),
+        notify_key_builder=lambda signal: f"{signal.inst_id}:{signal.side}",
+    )
+    context = SignalScanContext(
+        dataset="test",
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+        strategy_params=StrategyParams(),
+        risk_config=RiskConfig(),
+        ledger=Ledger("portfolio", init_capital=10000, equity=10000, open_positions=1),
+        quality_gate_allows_push=True,
+        min_vote_approval_rate=0.4,
+        mode="test_manual_confirmation_only",
+        min_history_bars=5,
+        expected_latest_closed=pd.Timestamp("2026-01-01T02:45:00Z"),
+        now=pd.Timestamp("2026-01-01T03:05:00Z"),
+    )
+
+    result = asyncio.run(service.scan_cycle(["BTC-USDT-SWAP"], context))
+
+    assert result.cycle_health[0]["reason"] == "ready"
+    assert len(result.ready_candidates) == 1
 
 
 def test_signal_scan_service_applies_shadow_adjustment_once(monkeypatch) -> None:
@@ -262,6 +334,9 @@ def test_signal_scan_service_respects_checked_bar_gate() -> None:
 
 
 def test_signal_scan_service_rejects_future_closed_bar() -> None:
+    lifecycle = FakeLifecycleStore()
+    shadow_ledger = FakeShadowLedger()
+
     async def loader(_inst_id: str, _limit: int) -> pd.DataFrame:
         return _frame()
 
@@ -269,8 +344,8 @@ def test_signal_scan_service_rejects_future_closed_bar() -> None:
         candle_loader=loader,
         regime_manager=FakeRegimeManager(),
         quality_model_shadow=FakeQualityShadow(),
-        lifecycle_store=FakeLifecycleStore(),
-        shadow_ledger=FakeShadowLedger(),
+        lifecycle_store=lifecycle,
+        shadow_ledger=shadow_ledger,
     )
     context = SignalScanContext(
         dataset="test",
@@ -291,10 +366,55 @@ def test_signal_scan_service_rejects_future_closed_bar() -> None:
 
     assert result.cycle_health[0]["reason"] == "future_closed_bar"
     assert result.ready_candidates == []
+    assert lifecycle.recorded == []
+    assert lifecycle.updated == []
+    assert shadow_ledger.updated == []
+    assert shadow_ledger.min_closed_values == []
+
+
+def test_signal_scan_service_does_not_update_state_before_closed_bar_gate() -> None:
+    lifecycle = FakeLifecycleStore()
+    shadow_ledger = FakeShadowLedger()
+
+    async def loader(_inst_id: str, _limit: int) -> pd.DataFrame:
+        return _frame()
+
+    service = SignalScanService(
+        candle_loader=loader,
+        regime_manager=FakeRegimeManager(),
+        quality_model_shadow=FakeQualityShadow(),
+        lifecycle_store=lifecycle,
+        shadow_ledger=shadow_ledger,
+    )
+    context = SignalScanContext(
+        dataset="test",
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+        strategy_params=StrategyParams(),
+        risk_config=RiskConfig(),
+        ledger=Ledger("portfolio", init_capital=10000, equity=10000),
+        quality_gate_allows_push=True,
+        min_vote_approval_rate=0.4,
+        mode="test_manual_confirmation_only",
+        min_history_bars=5,
+        expected_latest_closed=pd.Timestamp("2026-01-01T03:00:00Z"),
+        now=pd.Timestamp("2026-01-01T03:05:00Z"),
+    )
+
+    result = asyncio.run(service.scan_cycle(["BTC-USDT-SWAP"], context))
+
+    assert result.cycle_health[0]["reason"] == "missing_latest_closed_bar"
+    assert result.candidate_history == {}
+    assert lifecycle.recorded == []
+    assert lifecycle.updated == []
+    assert shadow_ledger.updated == []
+    assert shadow_ledger.min_closed_values == []
 
 
 def test_signal_scan_service_retries_feature_error_bar(monkeypatch) -> None:
     checked = {}
+    lifecycle = FakeLifecycleStore()
+    shadow_ledger = FakeShadowLedger()
 
     async def loader(_inst_id: str, _limit: int) -> pd.DataFrame:
         return _frame()
@@ -307,8 +427,8 @@ def test_signal_scan_service_retries_feature_error_bar(monkeypatch) -> None:
         candle_loader=loader,
         regime_manager=FakeRegimeManager(),
         quality_model_shadow=FakeQualityShadow(),
-        lifecycle_store=FakeLifecycleStore(),
-        shadow_ledger=FakeShadowLedger(),
+        lifecycle_store=lifecycle,
+        shadow_ledger=shadow_ledger,
     )
     context = SignalScanContext(
         dataset="test",
@@ -330,10 +450,15 @@ def test_signal_scan_service_retries_feature_error_bar(monkeypatch) -> None:
 
     assert result.cycle_health[0]["reason"] == "feature_error"
     assert checked == {}
+    assert lifecycle.recorded == []
+    assert lifecycle.updated == []
+    assert shadow_ledger.updated == []
 
 
 def test_signal_scan_service_retries_invalid_features_bar(monkeypatch) -> None:
     checked = {}
+    lifecycle = FakeLifecycleStore()
+    shadow_ledger = FakeShadowLedger()
 
     async def loader(_inst_id: str, _limit: int) -> pd.DataFrame:
         return _frame()
@@ -343,8 +468,8 @@ def test_signal_scan_service_retries_invalid_features_bar(monkeypatch) -> None:
         candle_loader=loader,
         regime_manager=FakeRegimeManager(),
         quality_model_shadow=FakeQualityShadow(),
-        lifecycle_store=FakeLifecycleStore(),
-        shadow_ledger=FakeShadowLedger(),
+        lifecycle_store=lifecycle,
+        shadow_ledger=shadow_ledger,
     )
     context = SignalScanContext(
         dataset="test",
@@ -366,6 +491,9 @@ def test_signal_scan_service_retries_invalid_features_bar(monkeypatch) -> None:
 
     assert result.cycle_health[0]["reason"] == "invalid_features"
     assert checked == {}
+    assert lifecycle.recorded == []
+    assert lifecycle.updated == []
+    assert shadow_ledger.updated == []
 
 
 def test_signal_scan_service_retries_after_strategy_scan_error(monkeypatch) -> None:

@@ -1,6 +1,9 @@
 import pandas as pd
 from pathlib import Path
 
+import pytest
+
+from tests._integration import require_lightweight_history
 from okx_signal_system.data.closed_backfill import latest_closed_candle_start, seconds_until_next_closed_run
 from okx_signal_system.data.gap_handler import DataGap, DataGapHandler, summarize_sync_error
 from okx_signal_system.data.loader import closed_bars, file_symbol_to_inst_id, file_timeframe, load_symbol_file
@@ -10,8 +13,9 @@ from okx_signal_system.paths import find_lightweight_history
 from okx_signal_system.timeframe import bars_for_hours, default_trend_timeframe, timeframe_spec
 
 
+@pytest.mark.integration
 def test_find_okx_history_root() -> None:
-    root = find_lightweight_history("okx_1h_extended")
+    root = require_lightweight_history("okx_1h_extended", "BTC_USDT_USDT_1h.parquet")
     assert (root / "BTC_USDT_USDT_1h.parquet").exists()
 
 
@@ -46,8 +50,10 @@ def test_find_history_uses_onedir_internal_data_root(tmp_path, monkeypatch) -> N
     assert find_lightweight_history(dataset) == expected
 
 
+@pytest.mark.integration
 def test_file_symbol_maps_to_okx_inst_id() -> None:
-    assert file_symbol_to_inst_id(find_lightweight_history("okx_1h_extended") / "BTC_USDT_USDT_1h.parquet") == "BTC-USDT-SWAP"
+    history = require_lightweight_history("okx_1h_extended", "BTC_USDT_USDT_1h.parquet")
+    assert file_symbol_to_inst_id(history / "BTC_USDT_USDT_1h.parquet") == "BTC-USDT-SWAP"
 
 
 def test_list_parquet_files_ignores_atomic_tmp_files(tmp_path, monkeypatch) -> None:
@@ -75,8 +81,10 @@ def test_closed_backfill_waits_for_confirmed_bar() -> None:
     assert 7 * 60 < seconds_until_next_closed_run("15m", now=now, settle_seconds=60) < 10 * 60
 
 
+@pytest.mark.integration
 def test_load_symbol_file_normalizes_columns() -> None:
-    data = load_symbol_file(find_lightweight_history("okx_1h_extended") / "BTC_USDT_USDT_1h.parquet")
+    history = require_lightweight_history("okx_1h_extended", "BTC_USDT_USDT_1h.parquet")
+    data = load_symbol_file(history / "BTC_USDT_USDT_1h.parquet")
     assert data.inst_id == "BTC-USDT-SWAP"
     assert {"ts", "open", "high", "low", "close", "volume", "is_closed"}.issubset(data.frame.columns)
     assert str(data.frame["ts"].dt.tz) == "UTC"
@@ -133,8 +141,10 @@ def test_gap_handler_uses_configured_history_root(tmp_path, monkeypatch) -> None
     assert handler.data_dir == dataset_root
 
 
+@pytest.mark.integration
 def test_quality_audit_passes_btc_history() -> None:
-    data = load_symbol_file(find_lightweight_history("okx_1h_extended") / "BTC_USDT_USDT_1h.parquet")
+    history = require_lightweight_history("okx_1h_extended", "BTC_USDT_USDT_1h.parquet")
+    data = load_symbol_file(history / "BTC_USDT_USDT_1h.parquet")
     result = audit_symbol(data)
     assert result.status == "passed"
     assert result.duplicate_ts == 0

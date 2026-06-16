@@ -49,4 +49,6 @@ def test_readable_trades_renames_columns():
     assert "净盈亏" in table.columns
     assert "数量" not in table.columns
     assert "杠杆上限" not in table.columns
-    assert "样本数量" in table.columns
+    assert "样本数量" not in table.columns
+    assert "参考价" in table.columns
+    assert "结果价" in table.columns

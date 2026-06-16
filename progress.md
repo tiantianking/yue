@@ -272,3 +272,70 @@
 - `progress.md`: appended this task record.
 - Runtime outputs such as `outputs/pushed_signals.sqlite3` and `outputs/signal_lifecycle.json` were left uncommitted.
 - Rollback method: revert the upcoming commit `fix: tighten scan data gates`.
+
+## 2026-06-16 - Task: Connect Local MCP Codex Bridge
+### What was done
+- Added a local Streamable HTTP MCP bridge for `D:\JIAOYI-CX` under `LOCAL_RUN/mcp-codex-bridge`.
+- Exposed initial MCP tools for connectivity, read-only workspace snapshot, and Codex CLI availability status.
+- Fixed MCP session handling so initialization and later requests reuse the same session transport.
+- Started the bridge on `http://127.0.0.1:8765/mcp` and documented the current connection boundary.
+### Testing
+- `Invoke-RestMethod -Uri http://127.0.0.1:8765/health` passed and returned `ok: true`.
+- `D:\JIAOYI-CX\LOCAL_RUN\mcp-codex-bridge> node inspect-client.js` passed.
+- MCP inspection listed `ping`, `repo_snapshot`, and `codex_status`.
+- `ping` returned `pong`.
+- `codex_status` returned `available: false` with `spawn EPERM`, confirming the bridge is reachable but Codex CLI execution is not ready yet.
+### Notes
+- `LOCAL_RUN/mcp-codex-bridge/package.json`: defined the local MCP bridge package and npm scripts.
+- `LOCAL_RUN/mcp-codex-bridge/package-lock.json`: locked the MCP SDK, Express, and Zod dependency versions.
+- `LOCAL_RUN/mcp-codex-bridge/server.js`: implemented the MCP bridge, session transport reuse, and initial tools.
+- `LOCAL_RUN/mcp-codex-bridge/inspect-client.js`: added a local MCP verification client.
+- `docs/mcp-codex-bridge.md`: documented startup, verification, tools, and the ChatGPT connection boundary.
+- `progress.md`: appended this task record.
+- Rollback method: stop the bridge Node process on port `8765`, delete `LOCAL_RUN/mcp-codex-bridge`, remove `docs/mcp-codex-bridge.md`, and revert this `progress.md` entry if the bridge is no longer needed.
+
+## 2026-06-16 - Task: Make MCP Bridge Unattended
+### What was done
+- Extended the local MCP bridge with a persistent JSON-backed task queue and task lifecycle tools.
+- Added a local worker CLI so the Codex heartbeat can claim, finish, cancel, and inspect queued tasks.
+- Created a Codex app heartbeat automation that checks the queue every 5 minutes and handles at most one task per run.
+- Added a user-logon startup shortcut so the bridge restarts after login without requiring manual relaunch.
+- Documented the unattended execution boundary and the ChatGPT connection limit in the bridge doc.
+### Testing
+- `Invoke-RestMethod -Uri http://127.0.0.1:8765/health` passed.
+- `D:\JIAOYI-CX\LOCAL_RUN\mcp-codex-bridge> node inspect-client.js` passed and listed `ping`, `repo_snapshot`, `codex_status`, `submit_task`, `list_tasks`, `task_status`, `cancel_task`, and `queue_summary`.
+- `D:\JIAOYI-CX\LOCAL_RUN\mcp-codex-bridge> node worker-cli.js summary` passed.
+- `D:\JIAOYI-CX\LOCAL_RUN\mcp-codex-bridge> node queue-smoke-test.js` passed, then the task was cancelled cleanly.
+- `D:\JIAOYI-CX\LOCAL_RUN\mcp-codex-bridge> node worker-cli.js claim` returned `null` after cleanup, confirming no queued task remained.
+- Attempt to register a Windows scheduled task failed with `Access is denied`, so that path was not used.
+### Notes
+- `LOCAL_RUN/mcp-codex-bridge/task-store.js`: added persistent queue storage and task lifecycle helpers.
+- `LOCAL_RUN/mcp-codex-bridge/server.js`: exposed task queue MCP tools alongside the connectivity tools.
+- `LOCAL_RUN/mcp-codex-bridge/worker-cli.js`: added queue claim/finish/cancel/inspect commands for unattended execution.
+- `LOCAL_RUN/mcp-codex-bridge/start-bridge.ps1`: added a repeatable start entrypoint for the bridge.
+- `LOCAL_RUN/mcp-codex-bridge/start-bridge.cmd`: added a logon-friendly launcher wrapper.
+- `LOCAL_RUN/mcp-codex-bridge/install-scheduled-task.ps1`: attempted Windows scheduled-task registration; it is present but not usable here because of permission denial.
+- `LOCAL_RUN/mcp-codex-bridge/queue-smoke-test.js`: added a safe queue smoke test that creates and cleans up a task.
+- `LOCAL_RUN/mcp-codex-bridge/inspect-client.js`: extended the local inspection client to verify queue summary.
+- `LOCAL_RUN/mcp-codex-bridge/package.json`: added worker and queue npm scripts.
+- `docs/mcp-codex-bridge.md`: documented unattended queue operation, startup recovery, and cloud-access boundary.
+- `progress.md`: appended this task record.
+- `C:\Users\26492\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\Codex MCP Bridge.lnk`: created a user-logon shortcut to relaunch the bridge.
+- Rollback method: remove the startup shortcut, stop the bridge process on port `8765`, delete `LOCAL_RUN/mcp-codex-bridge\data`, remove the added bridge files, delete the heartbeat automation, and revert this `progress.md` entry.
+
+## 2026-06-16 - Task: v3.41 signal-only runtime and panel cleanup
+### What was done
+- Removed the last account-position suppression path from the formal scan service so signal decisions no longer depend on account position state.
+- Reworked the Streamlit panel, scheduler, and Feishu status copy to show signal-only metrics and observation context instead of quantity, leverage, equity, or tracked-position fields.
+- Removed the hard-coded local history root from the release config, kept `JIAOYI_DATA_DIR` and workspace discovery as the runtime data path, and documented that release behavior.
+- Kept the public OKX adapter as read-only market data only and preserved the compatibility export wrapper.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m compileall src\okx_signal_system\signal_service\scan.py src\okx_signal_system\signal_service\app.py src\okx_signal_system\scheduler.py src\okx_signal_system\notify\feishu.py src\okx_signal_system\exchange\realtime.py` -> passed.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests\test_config.py tests\test_data_layer.py tests\test_release_safety.py tests\test_signal_scan_service.py -q` -> `39 passed, 4 skipped`.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest` -> `154 passed, 18 skipped`.
+- `npm.cmd run check` in `dashboard` -> passed.
+- `Invoke-RestMethod http://127.0.0.1:3001/api/dashboard` -> returned dashboard JSON with 21 configured symbols, healthy closed-Kline backfill, connected WebSocket, lifecycle summary, and live scan status; latest runtime status was `stale`, reflecting old live-message age rather than a code failure.
+- In-app Browser attempted to open `http://127.0.0.1:3001`, but enterprise network policy blocked the action; no workaround was used.
+### Notes
+- Modified files: `config/base.yaml` clears the hard-coded local data root; `src/okx_signal_system/signal_service/scan.py` removes account-position suppression and delays shadow/lifecycle writes until feature/signal generation succeeds; `src/okx_signal_system/signal_service/app.py`, `src/okx_signal_system/scheduler.py`, and `src/okx_signal_system/notify/feishu.py` remove account/position-heavy display fields from the visible runtime; `src/okx_signal_system/exchange/realtime.py` stops passing `position_symbols`; `docs/RELEASE_SAFETY.md` and `docs/SYSTEM_ARCHITECTURE.md` document the runtime data path and read-only OKX adapter boundary; `tests/test_config.py`, `tests/test_panel_view.py`, `tests/test_release_safety.py`, and `tests/test_signal_scan_service.py` lock in the new runtime behavior; `progress.md` records this round.
+- Rollback: revert the listed files to the previous git diff state and remove this appended progress entry. For the runtime data path only, restore the prior `config/base.yaml` `root_dir` value if you need the old local-machine default back.

@@ -20,6 +20,19 @@ PRIVATE_OKX_TOKENS = [
     "OKX_SECRET_KEY",
     "OKX_PASSPHRASE",
 ]
+RELEASE_ARTIFACT_EXCLUDES = [
+    ".env",
+    ".env.*",
+    "build.log",
+    ".pytest_cache/",
+    "__pycache__/",
+    "*.py[cod]",
+    "output/",
+    "outputs/*",
+    "*.sqlite",
+    "*.sqlite3",
+    "*.db",
+]
 
 
 def _read(path: str) -> str:
@@ -28,6 +41,14 @@ def _read(path: str) -> str:
 
 def _release_text() -> str:
     return "\n".join(_read(path) for path in RELEASE_TEXT_FILES)
+
+
+def _manifest_lines() -> list[str]:
+    return [line.strip() for line in _read("MANIFEST.in").splitlines() if line.strip()]
+
+
+def _gitattributes_lines() -> list[str]:
+    return [line.strip() for line in _read(".gitattributes").splitlines() if line.strip()]
 
 
 def test_env_example_is_signal_only_and_has_no_private_okx_keys() -> None:
@@ -47,6 +68,7 @@ def test_release_defaults_are_signal_only_read_only_notifications() -> None:
 
     assert cfg["project"]["mode"] == "SIGNAL_ONLY"
     assert cfg["data"]["read_only"] is True
+    assert cfg["data"]["root_dir"] in {None, ""}
     assert cfg["execution"]["live_order_enabled"] is False
     assert cfg["execution"]["auto_close_enabled"] is False
     assert cfg["execution"]["dry_run_enabled"] is True
@@ -69,6 +91,39 @@ def test_gitignore_blocks_real_env_but_keeps_example() -> None:
     assert ".env" in lines
     assert ".env.*" in lines
     assert "!.env.example" in lines
+    for pattern in RELEASE_ARTIFACT_EXCLUDES:
+        assert pattern in lines
+
+
+def test_source_distribution_manifest_excludes_runtime_artifacts() -> None:
+    manifest = "\n".join(_manifest_lines())
+
+    for pattern in [".env .env.*", "*.py[cod]", "*.sqlite *.sqlite3 *.db", "build.log"]:
+        assert pattern in manifest
+    for directory in [".pytest_cache", "__pycache__", "output", "outputs"]:
+        assert f"prune {directory}" in manifest
+
+
+def test_source_archive_export_ignores_runtime_artifacts() -> None:
+    lines = _gitattributes_lines()
+
+    for pattern in [
+        ".env export-ignore",
+        ".env.* export-ignore",
+        ".env.example -export-ignore",
+        "build.log export-ignore",
+        ".pytest_cache/** export-ignore",
+        "__pycache__/** export-ignore",
+        "**/__pycache__/** export-ignore",
+        "output/** export-ignore",
+        "outputs/** export-ignore",
+        "*.pyc export-ignore",
+        "*.pyo export-ignore",
+        "*.sqlite export-ignore",
+        "*.sqlite3 export-ignore",
+        "*.db export-ignore",
+    ]:
+        assert pattern in lines
 
 
 def test_release_docs_do_not_advertise_live_order_defaults() -> None:
@@ -115,3 +170,63 @@ def test_release_facing_text_is_signal_only() -> None:
     ]
     for token in forbidden:
         assert token not in text
+
+
+def test_pyinstaller_datas_do_not_include_runtime_artifacts() -> None:
+    spec = _read("okx_signal.spec")
+    forbidden = [
+        "('.env', '.')",
+        '(".env", ".")',
+        "build.log",
+        "outputs",
+        "output",
+        ".pytest_cache",
+        "__pycache__",
+        ".sqlite",
+        ".sqlite3",
+        ".db",
+    ]
+
+    for token in forbidden:
+        assert token not in spec
+
+
+def test_realtime_runtime_api_does_not_expose_trade_execution() -> None:
+    from okx_signal_system.exchange.realtime import OKXRealtimeAPI
+
+    api = OKXRealtimeAPI.__new__(OKXRealtimeAPI)
+
+    for name in ["place_order", "cancel_order", "get_positions", "get_account_balance", "close_position"]:
+        assert not hasattr(api, name)
+    assert hasattr(api, "get_market_data")
+    assert hasattr(api, "get_candles")
+
+
+def test_okx_release_adapter_is_public_market_data_only() -> None:
+    source = "\n".join(
+        [
+            _read("src/okx_signal_system/exchange/okx.py"),
+            _read("src/okx_signal_system/exchange/okx_public.py"),
+            _read("okx_signal.spec"),
+        ]
+    )
+
+    forbidden = [
+        "OKX_SECRET_KEY",
+        "OKX_API_KEY",
+        "OKX_PASSPHRASE",
+        "OK-ACCESS-KEY",
+        "OK-ACCESS-SIGN",
+        "hmac",
+        "/api/v5/account/",
+        "/api/v5/trade/",
+        "place_order",
+        "close_position",
+        "get_open_orders",
+        "get_account_balance",
+        "get_account_positions",
+        "okx.account",
+        "okx.trade",
+    ]
+    for token in forbidden:
+        assert token not in source

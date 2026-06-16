@@ -1,9 +1,8 @@
-"""Manual position records and optional automatic stop monitoring."""
+"""Signal outcome records and stop/target observation."""
 from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 import time
 from dataclasses import asdict, dataclass
@@ -139,10 +138,11 @@ class PositionRecordStore:
 
 
 class AutoStopMonitor:
-    """Polls recorded positions and closes only when explicitly enabled.
+    """Poll recorded signal outcomes and report stop/target triggers.
 
-    Real orders are disabled by default. Set OKX_AUTO_CLOSE_ENABLED=true to allow
-    the monitor to submit reduce-only close orders through the OKX adapter.
+    This SIGNAL_ONLY runtime never submits close orders. The monitor exists only
+    to observe whether a manually reviewed signal reached its analysis stop or
+    target after being recorded.
     """
 
     def __init__(
@@ -157,11 +157,7 @@ class AutoStopMonitor:
         self.trigger_buffer_pct = trigger_buffer_pct
         self.cost_config = cost_config or CostConfig()
         self.record_store = store or PositionRecordStore()
-        self.auto_close_enabled = (
-            os.environ.get("OKX_AUTO_CLOSE_ENABLED", "false").lower() == "true"
-            if auto_close_enabled is None
-            else auto_close_enabled
-        )
+        self.auto_close_enabled = False
         self._running = False
         self._thread: threading.Thread | None = None
         self._on_close_callback: Callable[[CloseResult], None] | None = None
@@ -239,29 +235,15 @@ class AutoStopMonitor:
         self._notified_triggers.add(marker)
 
         result = self._build_close_result(record, current_price, reason)
-        if not self.auto_close_enabled:
-            log.warning(
-                "Auto close disabled; %s hit %s at %.8f",
-                record.key,
-                reason,
-                current_price,
-            )
-            if self._on_close_callback:
-                self._on_close_callback(result)
-            return
-
-        try:
-            from okx_signal_system.exchange.okx import close_position
-
-            response = close_position(record.inst_id, record.size)
-            if response.get("code") != "0":
-                raise RuntimeError(response.get("msg", "close order failed"))
-            self.record_store.delete(record.key)
-            if self._on_close_callback:
-                self._on_close_callback(result)
-            self._send_close_notification(result)
-        except Exception as exc:
-            log.error("Failed to close %s: %s", record.key, exc)
+        log.warning(
+            "Signal outcome trigger observed; %s hit %s at %.8f",
+            record.key,
+            reason,
+            current_price,
+        )
+        if self._on_close_callback:
+            self._on_close_callback(result)
+        self._send_close_notification(result)
 
     def _build_close_result(self, record: PositionRecord, exit_price: float, reason: str) -> CloseResult:
         side_mult = 1.0 if record.side == "long" else -1.0

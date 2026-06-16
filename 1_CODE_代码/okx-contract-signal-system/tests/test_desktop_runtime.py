@@ -186,12 +186,7 @@ def test_auto_stop_price_trigger_logic() -> None:
     assert monitor._check_price(short_record, 89.9) == (True, "take_profit")
 
 
-def test_manual_confirmation_auto_stop_trigger_does_not_close_live_order(monkeypatch, tmp_path) -> None:
-    from okx_signal_system.exchange import okx
-
-    calls = []
-    monkeypatch.setattr(okx, "close_position", lambda *args, **kwargs: calls.append((args, kwargs)))
-
+def test_manual_confirmation_auto_stop_trigger_only_reports_signal_outcome(tmp_path) -> None:
     monitor = AutoStopMonitor(auto_close_enabled=False, store=PositionRecordStore(tmp_path))
     results = []
     monitor.set_on_close_callback(results.append)
@@ -208,7 +203,6 @@ def test_manual_confirmation_auto_stop_trigger_does_not_close_live_order(monkeyp
 
     monitor._handle_trigger(record, 94.5, "stop_loss")
 
-    assert calls == []
     assert len(results) == 1
     assert results[0].exit_reason == "stop_loss"
 

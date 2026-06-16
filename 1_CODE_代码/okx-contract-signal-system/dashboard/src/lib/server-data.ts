@@ -18,6 +18,8 @@ import type {
 import { dashboardExecTimeoutMs, historyDir, pythonPath } from "./runtime-paths";
 
 const execFileAsync = promisify(execFile);
+const SCAN_STALE_MINUTES = 20;
+const WS_STALE_MINUTES = 10;
 
 export const projectRoot = path.resolve(
   process.env.OKX_SIGNAL_ROOT ?? path.join(process.cwd(), ".."),
@@ -64,6 +66,54 @@ function minutesSince(value?: string) {
     return null;
   }
   return Math.max(0, (Date.now() - ts) / 60000);
+}
+
+function minutesSinceEpochSeconds(value?: number | null) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  return Math.max(0, (Date.now() - value * 1000) / 60000);
+}
+
+function enrichLatestScan(latestScan: LatestScanStatus | null): LatestScanStatus | null {
+  if (!latestScan) {
+    return null;
+  }
+  const ageMinutes = minutesSince(latestScan.generated_at);
+  const ws = latestScan.websocket ?? null;
+  const wsMessageAge = minutesSinceEpochSeconds(ws?.last_message_at);
+  let runtimeStatus = "online";
+  let runtimeReason = "live_status_fresh";
+
+  if (latestScan.error) {
+    runtimeStatus = "error";
+    runtimeReason = "scan_error";
+  } else if (typeof ageMinutes === "number" && ageMinutes > SCAN_STALE_MINUTES) {
+    runtimeStatus = "stale";
+    runtimeReason = "scan_status_stale";
+  } else if (!ws?.running || !ws?.connected) {
+    runtimeStatus = "offline";
+    runtimeReason = "websocket_offline";
+  } else if (ws?.degraded) {
+    runtimeStatus = "stale";
+    runtimeReason = "websocket_degraded";
+  } else if (typeof wsMessageAge === "number" && wsMessageAge > WS_STALE_MINUTES) {
+    runtimeStatus = "stale";
+    runtimeReason = "websocket_message_stale";
+  }
+
+  return {
+    ...latestScan,
+    runtime_status: runtimeStatus,
+    runtime_reason: runtimeReason,
+    age_minutes: ageMinutes,
+    websocket: ws
+      ? {
+          ...ws,
+          last_message_age_minutes: wsMessageAge,
+        }
+      : ws,
+  };
 }
 
 function toSymbolRow(symbol: string, backfill?: BackfillRow): SymbolRow {
@@ -176,8 +226,9 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
   const symbols = [...new Set([...configuredSymbols, ...backfillSymbols])];
   const backfillBySymbol = new Map(backfill.map((row) => [row.inst_id, row]));
   const actualBySymbol = await readActualHistory(symbols);
-  const effectiveLatestSignal = latestScan
-    ? latestScan.last_signal ?? null
+  const enrichedLatestScan = enrichLatestScan(latestScan);
+  const effectiveLatestSignal = enrichedLatestScan
+    ? enrichedLatestScan.last_signal ?? null
     : latestSignal;
   const symbolRows = symbols.map((symbol) => {
     const row = toSymbolRow(symbol, backfillBySymbol.get(symbol));
@@ -226,7 +277,7 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
     },
     risk_config: asRecord(riskConfig.risk),
     latest_signal: effectiveLatestSignal,
-    latest_scan: latestScan,
+    latest_scan: enrichedLatestScan,
     closed_backfill: closedBackfill,
     closed_backfills: {
       "15m": closedBackfill,

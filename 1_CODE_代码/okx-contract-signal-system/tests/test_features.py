@@ -1,5 +1,7 @@
 import pandas as pd
+import pytest
 
+from tests._integration import require_lightweight_history
 from okx_signal_system.data.loader import load_symbol_file
 from okx_signal_system.features.indicators import (
     add_1h_features,
@@ -10,11 +12,11 @@ from okx_signal_system.features.indicators import (
     resample_trend,
     trend_ema_spans,
 )
-from okx_signal_system.paths import find_lightweight_history
 
 
 def sample_frame() -> pd.DataFrame:
-    return load_symbol_file(find_lightweight_history("okx_1h_extended") / "BTC_USDT_USDT_1h.parquet").frame.head(300)
+    history = require_lightweight_history("okx_1h_extended", "BTC_USDT_USDT_1h.parquet")
+    return load_symbol_file(history / "BTC_USDT_USDT_1h.parquet").frame.head(300)
 
 
 def test_prior_breakout_excludes_current_bar() -> None:
@@ -29,6 +31,7 @@ def test_prior_breakout_excludes_current_bar() -> None:
     assert levels.loc[3, "breakout_low"] == 6
 
 
+@pytest.mark.integration
 def test_resample_4h_marks_complete_bars() -> None:
     four_h = resample_4h(sample_frame())
     assert {"ts", "open", "high", "low", "close", "volume", "complete_4h"}.issubset(four_h.columns)
@@ -58,6 +61,7 @@ def test_resample_trend_uses_left_closed_start_bars() -> None:
     assert bool(first_hour["complete_trend"]) is True
 
 
+@pytest.mark.integration
 def test_align_4h_uses_last_completed_value() -> None:
     frame = sample_frame()
     one_h = add_1h_features(frame)
@@ -70,6 +74,7 @@ def test_align_4h_uses_last_completed_value() -> None:
     assert row["bias_4h"] == "b5"
 
 
+@pytest.mark.integration
 def test_build_feature_frame_contains_required_features() -> None:
     features = build_feature_frame(sample_frame())
     assert {"ema_fast", "ema_slow", "atr", "breakout_high", "breakout_low", "bias_4h"}.issubset(features.columns)

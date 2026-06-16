@@ -25,3 +25,6 @@ where = ["src"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+  "integration: tests that require local historical market data via JIAOYI_DATA_DIR",
+]

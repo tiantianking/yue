@@ -47,12 +47,12 @@ class Ledger:
 
 
 @dataclass(frozen=True)
-class RiskDecision:
+class SignalRiskAssessment:
     accepted: bool
     reason: str | None
-    leverage_cap: float
-    qty: float | None
-    risk_amount: float | None
+    leverage_cap: float = 0.0
+    qty: float | None = None
+    risk_amount: float | None = None
     margin_mode: str = "isolated"
     position_mode: str = "one_way"
     stop_distance_pct: float | None = None
@@ -75,6 +75,9 @@ class RiskDecision:
     @property
     def margin_loss_pct(self) -> float | None:
         return self.position_margin_loss_pct
+
+
+RiskDecision = SignalRiskAssessment
 
 
 def apply_halt_policy(ledger: Ledger, config: RiskConfig) -> Ledger:
@@ -186,8 +189,8 @@ def _reject(
     est_liq_buffer_pct: float | None = None,
     near_liq_flag: bool = False,
     position_margin_loss_pct: float | None = None,
-) -> RiskDecision:
-    return RiskDecision(
+) -> SignalRiskAssessment:
+    return SignalRiskAssessment(
         accepted=False,
         reason=reason,
         leverage_cap=leverage_cap,
@@ -207,25 +210,11 @@ def _reject(
     )
 
 
-def validate_signal(signal: TradeSignal, ledger: Ledger, config: RiskConfig = RiskConfig()) -> RiskDecision:
-    active_ledger = apply_halt_policy(ledger, config)
-
-    if config.margin_mode != "isolated":
-        return _reject("margin_mode_not_isolated", signal=signal)
-    if config.position_mode not in {"one_way", "net_mode"}:
-        return _reject("position_mode_not_one_way_or_net", signal=signal)
+def validate_signal(signal: TradeSignal, ledger: Ledger | None = None, config: RiskConfig = RiskConfig()) -> SignalRiskAssessment:
     if not signal.accepted:
         return _reject(signal.reject_reason or "signal_rejected", signal=signal)
-    if not active_ledger.allow_new_entry:
-        if active_ledger.status == "halted":
-            reason = "ledger_halted"
-        elif active_ledger.open_positions > 0:
-            reason = "position_open"
-        else:
-            reason = "cool_off_active"
-        return _reject(reason, signal=signal)
     if signal.entry_ref is None or signal.stop_loss is None or signal.take_profit is None or signal.max_hold_bars is None:
-        return _reject("missing_trade_protection", signal=signal)
+        return _reject("missing_signal_protection", signal=signal)
     if _signal_score(signal) < config.min_signal_score:
         return _reject("signal_score_below_threshold", signal=signal)
 
@@ -251,73 +240,26 @@ def validate_signal(signal: TradeSignal, ledger: Ledger, config: RiskConfig = Ri
     if rr + RR_EPSILON < config.min_reward_to_risk:
         return _reject("risk_reward_too_low", signal=signal, stop_distance_pct=stop_pct)
 
-    leverage_cap = leverage_cap_for_signal(signal, active_ledger, config)
-    if leverage_cap <= 0 or leverage_cap > config.max_leverage or leverage_cap > 10.0:
-        return _reject("invalid_leverage", signal=signal)
-
-    leverage_used = smart_leverage_for_signal(signal, active_ledger, config)
-    if leverage_used <= 0:
-        return _reject("invalid_leverage", leverage_cap=leverage_cap, signal=signal)
-
     cost_buffered_risk = stop_dist + entry * COST_BUFFER_RATE
     if cost_buffered_risk <= 0:
-        return _reject("invalid_stop_distance", leverage_cap=leverage_cap, signal=signal)
+        return _reject("invalid_stop_distance", signal=signal)
 
-    target_risk_pct = max(0.0, min(config.risk_per_trade_pct, config.single_position_loss_pct))
-    risk_amount = active_ledger.equity * target_risk_pct
-    qty = risk_amount / cost_buffered_risk
-    if qty <= 0:
-        return _reject("invalid_qty", leverage_cap=leverage_cap, risk_amount=risk_amount, signal=signal)
-
-    max_notional = active_ledger.equity * leverage_used
-    notional = qty * entry
-    if notional > max_notional:
-        qty = max_notional / entry
-        notional = max_notional
-        risk_amount = qty * cost_buffered_risk
-
-    max_position_loss_pct = risk_amount / active_ledger.equity if active_ledger.equity > 0 else None
-    liq_buffer_pct = estimated_liquidation_buffer_pct(leverage_used, config)
-    position_margin_loss_pct = (stop_pct + COST_BUFFER_RATE) * leverage_used
-    if position_margin_loss_pct > config.single_position_loss_pct + 1e-12:
-        return _reject(
-            "position_margin_loss_above_27pct",
-            leverage_cap=leverage_cap,
-            signal=signal,
-            stop_distance_pct=stop_pct,
-            notional=notional,
-            leverage_used=leverage_used,
-            position_margin_loss_pct=position_margin_loss_pct,
-        )
-    if liq_buffer_pct < stop_pct * LIQ_SAFETY_MARGIN:
-        return _reject(
-            "near_liquidation_before_stop",
-            leverage_cap=leverage_cap,
-            signal=signal,
-            stop_distance_pct=stop_pct,
-            notional=notional,
-            leverage_used=leverage_used,
-            est_liq_buffer_pct=liq_buffer_pct,
-            near_liq_flag=True,
-            position_margin_loss_pct=position_margin_loss_pct,
-        )
-
-    return RiskDecision(
+    return SignalRiskAssessment(
         accepted=True,
         reason=None,
-        leverage_cap=leverage_cap,
-        qty=qty,
-        risk_amount=risk_amount,
+        leverage_cap=0.0,
+        qty=None,
+        risk_amount=None,
         stop_distance_pct=stop_pct,
-        notional=notional,
-        leverage_used=leverage_used,
-        est_liq_buffer_pct=liq_buffer_pct,
+        notional=None,
+        leverage_used=None,
+        est_liq_buffer_pct=None,
         near_liq_flag=False,
         cost_buffer_pct=COST_BUFFER_RATE,
         signal_score=_signal_score(signal),
         risk_reward_ratio=rr,
         stop_reason=signal.stop_reason,
         tp_reason=signal.tp_reason,
-        max_position_loss_pct=max_position_loss_pct,
-        position_margin_loss_pct=position_margin_loss_pct,
+        max_position_loss_pct=None,
+        position_margin_loss_pct=None,
     )

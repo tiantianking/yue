@@ -10,7 +10,7 @@ import pandas as pd
 from okx_signal_system.data.closed_backfill import latest_closed_candle_start
 from okx_signal_system.data.loader import closed_bars
 from okx_signal_system.features.indicators import build_feature_frame
-from okx_signal_system.risk.model import Ledger, RiskConfig, RiskDecision, apply_halt_policy, validate_signal
+from okx_signal_system.risk.model import RiskConfig, RiskDecision, validate_signal
 from okx_signal_system.signal_quality import (
     QualityModelShadowScorer,
     SignalCandidate,
@@ -59,8 +59,8 @@ def breakout_gap_pct(row: pd.Series | None) -> float | None:
 
 def candidate_rank_score(*, final_score: float, decision: RiskDecision) -> float:
     rr = float(decision.risk_reward_ratio or 0.0)
-    leverage = float(decision.leverage_used or 0.0)
-    return float(final_score) + min(rr, 8.0) * 0.15 - max(0.0, leverage - 5.0) * 0.05
+    stop_pct = float(decision.stop_distance_pct or 0.0)
+    return float(final_score) + min(rr, 8.0) * 0.15 - min(stop_pct, 0.05) * 2.0
 
 
 @dataclass(frozen=True)
@@ -70,7 +70,7 @@ class SignalScanContext:
     trend_timeframe: str
     strategy_params: StrategyParams
     risk_config: RiskConfig
-    ledger: Ledger
+    ledger: Any | None
     quality_gate_allows_push: bool
     min_vote_approval_rate: float
     mode: str
@@ -79,7 +79,6 @@ class SignalScanContext:
     settle_seconds: int = 60
     expected_latest_closed: datetime | pd.Timestamp | None = None
     now: datetime | pd.Timestamp | None = None
-    position_symbols: frozenset[str] = frozenset()
     checked_bars: dict[str, str] | None = None
     send_health_report: bool = False
     shadow_score_min_closed: int = 6
@@ -127,10 +126,6 @@ class SignalScanService:
 
         for symbol in symbols:
             inst_id = str(symbol)
-            if inst_id in context.position_symbols:
-                cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="position_open"))
-                continue
-
             history_limit = live_signal_history_limit(
                 context.strategy_params,
                 signal_timeframe=context.signal_timeframe,
@@ -141,12 +136,6 @@ class SignalScanService:
             if len(df) < context.min_history_bars:
                 cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="history_too_short"))
                 continue
-
-            candidate_history[inst_id] = df
-            if self._shadow_ledger is not None:
-                self._shadow_ledger.update_symbol(inst_id, df)
-            if self._lifecycle_store is not None:
-                self._lifecycle_store.update_symbol(inst_id, df)
 
             latest_closed = pd.to_datetime(df["ts"].iloc[-1], utc=True)
             expected_closed = self._expected_latest_closed(context)
@@ -180,7 +169,6 @@ class SignalScanService:
             ):
                 cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="stale_data"))
                 continue
-
             try:
                 features = build_feature_frame(
                     df,
@@ -209,6 +197,11 @@ class SignalScanService:
                     frame=features,
                     idx=len(features) - 1,
                 )
+                candidate_history[inst_id] = df
+                if self._shadow_ledger is not None:
+                    self._shadow_ledger.update_symbol(inst_id, df)
+                if self._lifecycle_store is not None:
+                    self._lifecycle_store.update_symbol(inst_id, df)
                 if not signal.accepted:
                     cycle_health.append(
                         self._candidate_health_item(
@@ -259,7 +252,7 @@ class SignalScanService:
                     context.risk_config,
                     max_leverage=max(1.0, min(10.0, context.risk_config.max_leverage * self._regime_mgr.get_leverage_factor())),
                 )
-                decision = validate_signal(signal, apply_halt_policy(context.ledger, context.risk_config), risk_cfg)
+                decision = validate_signal(signal, context.ledger, risk_cfg)
                 would_push = bool(
                     decision.accepted
                     and effective_score >= context.risk_config.min_signal_score

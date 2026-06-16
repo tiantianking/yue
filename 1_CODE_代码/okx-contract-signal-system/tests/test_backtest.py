@@ -1,5 +1,7 @@
 import pandas as pd
+import pytest
 
+from tests._integration import require_lightweight_history
 from okx_signal_system.backtest.runner import (
     exit_trade_from_arrays,
     run_backtest,
@@ -9,16 +11,17 @@ from okx_signal_system.backtest.runner import (
 )
 from okx_signal_system.data.loader import load_symbol_file
 from okx_signal_system.features.indicators import build_feature_frame
-from okx_signal_system.paths import find_lightweight_history
 from okx_signal_system.strategy.trend_breakout import StrategyParams, build_signal
 
 
 def btc_frame():
-    return load_symbol_file(find_lightweight_history("okx_1h_extended") / "BTC_USDT_USDT_1h.parquet").frame.head(1000)
+    history = require_lightweight_history("okx_1h_extended", "BTC_USDT_USDT_1h.parquet")
+    return load_symbol_file(history / "BTC_USDT_USDT_1h.parquet").frame.head(1000)
 
 
 def ada_frame():
-    return load_symbol_file(find_lightweight_history("okx_1h_extended") / "ADA_USDT_USDT_1h.parquet").frame.tail(2500)
+    history = require_lightweight_history("okx_1h_extended", "ADA_USDT_USDT_1h.parquet")
+    return load_symbol_file(history / "ADA_USDT_USDT_1h.parquet").frame.tail(2500)
 
 
 def sample_params() -> StrategyParams:
@@ -32,23 +35,27 @@ def sample_params() -> StrategyParams:
     )
 
 
+@pytest.mark.integration
 def test_train_valid_split_preserves_order() -> None:
     train, valid = split_train_valid(btc_frame(), valid_fraction=0.25)
     assert len(train) > len(valid)
     assert train["ts"].max() < valid["ts"].min()
 
 
+@pytest.mark.integration
 def test_run_backtest_returns_trade_table() -> None:
     trades = run_backtest(btc_frame(), inst_id="BTC-USDT-SWAP", params=sample_params())
     assert {"entry_time", "exit_time", "side", "net_pnl", "costs", "exit_reason"}.issubset(trades.columns)
 
 
+@pytest.mark.integration
 def test_summarize_trades_has_required_metrics() -> None:
     trades = run_backtest(btc_frame(), inst_id="BTC-USDT-SWAP", params=sample_params())
     summary = summarize_trades(trades)
     assert {"total_return", "profit_factor", "payoff_ratio", "max_drawdown", "win_rate", "total_trades", "status"}.issubset(summary)
 
 
+@pytest.mark.integration
 def test_signal_candidate_prefilter_keeps_all_live_signals() -> None:
     params = sample_params()
     features = build_feature_frame(

@@ -131,16 +131,15 @@ def test_risk_accepts_protected_signal_and_caps_leverage() -> None:
     signal = build_signal(base_row(), inst_id="BTC-USDT-SWAP")
     decision = validate_signal(signal, Ledger("BTC-USDT-SWAP", init_capital=10000, equity=10000))
     assert decision.accepted
-    assert decision.margin_mode == "isolated"
-    assert decision.position_mode == "one_way"
-    assert decision.leverage_cap <= 10
-    assert decision.leverage_used and 1 <= decision.leverage_used <= 10
-    assert decision.qty and decision.qty > 0
-    assert decision.margin_loss_pct is not None
-    assert decision.margin_loss_pct <= RiskConfig().single_position_loss_pct + 1e-12
+    assert decision.leverage_cap == 0
+    assert decision.leverage_used is None
+    assert decision.qty is None
+    assert decision.risk_amount is None
+    assert decision.margin_loss_pct is None
+    assert decision.risk_reward_ratio == 6.0
 
 
-def test_risk_caps_margin_loss_at_stop_to_27_percent() -> None:
+def test_signal_risk_ignores_account_margin_loss_model() -> None:
     signal = TradeSignal(
         ts=pd.Timestamp("2026-01-01T00:00:00Z"),
         inst_id="BTC-USDT-SWAP",
@@ -155,19 +154,16 @@ def test_risk_caps_margin_loss_at_stop_to_27_percent() -> None:
     )
     config = RiskConfig(max_leverage=10)
     decision = validate_signal(signal, Ledger("BTC-USDT-SWAP", init_capital=10000, equity=10000), config)
-    max_leverage_for_margin_cap = config.single_position_loss_pct / (0.25 + COST_BUFFER_RATE)
     assert decision.accepted
-    assert decision.leverage_used is not None
-    assert decision.leverage_used <= max_leverage_for_margin_cap
-    assert decision.margin_loss_pct is not None
-    assert decision.margin_loss_pct <= config.single_position_loss_pct + 1e-12
+    assert decision.leverage_used is None
+    assert decision.margin_loss_pct is None
 
 
-def test_risk_rejects_open_position() -> None:
+def test_signal_risk_does_not_reject_existing_account_position() -> None:
     signal = build_signal(base_row(), inst_id="BTC-USDT-SWAP")
     decision = validate_signal(signal, Ledger("BTC-USDT-SWAP", init_capital=10000, equity=10000, open_positions=1))
-    assert not decision.accepted
-    assert decision.reason == "position_open"
+    assert decision.accepted
+    assert decision.reason is None
 
 
 def test_strategy_rejects_too_close_protection_after_costs() -> None:

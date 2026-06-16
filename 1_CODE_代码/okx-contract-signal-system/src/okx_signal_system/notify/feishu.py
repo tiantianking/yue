@@ -136,8 +136,6 @@ def send_signal_alert(
         lines.append(f"signal_status: {lifecycle_status}")
     if invalidation_price is not None:
         lines.append(f"invalidation_price: {invalidation_price:.8f}")
-    if max_loss_pct is not None:
-        lines.append(f"账户止损风险: {max_loss_pct:.2%}")
     if kline_time:
         lines.append(f"K线时间: {kline_time}")
     if signal_timeframe:
@@ -294,22 +292,16 @@ def send_close_notification(
 def send_status_report(
     *,
     cycle_count: int,
-    equity: float,
-    tracked_items: int,
     status: str,
-    loss_streak: int = 0,
-    max_drawdown: float = 0.0,
     last_signal_count: int | None = None,
 ) -> bool:
     lines = [
         "OKX system status",
         f"time: {_now_utc():%Y-%m-%d %H:%M:%S} UTC",
         f"cycle: {cycle_count}",
+        "mode: SIGNAL_ONLY",
         f"status: {status}",
-        f"equity: {equity:.2f}",
-        f"tracked_items: {tracked_items}",
-        f"loss_streak: {loss_streak}",
-        f"max_drawdown: {max_drawdown:.2%}",
+        "scope: market signal research and manual review notification only",
     ]
     if last_signal_count is not None:
         lines.append(f"last_signal_count: {last_signal_count}")
@@ -401,19 +393,28 @@ def feishu_send_text(text: str, **kwargs) -> bool:
 def feishu_send_signal_card(
     inst_id: str,
     direction: str,
-    qty: float,
-    leverage: float,
-    entry_price: float,
-    stop_loss: float,
-    take_profit: float,
-    reason: str,
+    qty: float = 0.0,
+    leverage: float = 0.0,
+    entry_price: float | None = None,
+    stop_loss: float | None = None,
+    take_profit: float | None = None,
+    reason: str = "",
 ) -> bool:
     side = "long" if direction in {"long", "buy", "open_long"} else "short"
-    return send_signal_alert(inst_id, side, entry_price, stop_loss, take_profit, qty, leverage, reason)
+    return send_signal_alert(
+        inst_id,
+        side,
+        entry_price or 0.0,
+        stop_loss or 0.0,
+        take_profit or 0.0,
+        qty,
+        leverage,
+        reason,
+    )
 
 
 def feishu_send_status_card(
-    equity: float,
+    equity: float | None = None,
     tracked_items: int | None = None,
     status: str = "",
     loss_streak: int = 0,
@@ -422,15 +423,9 @@ def feishu_send_status_card(
     last_signal_count: int | None = None,
     **kwargs,
 ) -> bool:
-    if tracked_items is None:
-        tracked_items = int(kwargs.get("open_positions", 0))
     return send_status_report(
         cycle_count=cycle_count,
-        equity=equity,
-        tracked_items=tracked_items,
         status=status,
-        loss_streak=loss_streak,
-        max_drawdown=max_drawdown,
         last_signal_count=last_signal_count,
     )
 

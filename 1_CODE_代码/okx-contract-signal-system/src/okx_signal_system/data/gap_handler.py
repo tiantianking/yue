@@ -13,6 +13,7 @@ import pandas as pd
 
 from okx_signal_system.exchange.candles import okx_candles_to_frame
 from okx_signal_system.exchange.okx import get_candles  # OKXInstrument
+from okx_signal_system.io_atomic import read_parquet_with_retry, write_parquet_atomic
 from okx_signal_system.paths import find_lightweight_history
 from okx_signal_system.timeframe import timeframe_spec
 
@@ -104,7 +105,7 @@ class DataGapHandler:
             )]
 
         try:
-            df = pd.read_parquet(path)
+            df = read_parquet_with_retry(path)
             df["ts"] = pd.to_datetime(df["ts"], utc=True)
             df = df.sort_values("ts")
 
@@ -234,7 +235,7 @@ class DataGapHandler:
             if mode == "replace" or not path.exists():
                 df = new_data
             else:
-                existing = pd.read_parquet(path)
+                existing = read_parquet_with_retry(path)
                 existing["ts"] = pd.to_datetime(existing["ts"], utc=True)
                 new_data["ts"] = pd.to_datetime(new_data["ts"], utc=True)
 
@@ -261,7 +262,7 @@ class DataGapHandler:
                 df["timeframe"] = df["timeframe"].fillna(self.timeframe.key)
 
             # 保存
-            df.to_parquet(path, index=False)
+            write_parquet_atomic(df, path)
             log.info(f"Saved {len(df)} bars for {inst_id}")
             return True
 

@@ -1,5 +1,6 @@
 import pytest
 
+from tests._integration import require_lightweight_history
 from okx_signal_system.backtest.evaluation import evaluate_symbol
 from okx_signal_system.backtest.grid_search import parameter_grid, run_grid_search, select_best_params
 from okx_signal_system.backtest.research import (
@@ -11,18 +12,19 @@ from okx_signal_system.backtest.research import (
     write_research_artifacts,
 )
 from okx_signal_system.data.loader import load_symbol_file
-from okx_signal_system.paths import find_lightweight_history
 from okx_signal_system.strategy.trend_breakout import StrategyParams
 
 
 def btc_frame(rows: int = 700):
-    return load_symbol_file(find_lightweight_history("okx_1h_extended") / "BTC_USDT_USDT_1h.parquet").frame.head(rows)
+    history = require_lightweight_history("okx_1h_extended", "BTC_USDT_USDT_1h.parquet")
+    return load_symbol_file(history / "BTC_USDT_USDT_1h.parquet").frame.head(rows)
 
 
 def test_parameter_grid_has_1296_combinations() -> None:
     assert len(parameter_grid()) == 216
 
 
+@pytest.mark.integration
 def test_grid_search_selects_params() -> None:
     grid = run_grid_search(
         btc_frame(500),
@@ -42,6 +44,7 @@ def test_evaluation_flags_failed_validation() -> None:
     assert "valid_profit_factor_below_1_05" in result["reasons"]
 
 
+@pytest.mark.integration
 def test_train_valid_symbol_returns_required_sections() -> None:
     result = run_train_valid_symbol(
         btc_frame(700),
@@ -51,7 +54,9 @@ def test_train_valid_symbol_returns_required_sections() -> None:
     assert {"grid_results", "train_summary", "valid_summary", "evaluation", "selected_params"}.issubset(result)
 
 
+@pytest.mark.integration
 def test_dataset_research_outputs_symbol_result_table() -> None:
+    require_lightweight_history("okx_15m_extended", min_parquet_files=1)
     table = run_dataset_research(
         max_symbols=1,
         params_grid=[StrategyParams(fast_ema=10, slow_ema=50, breakout_window=20, max_hold_bars=24)],
@@ -61,7 +66,9 @@ def test_dataset_research_outputs_symbol_result_table() -> None:
     assert table["fail_reasons"].eq("NO_VALID_PARAMETER_SET").all()
 
 
+@pytest.mark.integration
 def test_shared_research_artifacts_use_one_param_set(tmp_path) -> None:
+    require_lightweight_history("okx_15m_extended", min_parquet_files=2)
     grid = [
         StrategyParams(fast_ema=10, slow_ema=50, breakout_window=20, max_hold_bars=24),
         StrategyParams(fast_ema=20, slow_ema=60, breakout_window=40, max_hold_bars=48),
@@ -76,6 +83,7 @@ def test_shared_research_artifacts_use_one_param_set(tmp_path) -> None:
         assert paths[key].exists()
 
 
+@pytest.mark.integration
 def test_shared_param_selection_refuses_failed_gate() -> None:
     grid = run_grid_search(
         btc_frame(500),

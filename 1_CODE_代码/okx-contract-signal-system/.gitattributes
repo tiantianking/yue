@@ -1,0 +1,14 @@
+.env export-ignore
+.env.* export-ignore
+.env.example -export-ignore
+build.log export-ignore
+.pytest_cache/** export-ignore
+__pycache__/** export-ignore
+**/__pycache__/** export-ignore
+output/** export-ignore
+outputs/** export-ignore
+*.pyc export-ignore
+*.pyo export-ignore
+*.sqlite export-ignore
+*.sqlite3 export-ignore
+*.db export-ignore

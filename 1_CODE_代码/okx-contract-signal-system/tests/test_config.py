@@ -5,7 +5,7 @@ from okx_signal_system.paths import find_lightweight_history
 def test_base_config_locks_okx_and_disables_live_orders() -> None:
     cfg = load_config("base.yaml")
     assert cfg["project"]["exchange"] == "OKX"
-    assert cfg["data"]["root_dir"]
+    assert cfg["data"]["root_dir"] is None
     assert cfg["data"]["timeframe"] == "15m"
     assert cfg["data"]["trend_timeframe"] == "1h"
     assert cfg["execution"]["live_order_enabled"] is False

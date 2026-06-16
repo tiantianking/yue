@@ -200,18 +200,15 @@ function SymbolList({
 function SignalPanel({ data }: { data: DashboardPayload }) {
   const scan = data.latest_scan;
   const signal = data.latest_signal?.signal;
-  const risk = data.latest_signal?.risk;
   const qualityModel =
     data.latest_signal?.quality_model ??
     scan?.symbols?.find((item) => item.quality_model?.enabled)?.quality_model ??
     scan?.quality_model;
-  const accepted = Boolean(risk?.accepted);
   const scanned = scan?.symbols_checked ?? scan?.symbols?.length ?? 0;
   const ready = scan?.ready_count ?? scan?.symbols?.filter((item) => item.would_push).length ?? 0;
-  const scanAge = minutesSince(scan?.generated_at);
-  const scanFresh = typeof scanAge === "number" && scanAge <= 2;
-  const topReason = scan?.symbols?.find((item) => item.reason)?.reason ?? signal?.reject_reason ?? risk?.reason ?? "-";
-  const badgeText = accepted ? "可推送" : scanFresh ? "已扫描" : "等待";
+  const runtimeOnline = scan?.runtime_status === "online";
+  const topReason = scan?.symbols?.find((item) => item.reason)?.reason ?? signal?.reject_reason ?? "-";
+  const badgeText = ready > 0 ? "可推送" : runtimeOnline ? "已扫描" : "等待";
   return (
     <div className="rounded-lg border border-[#9be7e3] bg-white/90 p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
@@ -224,16 +221,15 @@ function SignalPanel({ data }: { data: DashboardPayload }) {
             {signal?.inst_id ?? "-"}
           </div>
         </div>
-        <Badge tone={accepted ? "green" : scanFresh ? "neutral" : "amber"}>{badgeText}</Badge>
+        <Badge tone={ready > 0 ? "green" : runtimeOnline ? "neutral" : "amber"}>{badgeText}</Badge>
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3">
         <MetricTile label="方向" value={sideText(signal?.side)} />
-        <MetricTile label="杠杆上限" value={`${numberText(risk?.leverage_cap, 1)}x`} />
-        <MetricTile label="入场" value={numberText(signal?.entry_ref, 4)} />
-        <MetricTile label="止损" value={numberText(signal?.stop_loss, 4)} />
-        <MetricTile label="止盈" value={numberText(signal?.take_profit, 4)} />
-        <MetricTile label="风险额" value={numberText(risk?.risk_amount, 2)} tone={accepted ? "green" : "neutral"} />
+        <MetricTile label="参考价" value={numberText(signal?.entry_ref, 4)} />
+        <MetricTile label="分析止损" value={numberText(signal?.stop_loss, 4)} />
+        <MetricTile label="分析目标" value={numberText(signal?.take_profit, 4)} />
+        <MetricTile label="目标盈亏比" value={`${numberText(signal?.risk_reward_ratio, 2)}R`} />
         <MetricTile label="扫描/可推" value={`${scanned}/${ready}`} tone={ready > 0 ? "green" : "neutral"} />
       </div>
 
@@ -268,14 +264,17 @@ function RuntimePanel({ data }: { data: DashboardPayload }) {
   const scan = data.latest_scan;
   const ws = scan?.websocket;
   const modules = scan?.modules ?? {};
-  const scanAge = minutesSince(scan?.generated_at);
-  const scanFresh = typeof scanAge === "number" && scanAge <= 2;
-  const wsHealthy = Boolean(ws?.running && ws?.connected && !ws?.degraded);
+  const scanAge = scan?.age_minutes ?? minutesSince(scan?.generated_at);
+  const runtimeStatus = String(scan?.runtime_status ?? "offline");
+  const runtimeOnline = runtimeStatus === "online";
+  const wsHealthy = Boolean(runtimeOnline && ws?.running && ws?.connected && !ws?.degraded);
   const closedHealthy = modules.closed_kline_backfill?.status === "healthy";
   const signalGateHealthy = modules.signal_closed_bar_gate?.status === "healthy";
   const learningStatus = String(modules.daily_learning_review?.status ?? "-");
   const learningHealthy = ["healthy", "checking", "disabled"].includes(learningStatus);
-  const tone = wsHealthy && scanFresh && closedHealthy && signalGateHealthy && learningHealthy ? "green" : "red";
+  const tone = runtimeOnline && closedHealthy && signalGateHealthy && learningHealthy ? "green" : "red";
+  const runtimeLabel =
+    runtimeStatus === "online" ? "正常" : runtimeStatus === "stale" ? "过期" : runtimeStatus === "error" ? "错误" : "离线";
   return (
     <div className="rounded-lg border border-[#9be7e3] bg-white/90 p-4 shadow-sm">
       <div className="flex items-center justify-between gap-3">
@@ -283,11 +282,11 @@ function RuntimePanel({ data }: { data: DashboardPayload }) {
           <Activity className="h-4 w-4 text-[#008f8a]" />
           运行状态
         </div>
-        <Badge tone={tone}>{wsHealthy && scanFresh ? "正常" : "异常"}</Badge>
+        <Badge tone={tone}>{runtimeLabel}</Badge>
       </div>
       <div className="mt-4 grid grid-cols-2 gap-3">
         <MetricTile label="WebSocket" value={wsHealthy ? "已连接" : "未正常"} tone={wsHealthy ? "green" : "red"} />
-        <MetricTile label="扫描刷新" value={ageText(scanAge)} tone={scanFresh ? "green" : "red"} />
+        <MetricTile label="扫描刷新" value={ageText(scanAge)} tone={runtimeOnline ? "green" : "red"} />
         <MetricTile label="重连次数" value={integerText(ws?.reconnect_count)} tone={(ws?.reconnect_count ?? 0) === 0 ? "green" : "amber"} />
         <MetricTile label="检查币种" value={integerText(scan?.symbols_checked)} />
         <MetricTile label="闭合K线" value={closedHealthy ? "已补齐" : String(modules.closed_kline_backfill?.status ?? "-")} tone={closedHealthy ? "green" : "red"} />
@@ -299,12 +298,19 @@ function RuntimePanel({ data }: { data: DashboardPayload }) {
           {scan?.error ?? ws?.last_error}
         </div>
       ) : null}
+      {!runtimeOnline && scan?.runtime_reason ? (
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-900">
+          {scan.runtime_reason}
+        </div>
+      ) : null}
     </div>
   );
 }
 
 function QualityPanel({ data }: { data: DashboardPayload }) {
   const stress = data.stress_checks;
+  const blockingCount = data.quality.push_blocking_reasons.length;
+  const staleCount = data.quality.stale_symbols.length;
   return (
     <div className="rounded-lg border border-[#9be7e3] bg-white/90 p-4 shadow-sm">
       <div className="flex items-center justify-between gap-3">
@@ -325,16 +331,12 @@ function QualityPanel({ data }: { data: DashboardPayload }) {
           <span className="font-mono font-bold">{numberText(Number(stress.target_reward_to_risk), 1)}R</span>
         </div>
         <div className="flex items-center justify-between gap-3">
-          <span className="text-zinc-500">本金最大亏损</span>
-          <span className="font-mono font-bold">{percent(Number(stress.margin_loss_cap_pct), 0)}</span>
+          <span className="text-zinc-500">阻断原因</span>
+          <span className="font-mono font-bold">{integerText(blockingCount)}</span>
         </div>
         <div className="flex items-center justify-between gap-3">
-          <span className="text-zinc-500">低分杠杆</span>
-          <span className="font-mono font-bold">{numberText(Number(stress.low_score_leverage), 1)}x</span>
-        </div>
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-zinc-500">高分杠杆</span>
-          <span className="font-mono font-bold">{numberText(Number(stress.high_score_leverage), 1)}x</span>
+          <span className="text-zinc-500">过期币种</span>
+          <span className="font-mono font-bold">{integerText(staleCount)}</span>
         </div>
       </div>
 

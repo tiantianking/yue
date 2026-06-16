@@ -75,11 +75,8 @@ def signal_view_model(payload: dict[str, Any]) -> dict[str, Any]:
         "stop_loss": money(signal.get("stop_loss")),
         "take_profit": money(signal.get("take_profit")),
         "max_hold_bars": signal.get("max_hold_bars") or "-",
-        "qty": money(risk.get("qty")),
-        "risk_amount": money(risk.get("risk_amount")),
-        "leverage_cap": risk.get("leverage_cap") or 0,
-        "margin_mode": "逐仓" if risk.get("margin_mode") == "isolated" else risk.get("margin_mode", "-"),
-        "position_mode": "单向" if risk.get("position_mode") == "net_mode" else risk.get("position_mode", "-"),
+        "risk_reward_ratio": money(risk.get("risk_reward_ratio") or signal.get("risk_reward_ratio")),
+        "score": money(risk.get("signal_score") or signal.get("signal_score")),
         "reasons": sorted(set(readable_reasons)) or ["无"],
         "signal_mode": "SIGNAL_ONLY" if not payload.get("live_order_enabled") else "执行字段异常",
     }
@@ -101,19 +98,17 @@ def readable_trades(trades: pd.DataFrame) -> pd.DataFrame:
         "entry_time": "开仓时间",
         "exit_time": "平仓时间",
         "side": "方向",
-        "entry_price": "开仓价",
-        "exit_price": "平仓价",
-        "qty": "样本数量",
+        "entry_price": "参考价",
+        "exit_price": "结果价",
         "gross_pnl": "毛盈亏",
         "costs": "费用",
         "net_pnl": "净盈亏",
-        "exit_reason": "平仓原因",
-        "leverage_cap": "风险上限",
+        "exit_reason": "结果原因",
     }
     table["side"] = table["side"].map(side_map).fillna(table["side"])
     keep = [col for col in rename if col in table.columns]
     table = table[keep].rename(columns=rename)
-    for col in ["开仓价", "平仓价", "样本数量", "毛盈亏", "费用", "净盈亏"]:
+    for col in ["参考价", "结果价", "毛盈亏", "费用", "净盈亏"]:
         if col in table.columns:
             table[col] = table[col].map(money)
     return table
@@ -133,18 +128,15 @@ def render_signal(payload: dict[str, Any]) -> None:
     cols[0].metric("合约", view["inst_id"])
     cols[1].metric("方向", view["side"])
     cols[2].metric("系统模式", view["signal_mode"])
-    cols[3].metric("风险参考", view["leverage_cap"])
+    cols[3].metric("评分", view["score"])
 
     price_cols = st.columns(4)
     price_cols[0].metric("参考入场", view["entry_ref"])
-    price_cols[1].metric("止损", view["stop_loss"])
-    price_cols[2].metric("止盈", view["take_profit"])
+    price_cols[1].metric("分析止损", view["stop_loss"])
+    price_cols[2].metric("分析目标", view["take_profit"])
     price_cols[3].metric("最长观察K线", view["max_hold_bars"])
 
-    risk_cols = st.columns(3)
-    risk_cols[0].metric("样本数量", view["qty"])
-    risk_cols[1].metric("本笔风险额", view["risk_amount"])
-    risk_cols[2].metric("风险模式", f"{view['margin_mode']} / {view['position_mode']}")
+    st.metric("目标盈亏比", view["risk_reward_ratio"])
 
     st.write("原因：")
     for reason in view["reasons"]:

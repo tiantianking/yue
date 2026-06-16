@@ -66,6 +66,9 @@ export type LatestSignal = {
 export type LatestScanStatus = {
   generated_at?: string;
   status?: string;
+  runtime_status?: "online" | "stale" | "offline" | "error" | string;
+  runtime_reason?: string;
+  age_minutes?: number | null;
   error?: string | null;
   dataset?: string;
   signal_timeframe?: string;
@@ -84,6 +87,7 @@ export type LatestScanStatus = {
     last_close?: { code?: number | null; message?: string | null } | null;
     url?: string;
     proxy?: string | null;
+    last_message_age_minutes?: number | null;
   } | null;
   modules?: Record<
     string,
