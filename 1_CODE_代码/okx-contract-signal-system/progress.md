@@ -165,3 +165,18 @@
 ### Notes
 - Modified files: `src/okx_signal_system/backtest/runner.py` adds research sizing, standard R outputs, empty result schema, and validation; `src/okx_signal_system/backtest/cli.py`, `src/okx_signal_system/backtest/grid_search.py`, `src/okx_signal_system/backtest/research.py`, `src/okx_signal_system/ml/rolling_backtest.py`, `src/okx_signal_system/training/daily_learning.py`, `src/okx_signal_system/training/startup_quality.py`, and `src/okx_signal_system/reporting/report_builder.py` consume validated backtest results; `src/okx_signal_system/exchange/realtime.py` lazily resolves local history; `dashboard/scripts/read-candles.py`, `dashboard/scripts/read-history-summary.py`, `dashboard/src/app/api/candles/[symbol]/route.ts`, `dashboard/src/lib/runtime-paths.ts`, and `dashboard/src/lib/server-data.ts` remove hardcoded local history assumptions; `src/okx_signal_system/notify/feishu.py` and `src/okx_signal_system/notify/__init__.py` expose signal-only notification helpers; `main.py`, `gui.py`, `start.bat`, `pyproject.toml`, and `src/okx_signal_system/__init__.py` synchronize v3.43 version display; `docs/SYSTEM_ARCHITECTURE.md` documents the v3.43 signal-only backtest behavior; tests under `tests/` cover release version consistency, clean archive imports, realtime lazy history lookup, Feishu signal-only API, lifecycle table values, strict report/research validation, and the accepted-signal-without-qty regression; `progress.md` records this round.
 - Rollback: revert this commit after it is created, or before commit restore the listed files from the previous index state and remove this appended progress entry.
+
+## 2026-06-16 - Task: v3.44 backtest outcome compatibility closure
+### What was done
+- Upgraded the release metadata to v3.44 so package metadata, GUI display, CLI banner, and the Windows launcher continue to use one shared package version.
+- Tightened SIGNAL_ONLY backtest outcome mapping so downstream quality training only receives the supported `TP`, `SL`, and `TIMEOUT` classes.
+- Removed the last `qty`/`leverage` parameters from the legacy Feishu signal-card compatibility wrapper, while keeping the wrapper routed through the signal-only alert path.
+- Documented the v3.44 signal-only backtest boundary and locked regressions for the supported outcome set, Feishu signal-only signatures, and stale package metadata.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest -q` -> passed with historical-data integration tests skipped.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m compileall src tests main.py gui.py` -> passed.
+- `npm.cmd run check` in `dashboard` -> lint and production build passed.
+- `node --experimental-strip-types --test src/lib/runtime-paths.test.ts` in `dashboard` -> passed.
+### Notes
+- Modified files: `src/okx_signal_system/backtest/runner.py` maps all non-TP/SL exits to `TIMEOUT` and rejects unsupported result outcomes; `tests/test_backtest_signal_only.py` asserts the supported outcome set and rejection path; `src/okx_signal_system/notify/feishu.py` removes execution-style parameters from the legacy wrapper; `src/okx_signal_system/ml/trading_brain.py` stops passing those fields; `tests/test_feishu_notify.py` covers all Feishu signal signatures; `src/okx_signal_system/__init__.py`, `pyproject.toml`, and `src/okx_contract_signal_system.egg-info/PKG-INFO` bump the package metadata to v3.44; `tests/test_release_safety.py` covers the egg-info version; `docs/SYSTEM_ARCHITECTURE.md` documents the supported outcome classes; `progress.md` records this round.
+- Rollback: revert this commit after it is created, or before commit restore the listed files from the previous index state and remove this appended progress entry.

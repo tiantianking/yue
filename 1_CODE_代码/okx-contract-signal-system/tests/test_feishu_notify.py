@@ -46,11 +46,10 @@ def test_signal_alert_includes_target_rr_without_account_fields(monkeypatch) -> 
 
 
 def test_signal_alert_signature_is_signal_only() -> None:
-    params = __import__("inspect").signature(feishu.send_signal_alert).parameters
-    assert "qty" not in params
-    assert "leverage" not in params
-    assert "max_loss_pct" not in params
-    assert "margin_loss_pct" not in params
+    forbidden = {"qty", "leverage", "max_loss_pct", "margin_loss_pct"}
+    for func in [feishu.send_signal_observation, feishu.send_signal_alert, feishu.feishu_send_signal_card]:
+        params = __import__("inspect").signature(func).parameters
+        assert forbidden.isdisjoint(params)
 
 
 def test_legacy_signal_card_wrapper_does_not_emit_account_fields(monkeypatch) -> None:
@@ -65,8 +64,6 @@ def test_legacy_signal_card_wrapper_does_not_emit_account_fields(monkeypatch) ->
     ok = feishu.feishu_send_signal_card(
         inst_id="BTC-USDT-SWAP",
         direction="long",
-        qty=1.0,
-        leverage=3.0,
         entry_price=100.0,
         stop_loss=95.0,
         take_profit=117.5,

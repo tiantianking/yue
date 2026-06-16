@@ -194,8 +194,6 @@ class TradingBrain:
                     feishu_send_signal_card(
                         inst_id=signal.inst_id,
                         direction=signal.side,
-                        qty=decision.qty or 0,
-                        leverage=decision.leverage_used or decision.leverage_cap,
                         entry_price=signal.entry_ref or market.last_price,
                         stop_loss=signal.stop_loss or 0,
                         take_profit=signal.take_profit or 0,
@@ -324,8 +322,6 @@ class TradingBrain:
             feishu_send_signal_card(
                 inst_id="SYSTEM",
                 direction="rotation",
-                qty=0,
-                leverage=0,
                 entry_price=0,
                 stop_loss=0,
                 take_profit=0,

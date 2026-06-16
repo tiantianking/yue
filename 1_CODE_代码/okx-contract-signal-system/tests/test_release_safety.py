@@ -65,11 +65,13 @@ def test_release_tests_package_can_import_integration_helpers() -> None:
 def test_release_version_sources_stay_consistent() -> None:
     pyproject = tomllib.loads(_read("pyproject.toml"))
     package_version = okx_signal_system.__version__
+    pkg_info = _read("src/okx_contract_signal_system.egg-info/PKG-INFO")
     main_text = _read("main.py")
     gui_text = _read("gui.py")
     start_text = _read("start.bat")
 
     assert pyproject["project"]["version"] == package_version
+    assert f"Version: {package_version}" in pkg_info
     assert "from okx_signal_system import __version__ as _PACKAGE_VERSION" in main_text
     assert 'APP_VERSION = f"v{_PACKAGE_VERSION}"' in main_text
     assert "from okx_signal_system import __version__ as _PACKAGE_VERSION" in gui_text

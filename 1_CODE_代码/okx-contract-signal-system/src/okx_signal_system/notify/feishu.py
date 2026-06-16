@@ -443,8 +443,6 @@ def feishu_send_text(text: str, **kwargs) -> bool:
 def feishu_send_signal_card(
     inst_id: str,
     direction: str,
-    qty: float = 0.0,
-    leverage: float = 0.0,
     entry_price: float | None = None,
     stop_loss: float | None = None,
     take_profit: float | None = None,

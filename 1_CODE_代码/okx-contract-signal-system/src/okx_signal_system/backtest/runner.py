@@ -68,6 +68,7 @@ class TradeRecord:
 
 
 BACKTEST_RESULT_COLUMNS = tuple(TradeRecord.__dataclass_fields__)
+SUPPORTED_BACKTEST_OUTCOMES = frozenset({"TP", "SL", "TIMEOUT"})
 REQUIRED_BACKTEST_RESULT_COLUMNS = frozenset(
     {
         "inst_id",
@@ -104,6 +105,9 @@ def validate_backtest_result(trades: pd.DataFrame | None, *, context: str = "bac
         raise ValueError(f"{context} missing backtest columns: {', '.join(missing)}")
     if trades.empty:
         raise ValueError(f"{context} produced no backtest rows")
+    unsupported = sorted(set(trades["outcome"].dropna().astype(str)).difference(SUPPORTED_BACKTEST_OUTCOMES))
+    if unsupported:
+        raise ValueError(f"{context} has unsupported backtest outcomes: {', '.join(unsupported)}")
     return trades
 
 
@@ -112,8 +116,6 @@ def _exit_reason_to_outcome(exit_reason: str) -> str:
         return "TP"
     if exit_reason == "stop_loss":
         return "SL"
-    if exit_reason == "trend_reverse":
-        return "TREND_REVERSE"
     return "TIMEOUT"
 
 

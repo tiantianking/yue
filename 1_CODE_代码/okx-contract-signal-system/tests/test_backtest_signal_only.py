@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from okx_signal_system.backtest import runner
 from okx_signal_system.risk.model import SignalRiskAssessment
@@ -77,5 +78,13 @@ def test_signal_only_backtest_keeps_accepted_signal_without_exchange_qty(monkeyp
     assert trade["sizing_mode"] == "signal_only_research_risk"
     assert trade["qty"] > 0
     assert trade["risk_amount"] == 100.0
-    assert trade["outcome"] in {"TP", "SL", "TREND_REVERSE", "TIMEOUT"}
+    assert trade["outcome"] in {"TP", "SL", "TIMEOUT"}
     assert {"net_r", "final_net_r"}.issubset(trades.columns)
+
+
+def test_backtest_validation_rejects_unsupported_outcome() -> None:
+    trades = pd.DataFrame([{column: 1 for column in runner.REQUIRED_BACKTEST_RESULT_COLUMNS}])
+    trades["outcome"] = "TREND_REVERSE"
+
+    with pytest.raises(ValueError, match="unsupported backtest outcomes: TREND_REVERSE"):
+        runner.validate_backtest_result(trades, context="quality_model_training")
