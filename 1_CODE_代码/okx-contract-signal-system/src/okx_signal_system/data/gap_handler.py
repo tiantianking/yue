@@ -78,17 +78,7 @@ class DataGapHandler:
         self.timeframe = timeframe_spec(timeframe)
         if data_dir is None:
             dataset = dataset or f"okx_{self.timeframe.file_suffix}_extended"
-            # 尝试多个可能的路径
-            possible_paths = [
-                Path(r"D:\JIAOYI-CX\历史数据_保留\lightweight_history") / dataset,
-                Path(__file__).parent.parent.parent / "data" / dataset,
-            ]
-            for p in possible_paths:
-                if p.exists():
-                    data_dir = p
-                    break
-            if data_dir is None:
-                data_dir = possible_paths[0]  # 使用第一个作为默认值
+            data_dir = find_lightweight_history(dataset)
 
         if isinstance(data_dir, str):
             data_dir = Path(data_dir)

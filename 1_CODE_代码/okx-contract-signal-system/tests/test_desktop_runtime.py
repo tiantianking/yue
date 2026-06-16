@@ -214,3 +214,92 @@ def test_vote_gate_uses_support_ratio_not_unanimity() -> None:
     assert vote_gate_passed("long", "long", 0.50, 0.40)
     assert not vote_gate_passed("long", "long", 0.25, 0.40)
     assert not vote_gate_passed("short", "long", 0.80, 0.40)
+
+
+def test_publish_tiered_candidates_uses_scan_service_selection() -> None:
+    from okx_signal_system.exchange.realtime import LiveSignalMonitor
+    from okx_signal_system.risk.model import RiskDecision
+    from okx_signal_system.signal_quality import SignalCandidate, TieredSelection
+    from okx_signal_system.strategy.trend_breakout import TradeSignal
+
+    class Store:
+        def __init__(self, *, existing: bool = False):
+            self.existing = existing
+            self.marked = []
+
+        def has(self, _key):
+            return self.existing
+
+        def mark(self, key, metadata=None):
+            self.marked.append((key, metadata))
+            return True
+
+    def candidate(symbol: str, score: float, *, tier: str, rank: int) -> SignalCandidate:
+        signal = TradeSignal(
+            ts=pd.Timestamp("2026-01-01T00:00:00Z"),
+            inst_id=symbol,
+            side="long",
+            entry_ref=100.0,
+            stop_loss=98.0,
+            take_profit=107.0,
+            max_hold_bars=12,
+            reason_codes=("TEST",),
+            signal_score=score,
+            risk_reward_ratio=3.5,
+        )
+        decision = RiskDecision(
+            accepted=True,
+            reason=None,
+            leverage_cap=3.0,
+            qty=1.0,
+            risk_amount=100.0,
+            leverage_used=3.0,
+            signal_score=score,
+            risk_reward_ratio=3.5,
+        )
+        return SignalCandidate(
+            signal=signal,
+            decision=decision,
+            notify_key=f"{symbol}:{score}",
+            payload={"signal": {"signal_score": score}},
+            health_item={"symbol": symbol, "would_push": True},
+            rank_score=score,
+            raw_score=score,
+            tier=tier,
+            rank=rank,
+            correlation_group=f"group:{symbol}",
+        )
+
+    low_score_a = candidate("LOW-USDT-SWAP", 6.0, tier="A", rank=1)
+    high_score_b = candidate("HIGH-USDT-SWAP", 9.0, tier="B", rank=2)
+    selection = TieredSelection(
+        ranked=[low_score_a, high_score_b],
+        tier_a=[low_score_a],
+        tier_b=[high_score_b],
+        tier_c=[],
+    )
+    pushed = []
+    recorded = []
+
+    monitor = LiveSignalMonitor.__new__(LiveSignalMonitor)
+    monitor.api = type(
+        "Api",
+        (),
+        {
+            "timeframe": type("Timeframe", (), {"key": "15m"})(),
+            "trend_timeframe": type("Timeframe", (), {"key": "1h"})(),
+        },
+    )()
+    monitor.signal_callback = lambda signal, _decision: pushed.append(signal.inst_id) or True
+    monitor._shadow_ledger = type("ShadowLedger", (), {"record_signal": lambda self, signal, _decision: recorded.append(signal.inst_id)})()
+    monitor._signal_notification_store = Store()
+    monitor._b_tier_summary_store = Store(existing=True)
+    monitor._last_ready_signal = None
+
+    asyncio.run(monitor._publish_tiered_candidates(selection))
+
+    assert pushed == ["LOW-USDT-SWAP"]
+    assert recorded == ["LOW-USDT-SWAP"]
+    assert monitor._signal_notification_store.marked[0][0] == "LOW-USDT-SWAP:6.0"
+    assert low_score_a.health_item["tier"] == "A"
+    assert high_score_b.health_item["tier"] == "B"

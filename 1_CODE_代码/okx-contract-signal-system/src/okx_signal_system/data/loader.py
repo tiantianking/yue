@@ -92,4 +92,9 @@ def load_all_symbols(dataset: str = "okx_15m_extended") -> list[SymbolData]:
 def closed_bars(frame: pd.DataFrame) -> pd.DataFrame:
     if "is_closed" not in frame.columns:
         return frame.copy()
-    return frame[frame["is_closed"].astype(bool)].reset_index(drop=True)
+    closed = frame["is_closed"]
+    if pd.api.types.is_bool_dtype(closed):
+        mask = closed.fillna(False)
+    else:
+        mask = closed.astype("string").str.strip().str.lower().isin({"true", "1", "yes"})
+    return frame[mask].reset_index(drop=True)

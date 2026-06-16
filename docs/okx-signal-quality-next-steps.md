@@ -4,7 +4,7 @@
 
 - Repository root: `D:\JIAOYI-CX`
 - Project path: `D:\JIAOYI-CX\1_CODE_代码\okx-contract-signal-system`
-- Current completed version: v3.38
+- Current completed version: v3.39
 - Latest completed commits:
   - `a26f0d9 feat: batch rank and tier signal pushes`
   - `feat: add correlation-aware signal tiers`
@@ -15,6 +15,7 @@
   - `feat: score candidates with quality model shadow mode`
   - `fix: correct trend resample boundary`
   - `feat: unify signal scan service`
+  - `fix: tighten scan data gates`
 
 ## Completed Work
 
@@ -98,6 +99,14 @@
 - Preserved manual-confirmation mode, `min_signal_score=6.0`, fixed strategy parameters, and no-real-order posture.
 - Version metadata was bumped to v3.38.
 
+### v3.39
+- Fixed string closed-candle parsing so `"False"`, `"0"`, and `"no"` are not treated as closed bars.
+- Shared scan logic now rejects future-dated closed candles and retries the same bar after feature construction or validation failures.
+- Realtime publishing now uses the `SignalScanService` tier selection directly instead of running `assign_tiers()` a second time.
+- External history lookup can use `JIAOYI_DATA_DIR`, and dashboard history paths no longer fall back to a hard-coded local history directory.
+- Trading-entry audit items were not changed in this release; real orders remain disabled and live-order path changes require explicit approval.
+- Version metadata was bumped to v3.39.
+
 ## Absolute Constraints
 
 - Do not enable real orders.
@@ -117,7 +126,7 @@
 
 ## Remaining Decision Point
 
-The v3.38 scan-service cleanup does not approve model-assisted ranking. Phase 10 still requires an explicit decision before any behavior change.
+The v3.39 scan consistency cleanup does not approve model-assisted ranking or live-order behavior changes. Phase 10 still requires an explicit decision before any behavior change.
 
 ### Phase 10: Optional Model-Assisted Ranking
 

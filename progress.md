@@ -235,3 +235,40 @@
 - `progress.md`: appended this task record.
 - Runtime outputs such as `outputs/pushed_signals.sqlite3` and `outputs/signal_lifecycle.json` were left uncommitted.
 - Rollback method: revert the upcoming commit `feat: unify signal scan service`.
+
+## 2026-06-16 - Task: Fix Scan Consistency and Data Path Audit Items
+### What was done
+- Fixed v3.38 audit findings that affect manual signal stability: string closed-candle parsing, future closed-bar rejection, delayed checked-bar commits, and duplicate realtime tier assignment.
+- Unified external history resolution through explicit roots, `JIAOYI_DATA_DIR`, and `config/base.yaml` `data.root_dir`; startup gap sync and dashboard history lookup now use the same configured data root.
+- Removed hard-coded local history bundling from PyInstaller unless `JIAOYI_DATA_DIR` is explicitly set for packaging.
+- Set this machine's runtime history root to `D:/JIAOYI-CX/历史数据_保留` in `config/base.yaml`.
+- Bumped version metadata to v3.39 and documented that live-order audit items remain approval-gated.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m compileall gui.py main.py src` passed.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest` passed, 145 tests.
+- `npm.cmd run lint` passed from `D:\JIAOYI-CX\1_CODE_代码\okx-contract-signal-system\dashboard`.
+- `npm.cmd run build` passed from `D:\JIAOYI-CX\1_CODE_代码\okx-contract-signal-system\dashboard`.
+### Notes
+- `1_CODE_代码/okx-contract-signal-system/config/base.yaml`: added explicit local `data.root_dir` for existing external history data.
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/paths.py`: added configured history root resolution, packaged-root lookup, and explicit root support.
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/data/loader.py`: fixed closed-candle string flag parsing.
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/data/gap_handler.py`: routed default data directory selection through the configured history resolver.
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/signal_service/scan.py`: rejected future closed bars and delayed checked-bar commits until feature validation succeeds.
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/exchange/realtime.py`: reused `SignalScanService` tier selection for realtime publishing.
+- `1_CODE_代码/okx-contract-signal-system/dashboard/src/lib/runtime-paths.ts`: removed hard-coded dashboard history fallback and added env/config based resolution.
+- `1_CODE_代码/okx-contract-signal-system/dashboard/README.md`: documented dashboard data path configuration.
+- `1_CODE_代码/okx-contract-signal-system/okx_signal.spec`: removed unconditional local history-data packaging and kept explicit `JIAOYI_DATA_DIR` packaging support.
+- `1_CODE_代码/okx-contract-signal-system/tests/test_config.py`: covered config and data-root priority behavior.
+- `1_CODE_代码/okx-contract-signal-system/tests/test_data_layer.py`: covered packaged roots, explicit roots, configured roots, gap handler path usage, and closed-candle parsing.
+- `1_CODE_代码/okx-contract-signal-system/tests/test_desktop_runtime.py`: covered realtime publishing using service-provided tier selection.
+- `1_CODE_代码/okx-contract-signal-system/tests/test_signal_scan_service.py`: covered future-bar rejection and retryable feature failures.
+- `1_CODE_代码/okx-contract-signal-system/gui.py`: bumped app version to v3.39.
+- `1_CODE_代码/okx-contract-signal-system/main.py`: bumped app version to v3.39.
+- `1_CODE_代码/okx-contract-signal-system/pyproject.toml`: bumped package version to 3.39.0.
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/__init__.py`: bumped package runtime version to 3.39.0.
+- `1_CODE_代码/okx-contract-signal-system/start.bat`: bumped launcher version text to v3.39.
+- `docs/okx-runtime-health-v3.39.md`: added the v3.39 runtime health note and verification summary.
+- `docs/okx-signal-quality-next-steps.md`: moved scan/data-path audit cleanup into completed v3.39 work.
+- `progress.md`: appended this task record.
+- Runtime outputs such as `outputs/pushed_signals.sqlite3` and `outputs/signal_lifecycle.json` were left uncommitted.
+- Rollback method: revert the upcoming commit `fix: tighten scan data gates`.

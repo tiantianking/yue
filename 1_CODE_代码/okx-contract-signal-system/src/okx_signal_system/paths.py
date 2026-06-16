@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
+from typing import Any
+
+import yaml
 
 
 def package_project_root(start: Path | None = None) -> Path:
@@ -31,13 +35,74 @@ def workspace_root(start: Path | None = None) -> Path:
     return base
 
 
-def find_lightweight_history(dataset: str) -> Path:
+def _packaged_roots() -> list[Path]:
+    if not getattr(sys, 'frozen', False):
+        return []
+
+    roots: list[Path] = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        roots.append(Path(meipass))
+    roots.append(Path(sys.executable).parent / "_internal")
+    return roots
+
+
+def _data_root_from_config() -> Path | None:
+    config_dirs: list[Path] = []
+    for packaged_root in _packaged_roots():
+        config_dirs.append(packaged_root / "config")
+
+    try:
+        config_dirs.append(package_project_root() / "config")
+    except RuntimeError:
+        pass
+
+    for config_dir in config_dirs:
+        config_path = config_dir / "base.yaml"
+        if not config_path.exists():
+            continue
+        with config_path.open("r", encoding="utf-8") as handle:
+            config = yaml.safe_load(handle) or {}
+        data_cfg: Any = config.get("data", {}) if isinstance(config, dict) else {}
+        root_dir = data_cfg.get("root_dir") if isinstance(data_cfg, dict) else None
+        if root_dir:
+            return Path(str(root_dir)).expanduser()
+
+    return None
+
+
+def _dataset_under_data_root(data_root: Path, dataset: str) -> Path:
+    if data_root.name == dataset:
+        return data_root
+    if data_root.name == "lightweight_history":
+        return data_root / dataset
+    return data_root / "lightweight_history" / dataset
+
+
+def _configured_data_root(root_dir: Path | str | None = None) -> Path | None:
+    if root_dir is not None:
+        return Path(root_dir).expanduser()
+
+    env_root = os.environ.get("JIAOYI_DATA_DIR")
+    if env_root:
+        return Path(env_root).expanduser()
+
+    return _data_root_from_config()
+
+
+def find_lightweight_history(dataset: str, root_dir: Path | str | None = None) -> Path:
+    data_root = _configured_data_root(root_dir)
+    if data_root is not None:
+        dataset_path = _dataset_under_data_root(data_root, dataset)
+        if dataset_path.is_dir():
+            return dataset_path
+        raise FileNotFoundError(f"dataset not found under data root: {dataset} ({data_root})")
+
     root = workspace_root()
 
     # 打包后：数据在 _internal/lightweight_history
-    if getattr(sys, 'frozen', False):
-        exe_dir = Path(sys.executable).parent
-        packaged_data = exe_dir / "_internal" / "lightweight_history" / dataset
+    for packaged_root in _packaged_roots():
+        packaged_data = packaged_root / "lightweight_history" / dataset
         if packaged_data.exists():
             return packaged_data
 

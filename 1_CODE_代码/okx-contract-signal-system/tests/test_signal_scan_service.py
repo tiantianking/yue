@@ -182,3 +182,110 @@ def test_signal_scan_service_respects_checked_bar_gate() -> None:
 
     assert result.cycle_health[0]["reason"] == "waiting_next_bar"
     assert result.ready_candidates == []
+
+
+def test_signal_scan_service_rejects_future_closed_bar() -> None:
+    async def loader(_inst_id: str, _limit: int) -> pd.DataFrame:
+        return _frame()
+
+    service = SignalScanService(
+        candle_loader=loader,
+        regime_manager=FakeRegimeManager(),
+        quality_model_shadow=FakeQualityShadow(),
+        lifecycle_store=FakeLifecycleStore(),
+        shadow_ledger=FakeShadowLedger(),
+    )
+    context = SignalScanContext(
+        dataset="test",
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+        strategy_params=StrategyParams(),
+        risk_config=RiskConfig(),
+        ledger=Ledger("portfolio", init_capital=10000, equity=10000),
+        quality_gate_allows_push=True,
+        min_vote_approval_rate=0.4,
+        mode="test_manual_confirmation_only",
+        min_history_bars=5,
+        expected_latest_closed=pd.Timestamp("2026-01-01T02:30:00Z"),
+        now=pd.Timestamp("2026-01-01T03:05:00Z"),
+    )
+
+    result = asyncio.run(service.scan_cycle(["BTC-USDT-SWAP"], context))
+
+    assert result.cycle_health[0]["reason"] == "future_closed_bar"
+    assert result.ready_candidates == []
+
+
+def test_signal_scan_service_retries_feature_error_bar(monkeypatch) -> None:
+    checked = {}
+
+    async def loader(_inst_id: str, _limit: int) -> pd.DataFrame:
+        return _frame()
+
+    def fail_build_feature_frame(*_args, **_kwargs):
+        raise RuntimeError("feature build failed")
+
+    monkeypatch.setattr("okx_signal_system.signal_service.scan.build_feature_frame", fail_build_feature_frame)
+    service = SignalScanService(
+        candle_loader=loader,
+        regime_manager=FakeRegimeManager(),
+        quality_model_shadow=FakeQualityShadow(),
+        lifecycle_store=FakeLifecycleStore(),
+        shadow_ledger=FakeShadowLedger(),
+    )
+    context = SignalScanContext(
+        dataset="test",
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+        strategy_params=StrategyParams(),
+        risk_config=RiskConfig(),
+        ledger=Ledger("portfolio", init_capital=10000, equity=10000),
+        quality_gate_allows_push=True,
+        min_vote_approval_rate=0.4,
+        mode="test_manual_confirmation_only",
+        min_history_bars=5,
+        checked_bars=checked,
+        expected_latest_closed=pd.Timestamp("2026-01-01T02:45:00Z"),
+        now=pd.Timestamp("2026-01-01T03:05:00Z"),
+    )
+
+    result = asyncio.run(service.scan_cycle(["BTC-USDT-SWAP"], context))
+
+    assert result.cycle_health[0]["reason"] == "feature_error"
+    assert checked == {}
+
+
+def test_signal_scan_service_retries_invalid_features_bar(monkeypatch) -> None:
+    checked = {}
+
+    async def loader(_inst_id: str, _limit: int) -> pd.DataFrame:
+        return _frame()
+
+    monkeypatch.setattr("okx_signal_system.signal_service.scan.build_feature_frame", lambda frame, **_kwargs: frame.copy())
+    service = SignalScanService(
+        candle_loader=loader,
+        regime_manager=FakeRegimeManager(),
+        quality_model_shadow=FakeQualityShadow(),
+        lifecycle_store=FakeLifecycleStore(),
+        shadow_ledger=FakeShadowLedger(),
+    )
+    context = SignalScanContext(
+        dataset="test",
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+        strategy_params=StrategyParams(),
+        risk_config=RiskConfig(),
+        ledger=Ledger("portfolio", init_capital=10000, equity=10000),
+        quality_gate_allows_push=True,
+        min_vote_approval_rate=0.4,
+        mode="test_manual_confirmation_only",
+        min_history_bars=5,
+        checked_bars=checked,
+        expected_latest_closed=pd.Timestamp("2026-01-01T02:45:00Z"),
+        now=pd.Timestamp("2026-01-01T03:05:00Z"),
+    )
+
+    result = asyncio.run(service.scan_cycle(["BTC-USDT-SWAP"], context))
+
+    assert result.cycle_health[0]["reason"] == "invalid_features"
+    assert checked == {}

@@ -15,6 +15,37 @@ def test_find_okx_history_root() -> None:
     assert (root / "BTC_USDT_USDT_1h.parquet").exists()
 
 
+def test_find_history_uses_packaged_data_root(tmp_path, monkeypatch) -> None:
+    dataset = "okx_15m_extended"
+    packaged_root = tmp_path / "_MEIPASS"
+    expected = packaged_root / "lightweight_history" / dataset
+    expected.mkdir(parents=True)
+
+    monkeypatch.delenv("JIAOYI_DATA_DIR", raising=False)
+    monkeypatch.setattr("okx_signal_system.paths._data_root_from_config", lambda: None)
+    monkeypatch.setattr("okx_signal_system.paths.workspace_root", lambda start=None: tmp_path / "workspace")
+    monkeypatch.setattr("sys.frozen", True, raising=False)
+    monkeypatch.setattr("sys._MEIPASS", str(packaged_root), raising=False)
+
+    assert find_lightweight_history(dataset) == expected
+
+
+def test_find_history_uses_onedir_internal_data_root(tmp_path, monkeypatch) -> None:
+    dataset = "okx_15m_extended"
+    exe_dir = tmp_path / "dist" / "OKXSignalSystem"
+    expected = exe_dir / "_internal" / "lightweight_history" / dataset
+    expected.mkdir(parents=True)
+
+    monkeypatch.delenv("JIAOYI_DATA_DIR", raising=False)
+    monkeypatch.setattr("okx_signal_system.paths._data_root_from_config", lambda: None)
+    monkeypatch.setattr("okx_signal_system.paths.workspace_root", lambda start=None: tmp_path / "workspace")
+    monkeypatch.setattr("sys.frozen", True, raising=False)
+    monkeypatch.setattr("sys.executable", str(exe_dir / "OKXSignalSystem.exe"))
+    monkeypatch.delattr("sys._MEIPASS", raising=False)
+
+    assert find_lightweight_history(dataset) == expected
+
+
 def test_file_symbol_maps_to_okx_inst_id() -> None:
     assert file_symbol_to_inst_id(find_lightweight_history("okx_1h_extended") / "BTC_USDT_USDT_1h.parquet") == "BTC-USDT-SWAP"
 
@@ -54,6 +85,52 @@ def test_load_symbol_file_normalizes_columns() -> None:
 def test_closed_bars_filters_unclosed_rows() -> None:
     frame = pd.DataFrame({"ts": pd.date_range("2026-01-01", periods=2, tz="UTC"), "is_closed": [True, False]})
     assert len(closed_bars(frame)) == 1
+
+
+def test_closed_bars_parses_string_closed_flags() -> None:
+    frame = pd.DataFrame(
+        {
+            "ts": pd.date_range("2026-01-01", periods=6, tz="UTC"),
+            "is_closed": ["True", "False", "1", "0", "yes", "no"],
+        }
+    )
+
+    result = closed_bars(frame)
+
+    assert list(result["is_closed"]) == ["True", "1", "yes"]
+
+
+def test_find_lightweight_history_uses_env_data_root(tmp_path, monkeypatch) -> None:
+    data_root = tmp_path / "data"
+    dataset_root = data_root / "lightweight_history" / "okx_15m_extended"
+    dataset_root.mkdir(parents=True)
+
+    monkeypatch.setenv("JIAOYI_DATA_DIR", str(data_root))
+
+    assert find_lightweight_history("okx_15m_extended") == dataset_root
+
+
+def test_find_lightweight_history_uses_explicit_root_dir(tmp_path, monkeypatch) -> None:
+    env_root = tmp_path / "env_data"
+    explicit_root = tmp_path / "explicit_data"
+    dataset_root = explicit_root / "lightweight_history" / "okx_15m_extended"
+    dataset_root.mkdir(parents=True)
+
+    monkeypatch.setenv("JIAOYI_DATA_DIR", str(env_root))
+
+    assert find_lightweight_history("okx_15m_extended", root_dir=explicit_root) == dataset_root
+
+
+def test_gap_handler_uses_configured_history_root(tmp_path, monkeypatch) -> None:
+    data_root = tmp_path / "data"
+    dataset_root = data_root / "lightweight_history" / "okx_15m_extended"
+    dataset_root.mkdir(parents=True)
+
+    monkeypatch.setenv("JIAOYI_DATA_DIR", str(data_root))
+
+    handler = DataGapHandler(timeframe="15m")
+
+    assert handler.data_dir == dataset_root
 
 
 def test_quality_audit_passes_btc_history() -> None:

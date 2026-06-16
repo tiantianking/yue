@@ -5,6 +5,7 @@ project:
   mode: research
 
 data:
+  root_dir: D:/JIAOYI-CX/历史数据_保留
   historical_dataset: okx_15m_extended
   timeframe: 15m
   trend_timeframe: 1h

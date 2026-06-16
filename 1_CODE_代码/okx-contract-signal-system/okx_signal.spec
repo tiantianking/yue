@@ -3,6 +3,9 @@
 PyInstaller打包配置 - OKX合约信号系统
 """
 
+import os
+from pathlib import Path
+
 block_cipher = None
 
 # 隐藏导入（第三方库内部的动态导入）
@@ -61,17 +64,22 @@ hiddenimports = [
     'okx_signal_system.ml.rolling_backtest',
 ]
 
+datas = [
+    ('config', 'config'),
+    ('assets', 'assets'),
+]
+
+history_root = os.environ.get("JIAOYI_DATA_DIR")
+if history_root:
+    history_path = Path(history_root)
+    history_dir = history_path if history_path.name == "lightweight_history" else history_path / "lightweight_history"
+    datas.append((str(history_dir), 'lightweight_history'))
+
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[
-        # 配置文件
-        ('config', 'config'),
-        ('assets', 'assets'),
-        # 历史数据（打包后使用）
-        ('D:/JIAOYI-CX/历史数据_保留/lightweight_history', 'lightweight_history'),
-    ],
+    datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

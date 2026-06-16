@@ -18,12 +18,14 @@ The dashboard reads the existing local system files:
 - `outputs/selected_params.json`
 - `outputs/latest_signal.json`
 - `outputs/15m_backfill_3y_report.json`
-- 15m parquet candles under `D:\JIAOYI-CX\历史数据_保留\lightweight_history\okx_15m_extended`
+- 15m parquet candles from `OKX_HISTORY_DIR`, `OKX_HISTORY_BASE`, `JIAOYI_DATA_DIR`, or `config/base.yaml` `data.root_dir`
 
 Optional environment variables:
 
 - `OKX_SIGNAL_ROOT`
 - `OKX_HISTORY_DIR`
+- `OKX_HISTORY_BASE`
+- `JIAOYI_DATA_DIR`
 - `OKX_DASHBOARD_PYTHON`
 
 ## Check

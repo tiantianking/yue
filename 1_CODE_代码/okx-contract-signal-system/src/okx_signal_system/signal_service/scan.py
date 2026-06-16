@@ -152,6 +152,9 @@ class SignalScanService:
             if latest_closed < expected_closed:
                 cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="missing_latest_closed_bar"))
                 continue
+            if latest_closed > expected_closed:
+                cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="future_closed_bar"))
+                continue
             if signal_is_stale(
                 latest_closed,
                 timeframe=context.signal_timeframe,
@@ -160,6 +163,7 @@ class SignalScanService:
             ):
                 cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="stale_signal_bar"))
                 continue
+            checked_bar_ts: str | None = None
             if context.checked_bars is not None:
                 last_ts = str(df["ts"].iloc[-1])
                 is_new_bar = context.checked_bars.get(inst_id) != last_ts
@@ -167,7 +171,7 @@ class SignalScanService:
                     cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="waiting_next_bar"))
                     continue
                 if is_new_bar:
-                    context.checked_bars[inst_id] = last_ts
+                    checked_bar_ts = last_ts
             if not is_latest_bar_fresh(
                 df,
                 max_lag_hours=timeframe_spec(context.signal_timeframe).fresh_lag_hours,
@@ -194,6 +198,8 @@ class SignalScanService:
             if pd.isna(latest_row.get("atr")) or pd.isna(latest_row.get("breakout_high")):
                 cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="invalid_features", row=latest_row))
                 continue
+            if checked_bar_ts is not None and context.checked_bars is not None:
+                context.checked_bars[inst_id] = checked_bar_ts
 
             regime, _adaptive_params = self._regime_mgr.update_regime(features)
             signal = build_signal(

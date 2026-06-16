@@ -43,7 +43,7 @@ from okx_signal_system.signal_quality import (
     QualityModelShadowScorer,
     SignalCandidate,
     SignalLifecycleStore,
-    assign_tiers,
+    TieredSelection,
 )
 from okx_signal_system.signal_service import SignalScanContext, SignalScanService
 from okx_signal_system.timeframe import default_trend_timeframe, ratio_bars, timeframe_spec
@@ -1217,11 +1217,8 @@ class LiveSignalMonitor:
 
     async def _publish_tiered_candidates(
         self,
-        candidates: list[SignalCandidate],
-        *,
-        price_history: dict[str, pd.DataFrame] | None = None,
+        selection: TieredSelection,
     ) -> None:
-        selection = assign_tiers(candidates, max_tier_a=2, price_history=price_history)
         for candidate in selection.ranked:
             candidate.health_item["tier"] = candidate.tier
             candidate.health_item["rank"] = candidate.rank
@@ -1320,8 +1317,6 @@ class LiveSignalMonitor:
 
         while self._running:
             cycle_health: list[dict[str, Any]] = []
-            ready_candidates: list[SignalCandidate] = []
-            candidate_history: dict[str, pd.DataFrame] = {}
             try:
                 # 获取持仓（模拟盘可能401，优雅降级）
                 positions = []
@@ -1362,10 +1357,8 @@ class LiveSignalMonitor:
                     ),
                 )
                 cycle_health = scan_result.cycle_health
-                ready_candidates = scan_result.ready_candidates
-                candidate_history = scan_result.candidate_history
 
-                await self._publish_tiered_candidates(ready_candidates, price_history=candidate_history)
+                await self._publish_tiered_candidates(scan_result.selection)
                 self.api.persist_data()
                 self._write_latest_scan_status(cycle_health)
                 now_ts = time.time()
