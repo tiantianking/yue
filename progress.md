@@ -180,3 +180,28 @@
 - `docs/okx-signal-quality-next-steps.md`: moved Phase 9 into completed v3.36 work and left Phase 10 as an explicit decision point.
 - `progress.md`: appended this task record.
 - Rollback method: revert the upcoming commit `feat: score candidates with quality model shadow mode`.
+
+## 2026-06-16 - Task: Fix Trend Resample Boundary
+### What was done
+- Corrected the 15m to 1h trend resample boundary so the right-edge newly started 15m bar is not included in the completed 1h trend bar.
+- Extended startup anti-future checks to verify that trend resampling excludes the right edge.
+- Added a focused regression test for the 15m to 1h boundary.
+- Bumped version metadata to v3.37.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m compileall gui.py main.py src` passed.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest` passed, 131 tests.
+- `npm.cmd run lint` passed from `D:\JIAOYI-CX\1_CODE_代码\okx-contract-signal-system\dashboard`.
+- `npm.cmd run build` passed from `D:\JIAOYI-CX\1_CODE_代码\okx-contract-signal-system\dashboard`.
+### Notes
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/features/indicators.py`: changed trend resampling to left-closed, right-labeled bins.
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/training/startup_quality.py`: added a startup anti-future check for right-edge trend leakage.
+- `1_CODE_代码/okx-contract-signal-system/tests/test_features.py`: added the 15m to 1h boundary regression test.
+- `1_CODE_代码/okx-contract-signal-system/gui.py`: bumped app version to v3.37.
+- `1_CODE_代码/okx-contract-signal-system/main.py`: bumped app version to v3.37.
+- `1_CODE_代码/okx-contract-signal-system/pyproject.toml`: bumped package version to 3.37.0.
+- `1_CODE_代码/okx-contract-signal-system/src/okx_signal_system/__init__.py`: bumped package runtime version to 3.37.0.
+- `1_CODE_代码/okx-contract-signal-system/start.bat`: bumped launcher version text to v3.37.
+- `docs/okx-runtime-health-v3.37.md`: added the v3.37 runtime health note.
+- `docs/okx-signal-quality-next-steps.md`: moved the trend resample boundary fix into completed v3.37 work.
+- `progress.md`: appended this task record.
+- Rollback method: revert the upcoming commit `fix: correct trend resample boundary`.

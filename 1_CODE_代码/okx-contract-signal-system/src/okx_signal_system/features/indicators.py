@@ -123,7 +123,7 @@ def resample_trend(
     trend_spec = timeframe_spec(trend_key)
     expected_count = ratio_bars(trend_spec.key, signal_spec.key)
     df = frame.sort_values("ts").set_index("ts")
-    out = df.resample(trend_spec.pandas_freq, label="right", closed="right").agg(
+    out = df.resample(trend_spec.pandas_freq, label="right", closed="left").agg(
         {
             "open": "first",
             "high": "max",
@@ -132,7 +132,7 @@ def resample_trend(
             "volume": "sum",
         }
     )
-    counts = df["close"].resample(trend_spec.pandas_freq, label="right", closed="right").count()
+    counts = df["close"].resample(trend_spec.pandas_freq, label="right", closed="left").count()
     out["complete_trend"] = counts == expected_count
     # Backward-compatible alias used by older tests and views.
     out["complete_4h"] = out["complete_trend"]

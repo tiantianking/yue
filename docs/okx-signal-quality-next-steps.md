@@ -4,7 +4,7 @@
 
 - Repository root: `D:\JIAOYI-CX`
 - Project path: `D:\JIAOYI-CX\1_CODE_代码\okx-contract-signal-system`
-- Current completed version: v3.36
+- Current completed version: v3.37
 - Latest completed commits:
   - `a26f0d9 feat: batch rank and tier signal pushes`
   - `feat: add correlation-aware signal tiers`
@@ -81,6 +81,12 @@
 - Model artifacts are optional and loaded from `outputs/signal_quality_model.json`.
 - Existing A/B-tier selection and push decisions remain unchanged.
 - Version metadata was bumped to v3.36.
+
+### v3.37
+- Corrected the signal-to-trend resample boundary so a 1h trend bar labeled `01:00` is built from `00:00`, `00:15`, `00:30`, and `00:45`, excluding the newly started `01:00` 15m bar.
+- Extended startup anti-future checks to detect right-edge inclusion in trend resampling.
+- Added a focused regression test for the 15m to 1h resample boundary.
+- Version metadata was bumped to v3.37.
 
 ## Absolute Constraints
 

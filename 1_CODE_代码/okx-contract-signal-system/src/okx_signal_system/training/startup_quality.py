@@ -124,6 +124,7 @@ def _anti_future_checks(*, signal_timeframe: str = "15m", trend_timeframe: str |
     trend_key = trend_timeframe or default_trend_timeframe(signal_spec.key)
     trend_count = ratio_bars(trend_key, signal_spec.key)
     incomplete_marked = True
+    trend_resample_excludes_right_edge = True
     if trend_count > 1:
         periods = trend_count + 3
         probe = pd.DataFrame(
@@ -138,10 +139,14 @@ def _anti_future_checks(*, signal_timeframe: str = "15m", trend_timeframe: str |
         )
         trend_frame = resample_trend(probe, signal_timeframe=signal_spec.key, trend_timeframe=trend_key)
         incomplete_marked = bool((~trend_frame["complete_trend"].astype(bool)).any())
+        first_complete = trend_frame[trend_frame["complete_trend"].astype(bool)].head(1)
+        if not first_complete.empty:
+            trend_resample_excludes_right_edge = bool(first_complete.iloc[0]["close"] == trend_count)
 
     return {
         "prior_breakout_excludes_current_bar": breakout_ok,
         "incomplete_trend_not_tradable": incomplete_marked,
+        "trend_resample_excludes_right_edge": trend_resample_excludes_right_edge,
     }
 
 
