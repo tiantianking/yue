@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 
 import pandas as pd
 
@@ -152,7 +153,7 @@ def test_lifecycle_persists_records(tmp_path) -> None:
 
 
 def test_lifecycle_record_signal_is_idempotent_and_persistence_is_stable(tmp_path) -> None:
-    path = tmp_path / "lifecycle.json"
+    path = tmp_path / "lifecycle.sqlite3"
     store = SignalLifecycleStore(path)
     first = store.record_signal(_signal(), signal_id="sig-stable")
     second = store.record_signal(_signal(), signal_id="sig-stable")
@@ -160,13 +161,91 @@ def test_lifecycle_record_signal_is_idempotent_and_persistence_is_stable(tmp_pat
     assert first is second
     assert len(store.records) == 1
 
-    first_payload = json.loads(path.read_text(encoding="utf-8"))
+    with sqlite3.connect(path) as conn:
+        first_payload = conn.execute("SELECT COUNT(*) FROM lifecycle_records").fetchone()[0]
     reloaded = SignalLifecycleStore(path)
     assert len(reloaded.records) == 1
     reloaded.record_signal(_signal(), signal_id="sig-stable")
-    second_payload = json.loads(path.read_text(encoding="utf-8"))
+    with sqlite3.connect(path) as conn:
+        second_payload = conn.execute("SELECT COUNT(*) FROM lifecycle_records").fetchone()[0]
 
     assert second_payload == first_payload
+
+
+def test_lifecycle_sqlite_schema_records_events_and_outbox(tmp_path) -> None:
+    path = tmp_path / "lifecycle.sqlite3"
+    store = SignalLifecycleStore(path)
+    store.record_signal(_signal(), signal_id="sig-sqlite")
+    store.update_symbol(
+        "BTC-USDT-SWAP",
+        _frame(
+            [
+                {"ts": pd.Timestamp("2026-01-01T00:15:00Z"), "close": 101.0, "is_closed": True},
+            ]
+        ),
+    )
+    store.enqueue_notification(
+        "outbox-1",
+        signal_id="sig-sqlite",
+        event_type="A_TIER_SIGNAL",
+        payload={"symbol": "BTC-USDT-SWAP"},
+    )
+    assert store.pending_notifications()[0]["outbox_id"] == "outbox-1"
+    store.mark_notification_sent("outbox-1")
+
+    with sqlite3.connect(path) as conn:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        events = conn.execute(
+            "SELECT event_type, status FROM lifecycle_events WHERE signal_id = ? ORDER BY event_id",
+            ("sig-sqlite",),
+        ).fetchall()
+        outbox = conn.execute(
+            "SELECT status, sent_at FROM notification_outbox WHERE outbox_id = ?",
+            ("outbox-1",),
+        ).fetchone()
+
+    assert {"lifecycle_records", "lifecycle_events", "notification_outbox"}.issubset(tables)
+    assert events == [("TRIGGERED", "TRIGGERED"), ("CONFIRMED", "CONFIRMED")]
+    assert outbox[0] == "SENT"
+    assert outbox[1]
+    assert store.summary()["outbox"]["sent"] == 1
+
+
+def test_lifecycle_migrates_legacy_json_to_sqlite(tmp_path) -> None:
+    legacy_path = tmp_path / "lifecycle.json"
+    legacy_path.write_text(
+        json.dumps(
+            [
+                {
+                    "signal_id": "legacy-sig",
+                    "inst_id": "BTC-USDT-SWAP",
+                    "side": "long",
+                    "signal_time": "2026-01-01T00:00:00+00:00",
+                    "entry_ref": 100.0,
+                    "invalidation_price": 95.0,
+                    "max_hold_bars": 3,
+                    "status": "TRIGGERED",
+                    "last_event_type": "TRIGGERED",
+                    "last_event_at": "2026-01-01T00:00:00+00:00",
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                    "updated_at": "2026-01-01T00:00:00+00:00",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    store = SignalLifecycleStore(tmp_path / "lifecycle.sqlite3")
+
+    assert store.get("legacy-sig") is not None
+    with sqlite3.connect(tmp_path / "lifecycle.sqlite3") as conn:
+        assert conn.execute("SELECT COUNT(*) FROM lifecycle_records").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM lifecycle_events").fetchone()[0] == 1
 
 
 def test_gui_lifecycle_table_values_match_visible_columns(tmp_path) -> None:

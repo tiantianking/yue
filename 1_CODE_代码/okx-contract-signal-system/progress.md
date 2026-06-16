@@ -200,3 +200,21 @@
 - Modified files: `src/okx_signal_system/signal_quality/outcome.py` adds the shared outcome simulator; `src/okx_signal_system/signal_quality/execution.py` and `src/okx_signal_system/backtest/runner.py` use it for quality labels and backtest exits; `src/okx_signal_system/signal_service/scan.py`, `src/okx_signal_system/scheduler.py`, `src/okx_signal_system/signal_service/job.py`, and `src/okx_signal_system/ml/trading_brain.py` consolidate formal/observation scan paths through `SignalScanService`; `src/okx_signal_system/exchange/realtime.py` and `src/okx_signal_system/paths.py` separate historical reads from runtime cache writes; `tests/test_signal_quality_labeler.py`, `tests/test_signal_scan_service.py`, `tests/test_data_layer.py`, `tests/test_config.py`, and `tests/test_learning_lock.py` add focused regressions; `docs/SYSTEM_ARCHITECTURE.md`, `pyproject.toml`, `src/okx_signal_system/__init__.py`, and `src/okx_contract_signal_system.egg-info/PKG-INFO` document and version the v3.45 boundary.
 - SQLite lifecycle event/outbox tables were not added because they are a database schema change and need explicit approval before implementation.
 - Rollback: revert this commit after it is created, or before commit restore the listed source/test/doc/version files from the previous index state and remove this appended progress entry.
+
+## 2026-06-17 - Task: v3.46 SQLite lifecycle event and outbox persistence
+### What was done
+- Upgraded formal signal lifecycle persistence from JSON to SQLite and kept the existing lifecycle store API used by GUI, realtime monitoring, and scan services.
+- Added `lifecycle_records` for current signal state, `lifecycle_events` for state-change history, and `notification_outbox` for A-tier Feishu push pending/sent/failed tracking.
+- Added one-time migration from legacy `signal_lifecycle.json` into the SQLite lifecycle store and connected realtime/GUI A-tier push boundaries to update outbox status.
+- Bumped release metadata to v3.46 and documented the lifecycle storage boundary.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests/test_signal_lifecycle.py` -> `9 passed`.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests/test_signal_lifecycle.py tests/test_desktop_runtime.py tests/test_signal_runtime.py tests/test_feishu_notify.py` -> `43 passed`.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests/test_release_safety.py tests/test_signal_lifecycle.py tests/test_desktop_runtime.py tests/test_signal_runtime.py tests/test_feishu_notify.py` -> `56 passed`.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m compileall src tests main.py gui.py` -> passed.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest -q` -> passed with historical-data integration tests skipped.
+- `npm.cmd run check` in `dashboard` -> lint and production build passed.
+- `git diff --check` -> passed.
+### Notes
+- Modified files: `src/okx_signal_system/signal_quality/lifecycle.py` replaces JSON lifecycle persistence with SQLite records/events/outbox tables and legacy JSON migration; `src/okx_signal_system/exchange/realtime.py` records formal A-tier push outbox status; `gui.py` records GUI A-tier push outbox status; `tests/test_signal_lifecycle.py` covers schema, events, outbox, idempotency, and migration; `tests/test_desktop_runtime.py` covers realtime outbox status updates; `docs/SYSTEM_ARCHITECTURE.md`, `pyproject.toml`, `src/okx_signal_system/__init__.py`, and `src/okx_contract_signal_system.egg-info/PKG-INFO` document and version the v3.46 boundary; `progress.md` records this round.
+- Rollback: revert this commit after it is created, or before commit restore the listed files from the previous index state and remove this appended progress entry.

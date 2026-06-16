@@ -1240,6 +1240,12 @@ class OKXSignalGUI:
                 if self._notification_store().has(candidate.notify_key):
                     self.message_queue.put(('log', (f"已通知过同一根K线A级信号，跳过重复推送: {signal.inst_id} {signal.side}", "INFO")))
                     continue
+                self._signal_lifecycle_store().enqueue_notification(
+                    candidate.notify_key,
+                    signal_id=(candidate.payload.get("lifecycle") or {}).get("signal_id"),
+                    event_type="A_TIER_SIGNAL",
+                    payload=candidate.payload,
+                )
                 try:
                     from okx_signal_system.notify.feishu import send_signal_observation
                     sent = send_signal_observation(
@@ -1263,11 +1269,14 @@ class OKXSignalGUI:
                         invalidation_price=candidate.invalidation_price,
                     )
                     if sent:
+                        self._signal_lifecycle_store().mark_notification_sent(candidate.notify_key)
                         self._mark_signal_notified(candidate.notify_key, signal, score=float(candidate.raw_score))
                         self.message_queue.put(('log', (f"📤 A级飞书推送已发送：排名 {candidate.rank}/{len(selection.ranked)}，评分{candidate.raw_score:.1f}", "INFO")))
                     else:
+                        self._signal_lifecycle_store().mark_notification_failed(candidate.notify_key, "send_signal_observation_returned_false")
                         self.message_queue.put(('log', ("A级飞书推送未送达：飞书返回失败，稍后会重试", "WARNING")))
                 except Exception as e:
+                    self._signal_lifecycle_store().mark_notification_failed(candidate.notify_key, str(e))
                     self.message_queue.put(('log', (f"A级飞书推送失败: {e}", "WARNING")))
             if selection.tier_b:
                 self.message_queue.put(('log', (f"B级候选已保留到体检/面板：{len(selection.tier_b)} 个", "INFO")))

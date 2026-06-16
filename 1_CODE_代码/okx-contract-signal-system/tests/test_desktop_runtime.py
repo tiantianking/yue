@@ -376,6 +376,7 @@ def test_publish_tiered_candidates_uses_scan_service_selection() -> None:
     )
     pushed = []
     recorded = []
+    outbox = []
 
     monitor = LiveSignalMonitor.__new__(LiveSignalMonitor)
     monitor.api = type(
@@ -388,6 +389,15 @@ def test_publish_tiered_candidates_uses_scan_service_selection() -> None:
     )()
     monitor.signal_callback = lambda signal, _decision: pushed.append(signal.inst_id) or True
     monitor._shadow_ledger = type("ShadowLedger", (), {"record_signal": lambda self, signal, _decision: recorded.append(signal.inst_id)})()
+    monitor._lifecycle_store = type(
+        "LifecycleStore",
+        (),
+        {
+            "enqueue_notification": lambda self, key, **metadata: outbox.append(("pending", key, metadata)),
+            "mark_notification_sent": lambda self, key: outbox.append(("sent", key)),
+            "mark_notification_failed": lambda self, key, error: outbox.append(("failed", key, error)),
+        },
+    )()
     monitor._signal_notification_store = Store()
     monitor._b_tier_summary_store = Store(existing=True)
     monitor._last_ready_signal = None
@@ -396,6 +406,10 @@ def test_publish_tiered_candidates_uses_scan_service_selection() -> None:
 
     assert pushed == ["LOW-USDT-SWAP"]
     assert recorded == ["LOW-USDT-SWAP"]
+    assert outbox[0][0] == "pending"
+    assert outbox[0][1] == "LOW-USDT-SWAP:6.0"
+    assert outbox[0][2]["event_type"] == "A_TIER_SIGNAL"
+    assert outbox[1] == ("sent", "LOW-USDT-SWAP:6.0")
     assert monitor._signal_notification_store.marked[0][0] == "LOW-USDT-SWAP:6.0"
     assert low_score_a.health_item["tier"] == "A"
     assert high_score_b.health_item["tier"] == "B"
