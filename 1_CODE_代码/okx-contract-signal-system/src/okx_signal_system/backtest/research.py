@@ -3,8 +3,12 @@
 import json
 import logging
 import math
+import hashlib
+import subprocess
+from dataclasses import replace
 from dataclasses import asdict
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -14,7 +18,7 @@ from okx_signal_system.backtest.evaluation import evaluate_portfolio, evaluate_s
 from okx_signal_system.backtest.grid_search import parameter_grid, run_grid_search, select_best_params
 from okx_signal_system.backtest.runner import run_backtest, split_train_valid, summarize_trades, validate_backtest_result
 from okx_signal_system.data.loader import SymbolData, load_all_symbols
-from okx_signal_system.risk.costs import CostConfig
+from okx_signal_system.risk.costs import CostConfig, estimate_costs
 from okx_signal_system.strategy.trend_breakout import StrategyParams
 from okx_signal_system.timeframe import default_trend_timeframe, timeframe_spec
 
@@ -44,8 +48,10 @@ class ResearchValidationConfig:
     purge_bars: int = 768
     embargo_bars: int = 96
     min_train_trades: int = 80
-    min_neighbor_count: int = 1
-    min_neighbor_pf_ratio: float = 0.80
+    min_neighbor_count: int = 3
+    min_neighbor_pf_ratio: float = 0.85
+    min_neighbor_ratio: float = 0.50
+    neighbor_distance: float = 1.5
 
 
 @dataclass(frozen=True)
@@ -92,6 +98,93 @@ def combine_trade_summaries(
     return summarize_trades(combined, initial_equity=initial_equity_per_symbol * denominator_symbols)
 
 
+def _scenario_cost_config(base: CostConfig, *, multiplier: float, funding_rate: float) -> CostConfig:
+    return replace(
+        base,
+        taker_fee_rate=float(base.taker_fee_rate) * multiplier,
+        maker_fee_rate=float(base.maker_fee_rate) * multiplier,
+        funding_rate=funding_rate,
+    )
+
+
+def _stress_slippage_bps(base: CostConfig, multiplier: float) -> float:
+    if multiplier <= 1.0:
+        return float(base.normal_slippage_bps)
+    return max(float(base.stress_slippage_bps), float(base.normal_slippage_bps) * multiplier)
+
+
+def _recompute_costs_from_trade_facts(
+    trades: pd.DataFrame,
+    *,
+    cost_config: CostConfig,
+    slippage_bps: float,
+    fallback_multiplier: float,
+) -> pd.DataFrame:
+    stressed = trades.copy()
+    for column in ["entry_fee", "exit_fee", "slippage_cost", "funding_fee", "costs"]:
+        if column not in stressed.columns:
+            stressed[column] = 0.0
+
+    def _numeric_row_value(row: pd.Series, key: str) -> float:
+        return float(pd.to_numeric(pd.Series([row.get(key, 0.0)]), errors="coerce").fillna(0.0).iloc[0])
+
+    required = {"entry_price", "exit_price", "qty", "entry_time", "exit_time"}
+    can_recompute = required.issubset(stressed.columns)
+    entry_fees: list[float] = []
+    exit_fees: list[float] = []
+    slippage_costs: list[float] = []
+    funding_fees: list[float] = []
+    total_costs: list[float] = []
+    sources: list[str] = []
+    for _, row in stressed.iterrows():
+        try:
+            if not can_recompute:
+                raise ValueError("missing_trade_facts")
+            costs = estimate_costs(
+                entry_price=float(row["entry_price"]),
+                exit_price=float(row["exit_price"]),
+                qty=float(row["qty"]),
+                entry_time=pd.Timestamp(row["entry_time"]),
+                exit_time=pd.Timestamp(row["exit_time"]),
+                config=cost_config,
+                slippage_bps=slippage_bps,
+            )
+            entry_fee = float(costs.entry_fee)
+            exit_fee = float(costs.exit_fee)
+            slippage_cost = float(costs.slippage_cost)
+            funding_fee = float(costs.funding_fee)
+            source = "trade_fact_recompute"
+        except (TypeError, ValueError):
+            entry_fee = _numeric_row_value(row, "entry_fee") * fallback_multiplier
+            exit_fee = _numeric_row_value(row, "exit_fee") * fallback_multiplier
+            slippage_cost = _numeric_row_value(row, "slippage_cost") * fallback_multiplier
+            funding_fee = _numeric_row_value(row, "funding_fee") * fallback_multiplier
+            if entry_fee == 0.0 and exit_fee == 0.0 and slippage_cost == 0.0 and funding_fee == 0.0:
+                total = _numeric_row_value(row, "costs") * fallback_multiplier
+                entry_fee = total
+            source = "legacy_cost_fallback"
+        total_cost = entry_fee + exit_fee + slippage_cost + funding_fee
+        entry_fees.append(entry_fee)
+        exit_fees.append(exit_fee)
+        slippage_costs.append(slippage_cost)
+        funding_fees.append(funding_fee)
+        total_costs.append(total_cost)
+        sources.append(source)
+
+    gross_pnl = pd.to_numeric(stressed.get("gross_pnl", 0.0), errors="coerce").fillna(0.0)
+    risk_amount = pd.to_numeric(stressed.get("risk_amount", 0.0), errors="coerce").replace(0, pd.NA)
+    stressed["entry_fee"] = entry_fees
+    stressed["exit_fee"] = exit_fees
+    stressed["slippage_cost"] = slippage_costs
+    stressed["funding_fee"] = funding_fees
+    stressed["costs"] = total_costs
+    stressed["net_pnl"] = gross_pnl - stressed["costs"]
+    stressed["net_r"] = (stressed["net_pnl"] / risk_amount).fillna(0.0)
+    stressed["final_net_r"] = stressed["net_r"]
+    stressed["cost_recompute_source"] = sources
+    return stressed
+
+
 def replay_cost_stress(
     trades: pd.DataFrame,
     *,
@@ -106,6 +199,7 @@ def replay_cost_stress(
         "scenario",
         "cost_multiplier",
         "funding_rate",
+        "slippage_bps",
         "net_r",
         "profit_factor",
         "max_drawdown",
@@ -115,7 +209,12 @@ def replay_cost_stress(
         "top_symbol",
         "top_symbol_net_r_share",
         "top_regime",
+        "entry_fee",
+        "exit_fee",
+        "slippage_cost",
+        "funding_fee",
         "funding_sensitivity",
+        "recompute_source",
     ]
     if trades.empty:
         return pd.DataFrame(columns=columns)
@@ -127,36 +226,42 @@ def replay_cost_stress(
         ("stress_2x", 2.0, float(cost_config.funding_rate) * 2.0),
     ]
     baseline_net_r: float | None = None
+    baseline_funding_fee: float | None = None
     for name, multiplier, funding_rate in scenarios:
-        stressed = trades.copy()
-        base_costs = pd.to_numeric(stressed.get("costs", 0.0), errors="coerce").fillna(0.0)
-        gross_pnl = pd.to_numeric(stressed.get("gross_pnl", 0.0), errors="coerce").fillna(0.0)
-        risk_amount = pd.to_numeric(stressed.get("risk_amount", 0.0), errors="coerce").replace(0, pd.NA)
-        stressed["costs"] = base_costs * multiplier
-        stressed["net_pnl"] = gross_pnl - stressed["costs"]
-        stressed["net_r"] = (stressed["net_pnl"] / risk_amount).fillna(0.0)
-        stressed["final_net_r"] = stressed["net_r"]
+        slippage_bps = _stress_slippage_bps(cost_config, multiplier)
+        scenario_config = _scenario_cost_config(cost_config, multiplier=multiplier, funding_rate=funding_rate)
+        stressed = _recompute_costs_from_trade_facts(
+            trades,
+            cost_config=scenario_config,
+            slippage_bps=slippage_bps,
+            fallback_multiplier=multiplier,
+        )
         summary = summarize_trades(stressed, initial_equity=initial_equity)
         total_net_r = float(stressed["net_r"].sum())
+        funding_fee = float(pd.to_numeric(stressed["funding_fee"], errors="coerce").fillna(0.0).sum())
+        risk_total = float(pd.to_numeric(stressed.get("risk_amount", 0.0), errors="coerce").fillna(0.0).sum())
         if baseline_net_r is None:
             baseline_net_r = total_net_r
+            baseline_funding_fee = funding_fee
         symbol_r = stressed.groupby("inst_id")["net_r"].sum() if "inst_id" in stressed else pd.Series(dtype=float)
         if symbol_r.empty:
             top_symbol = ""
             top_symbol_share = 0.0
         else:
             top_symbol = str(symbol_r.abs().idxmax())
-            top_symbol_share = float(symbol_r.loc[top_symbol] / total_net_r) if total_net_r else 0.0
+            top_symbol_share = float(abs(symbol_r.loc[top_symbol]) / symbol_r.abs().sum()) if symbol_r.abs().sum() else 0.0
         if "market_regime" in stressed:
             regime_r = stressed.groupby("market_regime")["net_r"].sum()
             top_regime = str(regime_r.abs().idxmax()) if not regime_r.empty else "unknown"
         else:
             top_regime = "unknown"
+        recompute_source = ",".join(sorted({str(value) for value in stressed["cost_recompute_source"].unique()}))
         rows.append(
             {
                 "scenario": name,
                 "cost_multiplier": multiplier,
                 "funding_rate": funding_rate,
+                "slippage_bps": slippage_bps,
                 "net_r": total_net_r,
                 "profit_factor": summary["profit_factor"],
                 "max_drawdown": summary["max_drawdown"],
@@ -166,7 +271,12 @@ def replay_cost_stress(
                 "top_symbol": top_symbol,
                 "top_symbol_net_r_share": top_symbol_share,
                 "top_regime": top_regime,
-                "funding_sensitivity": total_net_r - float(baseline_net_r),
+                "entry_fee": float(pd.to_numeric(stressed["entry_fee"], errors="coerce").fillna(0.0).sum()),
+                "exit_fee": float(pd.to_numeric(stressed["exit_fee"], errors="coerce").fillna(0.0).sum()),
+                "slippage_cost": float(pd.to_numeric(stressed["slippage_cost"], errors="coerce").fillna(0.0).sum()),
+                "funding_fee": funding_fee,
+                "funding_sensitivity": -((funding_fee - float(baseline_funding_fee or 0.0)) / risk_total) if risk_total else 0.0,
+                "recompute_source": recompute_source,
             }
         )
     return pd.DataFrame(rows, columns=columns)
@@ -213,6 +323,38 @@ def _timestamp_bounds(symbols: list[SymbolData]) -> tuple[pd.Timestamp, pd.Times
     return max(starts), min(ends)
 
 
+def _global_split_boundaries(
+    symbols: list[SymbolData],
+    *,
+    common_start: pd.Timestamp,
+    common_end: pd.Timestamp,
+    warmup: int,
+    signal_timeframe: str,
+    config: ResearchValidationConfig,
+) -> dict[str, pd.Timestamp]:
+    spec = timeframe_spec(signal_timeframe)
+    axis = pd.date_range(common_start, common_end, freq=spec.pandas_freq, tz="UTC")
+    if len(axis) <= warmup + config.purge_bars * 2 + config.embargo_bars * 2 + 10:
+        raise ValueError("STRICT_SPLIT_UNAVAILABLE: insufficient common calendar axis")
+    usable_axis = axis[warmup:]
+    train_cut = int(len(usable_axis) * config.train_fraction)
+    valid_cut = int(len(usable_axis) * (config.train_fraction + config.validation_fraction))
+    valid_start_idx = train_cut + config.purge_bars
+    blind_start_idx = valid_cut + config.embargo_bars
+    if train_cut <= 0 or valid_start_idx >= valid_cut or blind_start_idx >= len(usable_axis):
+        raise ValueError("STRICT_SPLIT_UNAVAILABLE: empty strict split window")
+    return {
+        "common_start": common_start,
+        "common_end": common_end,
+        "train_start": pd.Timestamp(usable_axis[0]),
+        "train_end": pd.Timestamp(usable_axis[train_cut - 1]),
+        "validation_start": pd.Timestamp(usable_axis[valid_start_idx]),
+        "validation_end": pd.Timestamp(usable_axis[valid_cut - 1]),
+        "blind_start": pd.Timestamp(usable_axis[blind_start_idx]),
+        "blind_end": pd.Timestamp(usable_axis[-1]),
+    }
+
+
 def common_calendar_split(
     symbols: list[SymbolData],
     *,
@@ -229,28 +371,24 @@ def common_calendar_split(
 
     common_start, common_end = _timestamp_bounds(symbols)
     warmup = _max_warmup_bars(params_grid, signal_timeframe)
+    boundaries = _global_split_boundaries(
+        symbols,
+        common_start=common_start,
+        common_end=common_end,
+        warmup=warmup,
+        signal_timeframe=signal_timeframe,
+        config=config,
+    )
     split_by_symbol: dict[str, ResearchSplit] = {}
     for symbol_data in symbols:
         frame = symbol_data.frame.copy()
         frame["ts"] = pd.to_datetime(frame["ts"], utc=True, errors="coerce")
         frame = frame[(frame["ts"] >= common_start) & (frame["ts"] <= common_end)].sort_values("ts").reset_index(drop=True)
-        if len(frame) <= warmup + config.purge_bars * 2 + config.embargo_bars * 2 + 10:
-            raise ValueError(f"{symbol_data.inst_id} has insufficient common-calendar rows")
-
-        usable_start = min(warmup, len(frame) - 1)
-        usable = frame.iloc[usable_start:].reset_index(drop=True)
-        train_end = int(len(usable) * config.train_fraction)
-        valid_end = int(len(usable) * (config.train_fraction + config.validation_fraction))
-        valid_start = min(len(usable), train_end + config.purge_bars)
-        blind_start = min(len(usable), valid_end + config.embargo_bars)
-        train_end = max(0, train_end)
-        valid_end = max(valid_start, valid_end)
-
-        train = usable.iloc[:train_end].reset_index(drop=True)
-        validation = usable.iloc[valid_start:valid_end].reset_index(drop=True)
-        blind = usable.iloc[blind_start:].reset_index(drop=True)
+        train = frame[(frame["ts"] >= boundaries["train_start"]) & (frame["ts"] <= boundaries["train_end"])].reset_index(drop=True)
+        validation = frame[(frame["ts"] >= boundaries["validation_start"]) & (frame["ts"] <= boundaries["validation_end"])].reset_index(drop=True)
+        blind = frame[(frame["ts"] >= boundaries["blind_start"]) & (frame["ts"] <= boundaries["blind_end"])].reset_index(drop=True)
         if train.empty or validation.empty or blind.empty:
-            raise ValueError(f"{symbol_data.inst_id} has empty train/validation/blind split")
+            raise ValueError(f"STRICT_SPLIT_UNAVAILABLE: {symbol_data.inst_id} has empty train/validation/blind split")
 
         split_by_symbol[symbol_data.inst_id] = ResearchSplit(
             train=train,
@@ -258,16 +396,7 @@ def common_calendar_split(
             blind=blind,
             purge_bars=config.purge_bars,
             embargo_bars=config.embargo_bars,
-            boundaries={
-                "common_start": common_start,
-                "common_end": common_end,
-                "train_start": pd.Timestamp(train["ts"].iloc[0]),
-                "train_end": pd.Timestamp(train["ts"].iloc[-1]),
-                "validation_start": pd.Timestamp(validation["ts"].iloc[0]),
-                "validation_end": pd.Timestamp(validation["ts"].iloc[-1]),
-                "blind_start": pd.Timestamp(blind["ts"].iloc[0]),
-                "blind_end": pd.Timestamp(blind["ts"].iloc[-1]),
-            },
+            boundaries=dict(boundaries),
         )
     return split_by_symbol
 
@@ -354,9 +483,11 @@ def _neighbor_stability(frame: pd.DataFrame, *, config: ResearchValidationConfig
             stable_counts.append(0)
             stable_ratios.append(0.0)
             continue
-        mask = pd.Series(True, index=out.index)
+        distance = pd.Series(0.0, index=out.index)
         for col in PARAM_COLS:
-            mask &= (out[col].astype(float) - float(row[col])).abs() <= steps[col]
+            step = steps[col] if steps[col] > 0 else 1.0
+            distance += (out[col].astype(float) - float(row[col])).abs() / step
+        mask = distance <= float(config.neighbor_distance)
         mask &= out.index != row.name
         mask &= out["base_train_gate"].fillna(False).astype(bool)
         neighbors = out[mask].copy()
@@ -375,6 +506,16 @@ def _neighbor_stability(frame: pd.DataFrame, *, config: ResearchValidationConfig
     out["stable_neighbor_count"] = stable_counts
     out["stable_neighbor_ratio"] = stable_ratios
     return out
+
+
+def _safe_portfolio_pf(wins: float, losses: float) -> float:
+    return float(wins / abs(losses)) if losses < 0 else float("inf")
+
+
+def _contribution_concentration(values: pd.Series) -> float:
+    numeric = pd.to_numeric(values, errors="coerce").fillna(0.0).abs()
+    total = float(numeric.sum())
+    return float(numeric.max() / total) if total else 0.0
 
 
 def run_shared_train_grid(
@@ -406,11 +547,13 @@ def run_shared_train_grid(
     if symbol_results.empty:
         return symbol_results
 
+    grouped = symbol_results.groupby(PARAM_COLS, dropna=False)
     agg = (
         symbol_results.groupby(PARAM_COLS, dropna=False)
         .agg(
-            train_total_return=("train_total_return", "mean"),
-            train_profit_factor=("train_profit_factor", "mean"),
+            train_net_pnl=("train_net_pnl", "sum"),
+            train_winning_net_pnl=("train_winning_net_pnl", "sum"),
+            train_losing_net_pnl=("train_losing_net_pnl", "sum"),
             train_payoff_ratio=("train_payoff_ratio", "mean"),
             train_win_rate=("train_win_rate", "mean"),
             train_total_trades=("train_total_trades", "sum"),
@@ -421,10 +564,24 @@ def run_shared_train_grid(
             train_gt5x_trade_pct=("train_gt5x_trade_pct", "mean"),
             train_pnl_share_from_gt5x=("train_pnl_share_from_gt5x", "mean"),
             profitable_symbols=("train_total_return", lambda values: int((values > 0).sum())),
+            median_symbol_pf=("train_profit_factor", "median"),
+            min_symbol_pf=("train_profit_factor", "min"),
             symbols_tested=("symbol", "nunique"),
         )
         .reset_index()
     )
+    concentration = (
+        grouped["train_net_pnl"]
+        .apply(_contribution_concentration)
+        .rename("top_symbol_net_pnl_share")
+        .reset_index()
+    )
+    agg = agg.merge(concentration, on=PARAM_COLS, how="left")
+    agg["train_total_return"] = agg["train_net_pnl"] / (10000.0 * agg["symbols_tested"].clip(lower=1))
+    agg["train_profit_factor"] = [
+        _safe_portfolio_pf(float(wins), float(losses))
+        for wins, losses in zip(agg["train_winning_net_pnl"], agg["train_losing_net_pnl"], strict=False)
+    ]
     agg["profitable_symbol_ratio"] = agg["profitable_symbols"] / agg["symbols_tested"].clip(lower=1)
     agg["centrality_distance"] = agg.apply(_param_distance, axis=1)
     agg["finite_profit_factor"] = agg["train_profit_factor"].map(_finite_number)
@@ -444,6 +601,7 @@ def run_shared_train_grid(
     agg["passed_train_gate"] = (
         agg["base_train_gate"]
         & (agg["stable_neighbor_count"] >= validation_config.min_neighbor_count)
+        & (agg["stable_neighbor_ratio"] >= validation_config.min_neighbor_ratio)
     )
     return agg
 
@@ -521,6 +679,13 @@ def _calculate_param_score(row: pd.Series) -> float:
     return 0.6 * pf_normalized + 0.4 * win_normalized
 
 
+def _filter_trades_after_start(trades: pd.DataFrame, validation_start: pd.Timestamp) -> pd.DataFrame:
+    if trades.empty or "entry_time" not in trades.columns:
+        return trades
+    entry_time = pd.to_datetime(trades["entry_time"], utc=True, errors="coerce")
+    return trades[entry_time >= validation_start].reset_index(drop=True)
+
+
 def run_walk_forward_validation(
     frame: pd.DataFrame,
     *,
@@ -529,6 +694,8 @@ def run_walk_forward_validation(
     train_window: int | None = None,
     valid_window: int | None = None,
     step: int | None = None,
+    purge_bars: int = 0,
+    embargo_bars: int = 0,
     params_grid: list[StrategyParams] | None = None,
     signal_timeframe: str | None = None,
     trend_timeframe: str | None = None,
@@ -539,15 +706,21 @@ def run_walk_forward_validation(
     train_window = train_window or max(warmup * 2, 2048)
     valid_window = valid_window or max(warmup, 768)
     step = step or valid_window
-    if len(frame) < train_window + valid_window:
+    purge_bars = max(0, int(purge_bars))
+    embargo_bars = max(0, int(embargo_bars))
+    if len(frame) < train_window + purge_bars + valid_window:
         log.warning(f"{inst_id} data is insufficient for walk-forward validation")
         return {}
 
     results: list[dict] = []
     cursor = 0
-    while cursor + train_window + valid_window <= len(frame):
+    while cursor + train_window + purge_bars + valid_window <= len(frame):
         train_frame = frame.iloc[cursor : cursor + train_window].reset_index(drop=True)
-        valid_frame = frame.iloc[cursor + train_window : cursor + train_window + valid_window].reset_index(drop=True)
+        validation_start_idx = cursor + train_window + purge_bars
+        validation_end_idx = validation_start_idx + valid_window
+        warmup_start_idx = max(0, validation_start_idx - warmup)
+        valid_frame = frame.iloc[warmup_start_idx:validation_end_idx].reset_index(drop=True)
+        validation_start_ts = pd.Timestamp(frame.iloc[validation_start_idx]["ts"]) if "ts" in frame.columns else None
         fold_grid = run_grid_search(
             train_frame,
             inst_id=inst_id,
@@ -574,15 +747,29 @@ def run_walk_forward_validation(
             signal_timeframe=signal_key,
             trend_timeframe=trend_key,
         )
+        if validation_start_ts is not None:
+            valid_trades = _filter_trades_after_start(valid_trades, validation_start_ts)
+        try:
+            train_summary = summarize_trades(validate_backtest_result(train_trades, context=f"{inst_id} walk_forward train"))
+            valid_summary = summarize_trades(validate_backtest_result(valid_trades, context=f"{inst_id} walk_forward validation"))
+        except ValueError:
+            cursor += step + embargo_bars
+            continue
         results.append(
             {
                 "window_start": cursor,
+                "train_start_ts": str(train_frame["ts"].iloc[0]) if "ts" in train_frame and not train_frame.empty else "",
+                "train_end_ts": str(train_frame["ts"].iloc[-1]) if "ts" in train_frame and not train_frame.empty else "",
+                "purge_bars": purge_bars,
+                "validation_start_ts": str(validation_start_ts) if validation_start_ts is not None else "",
+                "validation_end_ts": str(frame.iloc[validation_end_idx - 1]["ts"]) if "ts" in frame.columns else "",
+                "embargo_bars": embargo_bars,
                 "selected_params": asdict(frozen_params),
-                "train_summary": summarize_trades(train_trades),
-                "valid_summary": summarize_trades(valid_trades),
+                "train_summary": train_summary,
+                "valid_summary": valid_summary,
             }
         )
-        cursor += step
+        cursor += step + embargo_bars
 
     if not results:
         return {}
@@ -592,11 +779,17 @@ def run_walk_forward_validation(
     valid_pfs = [r["valid_summary"]["profit_factor"] for r in results]
     valid_returns = [r["valid_summary"]["total_return"] for r in results]
     valid_win_rates = [r["valid_summary"]["win_rate"] for r in results]
+    finite_valid_pfs = [float(value) for value in valid_pfs if _finite_number(value)]
+    pass_flags = [value >= 1.05 for value in finite_valid_pfs]
     return {
         "window_count": len(results),
         "valid_pf_mean": float(np.mean(valid_pfs)),
         "valid_pf_std": float(np.std(valid_pfs)),
         "valid_pf_cv": float(np.std(valid_pfs) / np.mean(valid_pfs)) if np.mean(valid_pfs) > 0 else 0,
+        "valid_pf_median": float(np.median(finite_valid_pfs)) if finite_valid_pfs else 0.0,
+        "valid_pf_pass_ratio": float(sum(pass_flags) / len(pass_flags)) if pass_flags else 0.0,
+        "purge_bars": purge_bars,
+        "embargo_bars": embargo_bars,
         "valid_return_mean": float(np.mean(valid_returns)),
         "valid_return_std": float(np.std(valid_returns)),
         "valid_win_rate_mean": float(np.mean(valid_win_rates)),
@@ -624,6 +817,157 @@ def run_dataset_research(
     return artifacts["single_symbol_results"]
 
 
+def _empty_symbol_research_row(inst_id: str, *, shared_params: bool, reason: str) -> dict:
+    empty_summary = summarize_trades(pd.DataFrame())
+    return {
+        "symbol": inst_id,
+        **_prefixed(empty_summary, "train"),
+        **_prefixed(empty_summary, "valid"),
+        "shared_params": bool(shared_params),
+        "pass_fail": "failed",
+        "fail_reasons": reason,
+    }
+
+
+def _failed_research_artifacts(
+    *,
+    dataset: str,
+    symbols: list[SymbolData],
+    signal_key: str,
+    trend_key: str,
+    shared_params: bool,
+    reason: str,
+    split_status: str,
+) -> dict[str, pd.DataFrame | dict | StrategyParams]:
+    single_results = pd.DataFrame(
+        [_empty_symbol_research_row(symbol.inst_id, shared_params=shared_params, reason=reason) for symbol in symbols]
+    )
+    validation_results = single_results[
+        ["symbol", "valid_total_return", "valid_profit_factor", "valid_total_trades", "pass_fail", "fail_reasons"]
+    ].copy()
+    empty_portfolio = summarize_trades(pd.DataFrame(), initial_equity=10000.0 * max(1, len(symbols)))
+    empty_portfolio["status"] = "failed_no_valid_backtest"
+    portfolio_results = pd.DataFrame(
+        [
+            {
+                "portfolio_name": "shared_parameter_portfolio" if shared_params else "per_symbol_parameter_portfolio",
+                "dataset": dataset,
+                "signal_timeframe": signal_key,
+                "trend_timeframe": trend_key,
+                "symbols_included": len(symbols),
+                **_prefixed(empty_portfolio, "train"),
+                **_prefixed(empty_portfolio, "valid"),
+                **_prefixed({**empty_portfolio, "status": "locked"}, "blind"),
+                "blind_lock_status": "locked",
+                "profitable_symbol_ratio": 0.0,
+                "hit_27pct_symbol_ratio": 0.0,
+                "pass_fail": "failed",
+                "fail_reasons": reason,
+            }
+        ]
+    )
+    leverage_risk = build_leverage_risk_table(pd.DataFrame())
+    cost_stress = replay_cost_stress(pd.DataFrame())
+    checklist = build_acceptance_checklist(
+        train_grid_results=pd.DataFrame(),
+        selected=StrategyParams(),
+        selected_params_available=False,
+        validation_results=validation_results,
+        portfolio_results=portfolio_results,
+        leverage_risk=leverage_risk,
+        cost_stress=cost_stress,
+        walk_forward_results={},
+        shared_params=shared_params,
+        signal_timeframe=signal_key,
+        split_status=split_status,
+        blind_lock_status="locked",
+    )
+    return {
+        "train_grid_results": pd.DataFrame(),
+        "selected_params": {},
+        "validation_results": validation_results,
+        "single_symbol_results": single_results,
+        "portfolio_results": portfolio_results,
+        "leverage_risk": leverage_risk,
+        "cost_stress": cost_stress,
+        "walk_forward_results": {},
+        "acceptance_checklist": checklist,
+        "sample_trades": pd.DataFrame(),
+        "blind_trades": pd.DataFrame(),
+        "research_metadata": {
+            "dataset": dataset,
+            "split_status": split_status,
+            "promotion_eligible": False,
+            "fail_reasons": reason,
+        },
+    }
+
+
+def _data_hash(symbols: list[SymbolData]) -> str:
+    digest = hashlib.sha256()
+    for symbol in sorted(symbols, key=lambda item: item.inst_id):
+        frame = symbol.frame
+        digest.update(symbol.inst_id.encode("utf-8"))
+        digest.update(str(symbol.source_path).encode("utf-8"))
+        digest.update(str(len(frame)).encode("utf-8"))
+        if "ts" in frame and not frame.empty:
+            ts = pd.to_datetime(frame["ts"], utc=True, errors="coerce").dropna()
+            if not ts.empty:
+                digest.update(str(ts.min()).encode("utf-8"))
+                digest.update(str(ts.max()).encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _params_hash(params: StrategyParams | dict | None) -> str:
+    payload = asdict(params) if isinstance(params, StrategyParams) else (params or {})
+    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _git_commit() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path(__file__).resolve().parents[3],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except Exception:
+        return "unknown"
+    return result.stdout.strip() or "unknown"
+
+
+def _blind_access_manifest(
+    *,
+    dataset: str,
+    symbols: list[SymbolData],
+    signal_key: str,
+    trend_key: str,
+    selected: StrategyParams,
+    validation_config: ResearchValidationConfig,
+    release_token: str,
+    research_version: str,
+) -> dict:
+    config_payload = {
+        "signal_timeframe": signal_key,
+        "trend_timeframe": trend_key,
+        "validation_config": asdict(validation_config),
+    }
+    token_hash = hashlib.sha256(release_token.encode("utf-8")).hexdigest()
+    return {
+        "blind_status": "unlocked",
+        "research_version": research_version,
+        "dataset": dataset,
+        "dataset_hash": _data_hash(symbols),
+        "config_hash": hashlib.sha256(json.dumps(config_payload, sort_keys=True).encode("utf-8")).hexdigest(),
+        "params_hash": _params_hash(selected),
+        "release_token_hash": token_hash,
+        "git_commit": _git_commit(),
+        "first_access_time_utc": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def run_dataset_research_artifacts(
     *,
     dataset: str = DEFAULT_DATASET,
@@ -632,6 +976,10 @@ def run_dataset_research_artifacts(
     shared_params: bool = True,
     signal_timeframe: str | None = None,
     trend_timeframe: str | None = None,
+    legacy_split: bool = False,
+    unlock_blind: bool = False,
+    blind_release_token: str | None = None,
+    research_version: str = "v3.50-strict",
 ) -> dict[str, pd.DataFrame | dict | StrategyParams]:
     symbols = load_all_symbols(dataset)
     if max_symbols is not None:
@@ -640,6 +988,7 @@ def run_dataset_research_artifacts(
         raise ValueError("no symbols loaded for research")
     signal_key, trend_key = _resolve_timeframes(symbols[0].frame, signal_timeframe, trend_timeframe)
     validation_config = ResearchValidationConfig()
+    split_status = "strict"
     try:
         splits = common_calendar_split(
             symbols,
@@ -647,8 +996,34 @@ def run_dataset_research_artifacts(
             signal_timeframe=signal_key,
             config=validation_config,
         )
-    except ValueError:
+    except ValueError as exc:
+        if not legacy_split:
+            return _failed_research_artifacts(
+                dataset=dataset,
+                symbols=symbols,
+                signal_key=signal_key,
+                trend_key=trend_key,
+                shared_params=shared_params,
+                reason=f"STRICT_SPLIT_UNAVAILABLE:{exc}",
+                split_status="strict_unavailable",
+            )
         splits = {}
+        split_status = "legacy_non_formal"
+
+    blind_lock_status = "locked"
+    blind_manifest: dict | None = None
+    if unlock_blind:
+        if not blind_release_token:
+            return _failed_research_artifacts(
+                dataset=dataset,
+                symbols=symbols,
+                signal_key=signal_key,
+                trend_key=trend_key,
+                shared_params=shared_params,
+                reason="BLIND_RELEASE_TOKEN_REQUIRED",
+                split_status=split_status,
+            )
+        blind_lock_status = "unlocked"
 
     if shared_params:
         train_grid_results = run_shared_train_grid(
@@ -745,7 +1120,7 @@ def run_dataset_research_artifacts(
                         ),
                         context=f"{symbol_data.inst_id} blind",
                     )
-                    if not blind_frame.empty
+                    if unlock_blind and not blind_frame.empty
                     else pd.DataFrame()
                 )
             except ValueError as exc:
@@ -834,7 +1209,51 @@ def run_dataset_research_artifacts(
         blind_portfolio = combine_trade_summaries(blind_trades_by_symbol, symbol_count=len(symbols))
     except ValueError:
         blind_portfolio = summarize_trades(pd.DataFrame(), initial_equity=10000.0 * max(1, len(symbols)))
-        blind_portfolio["status"] = "failed_no_blind_backtest"
+        blind_portfolio["status"] = "locked" if not unlock_blind else "failed_no_blind_backtest"
+    if unlock_blind and selected is not None and blind_release_token:
+        blind_manifest = _blind_access_manifest(
+            dataset=dataset,
+            symbols=symbols,
+            signal_key=signal_key,
+            trend_key=trend_key,
+            selected=selected,
+            validation_config=validation_config,
+            release_token=blind_release_token,
+            research_version=research_version,
+        )
+    walk_forward_results: dict = {}
+    if shared_params and selected is not None and splits:
+        walk_rows = []
+        for symbol_data in symbols:
+            split = splits.get(symbol_data.inst_id)
+            if split is None:
+                continue
+            wf_frame = pd.concat([split.train, split.validation], ignore_index=True).sort_values("ts").reset_index(drop=True)
+            result = run_walk_forward_validation(
+                wf_frame,
+                inst_id=symbol_data.inst_id,
+                params=selected,
+                params_grid=[selected],
+                signal_timeframe=signal_key,
+                trend_timeframe=trend_key,
+                purge_bars=validation_config.purge_bars,
+                embargo_bars=validation_config.embargo_bars,
+            )
+            if result:
+                walk_rows.append({"symbol": symbol_data.inst_id, **{key: value for key, value in result.items() if key != "windows"}})
+        if walk_rows:
+            walk_table = pd.DataFrame(walk_rows)
+            finite_pf = pd.to_numeric(walk_table["valid_pf_median"], errors="coerce").dropna()
+            pass_ratio = pd.to_numeric(walk_table["valid_pf_pass_ratio"], errors="coerce").dropna()
+            walk_forward_results = {
+                "symbol_results": walk_rows,
+                "symbol_count": int(len(walk_rows)),
+                "window_count": int(pd.to_numeric(walk_table["window_count"], errors="coerce").fillna(0).sum()),
+                "valid_pf_median": float(finite_pf.median()) if not finite_pf.empty else 0.0,
+                "valid_pf_pass_ratio": float(pass_ratio.mean()) if not pass_ratio.empty else 0.0,
+                "purge_bars": validation_config.purge_bars,
+                "embargo_bars": validation_config.embargo_bars,
+            }
     profitable_ratio = float((single_results["valid_total_return"] > 0).mean()) if not single_results.empty else 0.0
     hit27_ratio = float((single_results["valid_hit_27pct_stop"] > 0).mean()) if not single_results.empty else 0.0
     portfolio_eval = evaluate_portfolio(
@@ -859,6 +1278,8 @@ def run_dataset_research_artifacts(
                 **_prefixed(train_portfolio, "train"),
                 **_prefixed(valid_portfolio, "valid"),
                 **_prefixed(blind_portfolio, "blind"),
+                "split_status": split_status,
+                "blind_lock_status": blind_lock_status,
                 "profitable_symbol_ratio": profitable_ratio,
                 "hit_27pct_symbol_ratio": hit27_ratio,
                 "pass_fail": portfolio_eval["pass_fail"],
@@ -873,12 +1294,16 @@ def run_dataset_research_artifacts(
     checklist = build_acceptance_checklist(
         train_grid_results=train_grid_results,
         selected=selected if selected is not None else StrategyParams(),
+        selected_params_available=selected is not None,
         validation_results=validation_results,
         portfolio_results=portfolio_results,
         leverage_risk=leverage_risk,
         cost_stress=cost_stress,
+        walk_forward_results=walk_forward_results,
         shared_params=shared_params,
         signal_timeframe=signal_key,
+        split_status=split_status,
+        blind_lock_status=blind_lock_status,
     )
     return {
         "train_grid_results": train_grid_results,
@@ -888,9 +1313,17 @@ def run_dataset_research_artifacts(
         "portfolio_results": portfolio_results,
         "leverage_risk": leverage_risk,
         "cost_stress": cost_stress,
+        "walk_forward_results": walk_forward_results,
         "acceptance_checklist": checklist,
         "sample_trades": valid_trades,
         "blind_trades": blind_trades,
+        "blind_access_manifest": blind_manifest or {},
+        "research_metadata": {
+            "dataset": dataset,
+            "split_status": split_status,
+            "blind_lock_status": blind_lock_status,
+            "promotion_eligible": bool(not checklist.empty and checklist["passed"].astype(bool).all()),
+        },
     }
 
 
@@ -930,34 +1363,74 @@ def build_acceptance_checklist(
     *,
     train_grid_results: pd.DataFrame,
     selected: StrategyParams,
+    selected_params_available: bool = True,
     validation_results: pd.DataFrame,
     portfolio_results: pd.DataFrame,
     leverage_risk: pd.DataFrame,
     cost_stress: pd.DataFrame | None = None,
+    walk_forward_results: dict | None = None,
     shared_params: bool,
     signal_timeframe: str = DEFAULT_SIGNAL_TIMEFRAME,
+    split_status: str = "strict",
+    blind_lock_status: str = "locked",
 ) -> pd.DataFrame:
     portfolio = portfolio_results.iloc[0].to_dict() if not portfolio_results.empty else {}
     near_liq_count = int(leverage_risk["near_liq_flag"].fillna(False).sum()) if "near_liq_flag" in leverage_risk else 0
     expected_grid_size = len(parameter_grid(signal_timeframe))
     stress_scenarios = set(cost_stress["scenario"].astype(str)) if cost_stress is not None and not cost_stress.empty else set()
+    stress_sources = set(cost_stress["recompute_source"].astype(str)) if cost_stress is not None and "recompute_source" in cost_stress else set()
     stable_gate = bool(
         not train_grid_results.empty
         and "finite_profit_factor" in train_grid_results
         and "stable_neighbor_count" in train_grid_results
+        and "stable_neighbor_ratio" in train_grid_results
+    )
+    if stable_gate and "passed_train_gate" in train_grid_results:
+        stable_gate = bool(train_grid_results["passed_train_gate"].fillna(False).any())
+    walk_forward_results = walk_forward_results or {}
+    walk_forward_pass = bool(
+        walk_forward_results.get("window_count", 0) > 0
+        and walk_forward_results.get("purge_bars", 0) > 0
+        and walk_forward_results.get("embargo_bars", 0) > 0
+        and float(walk_forward_results.get("valid_pf_pass_ratio", 0.0)) >= 0.5
     )
     checks = [
         ("exchange_okx_only", True, "OKX SWAP only"),
+        ("strict_common_calendar_split", split_status == "strict", split_status),
         (
             "parameter_grid_evaluated",
             len(train_grid_results) > 0 or not shared_params,
             f"current rows {len(train_grid_results)}, full {signal_timeframe} grid {expected_grid_size}",
         ),
-        ("shared_params_selected", shared_params, json.dumps(asdict(selected), ensure_ascii=False)),
+        ("shared_params_selected", shared_params and selected_params_available, json.dumps(asdict(selected), ensure_ascii=False)),
         ("validation_once_after_freeze", shared_params and not validation_results.empty, "validation uses frozen params"),
-        ("finite_pf_and_neighbor_stability_gate", stable_gate, "finite_profit_factor + stable_neighbor_count"),
-        ("blind_set_locked", "blind_total_trades" in portfolio, str(portfolio.get("blind_total_trades", 0))),
-        ("cost_stress_replay_three_scenarios", {"baseline", "stress_1_5x", "stress_2x"}.issubset(stress_scenarios), ",".join(sorted(stress_scenarios))),
+        (
+            "finite_pf_and_neighbor_stability_gate",
+            stable_gate,
+            f"min_count_ratio={ResearchValidationConfig().min_neighbor_count}/{ResearchValidationConfig().min_neighbor_ratio}",
+        ),
+        (
+            "purged_walk_forward_gate",
+            walk_forward_pass,
+            json.dumps(
+                {
+                    "windows": walk_forward_results.get("window_count", 0),
+                    "median_pf": walk_forward_results.get("valid_pf_median", 0.0),
+                    "pass_ratio": walk_forward_results.get("valid_pf_pass_ratio", 0.0),
+                    "purge": walk_forward_results.get("purge_bars", 0),
+                    "embargo": walk_forward_results.get("embargo_bars", 0),
+                },
+                ensure_ascii=False,
+            ),
+        ),
+        ("blind_set_locked", blind_lock_status == "locked", blind_lock_status),
+        (
+            "cost_stress_replay_three_scenarios",
+            {"baseline", "stress_1_5x", "stress_2x"}.issubset(stress_scenarios)
+            and bool(stress_sources)
+            and "legacy_cost_fallback" not in stress_sources,
+            ",".join(sorted(stress_scenarios)),
+        ),
         ("portfolio_valid_trades_ge_80", portfolio.get("valid_total_trades", 0) >= 80, str(portfolio.get("valid_total_trades", 0))),
         ("near_liq_zero", near_liq_count == 0, str(near_liq_count)),
         ("live_orders_disabled", True, "manual confirmation only"),
@@ -1000,9 +1473,11 @@ def write_research_artifacts(artifacts: dict[str, pd.DataFrame | dict | Strategy
         "portfolio_result": out / "portfolio_result.csv",
         "leverage_risk": out / "leverage_risk.csv",
         "cost_stress": out / "cost_stress.csv",
+        "walk_forward_results": out / "walk_forward_results.json",
         "acceptance_checklist": out / "acceptance_checklist.csv",
         "sample_trades": out / "sample_trades.csv",
         "blind_trades": out / "blind_trades.csv",
+        "blind_access_manifest": out / "blind_access_manifest.json",
         "sample_summary": out / "sample_summary.json",
         "final_report": out / "final_report.md",
         "selection_memo": out / "selection_memo.md",
@@ -1023,6 +1498,10 @@ def write_research_artifacts(artifacts: dict[str, pd.DataFrame | dict | Strategy
             value.to_csv(paths[key], index=False, encoding="utf-8")
     if isinstance(artifacts.get("portfolio_results"), pd.DataFrame):
         artifacts["portfolio_results"].to_csv(paths["portfolio_result"], index=False, encoding="utf-8")
+    for key in ["walk_forward_results", "blind_access_manifest"]:
+        value = artifacts.get(key)
+        if isinstance(value, dict):
+            paths[key].write_text(json.dumps(value, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
     selected = artifacts.get("selected_params")
     selected_dict = asdict(selected) if isinstance(selected, StrategyParams) else selected
     paths["selected_params"].write_text(json.dumps(selected_dict, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -1054,7 +1533,7 @@ def build_selection_memo(artifacts: dict[str, pd.DataFrame | dict | StrategyPara
             "",
             f"- Training grid rows: {rows}",
             "- Selection rule: pass finite-PF, minimum-trade, drawdown, concentration, and neighbor-stability gates before ranking.",
-            "- Validation rule: frozen parameters are evaluated once on validation data; blind data is reported only and not fed back.",
+            "- Validation rule: frozen parameters are evaluated once on validation data; blind data stays locked unless an explicit release token is supplied.",
             f"- Frozen parameters: `{json.dumps(selected_dict, ensure_ascii=False)}`",
         ]
     )

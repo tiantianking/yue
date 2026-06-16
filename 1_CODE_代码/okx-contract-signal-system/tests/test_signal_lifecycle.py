@@ -308,6 +308,33 @@ def test_lifecycle_outbox_worker_marks_sent_and_failed(tmp_path) -> None:
     assert pending["outbox-fail"]["attempt_count"] == 1
 
 
+def test_lifecycle_outbox_worker_dead_letters_after_max_attempts(tmp_path) -> None:
+    path = tmp_path / "lifecycle.sqlite3"
+    store = SignalLifecycleStore(path)
+    store.enqueue_notification(
+        "outbox-dead",
+        signal_id=None,
+        event_type="STOP_REACHED",
+        payload={"status": "STOP_REACHED", "symbol": "ETH-USDT-SWAP", "side": "short"},
+    )
+
+    class DummyDispatcher:
+        def send_lifecycle_event(self, _event: dict) -> bool:
+            return False
+
+    result = LifecycleOutboxWorker(store, DummyDispatcher(), max_attempts=1).run_once()
+
+    assert result == {"sent": 0, "failed": 0, "dead_letter": 1}
+    assert store.pending_notifications() == []
+    assert store.summary()["outbox"]["dead_letter"] == 1
+    with sqlite3.connect(path) as conn:
+        row = conn.execute(
+            "SELECT status, attempt_count, last_error FROM notification_outbox WHERE outbox_id = ?",
+            ("outbox-dead",),
+        ).fetchone()
+    assert row == ("DEAD_LETTER", 1, "send_lifecycle_event_returned_false")
+
+
 def test_lifecycle_migrates_legacy_json_to_sqlite(tmp_path) -> None:
     legacy_path = tmp_path / "lifecycle.json"
     legacy_path.write_text(

@@ -176,6 +176,7 @@ class OKXSignalGUI:
         self._b_tier_summary_store = None
         self._lifecycle_store = None
         self._notification_dispatcher_instance = None
+        self._lifecycle_outbox_worker_instance = None
         self._quality_model_shadow = None
         self._shadow_ledger = None
         self._runtime_modules: dict[str, dict] = {}
@@ -372,7 +373,8 @@ class OKXSignalGUI:
         self._update_runtime_module_status(
             "daily_learning_review",
             "disabled" if not enabled else "checking",
-            auto_promote_enabled=bool(review_cfg.auto_promote_params and review_cfg.live_param_updates_enabled),
+            auto_promote_enabled=False,
+            promotion_eligible=False,
             live_param_updates_enabled=bool(review_cfg.live_param_updates_enabled),
         )
         if not enabled:
@@ -417,6 +419,7 @@ class OKXSignalGUI:
             "healthy",
             ran_this_start=True,
             candidate_gate_passed=report.candidate_gate_passed,
+            promotion_eligible=report.promotion_eligible,
             promotion_allowed=report.promotion_allowed,
             auto_promote_enabled=report.auto_promote_enabled,
             reasons=report.reasons[:8],
@@ -514,6 +517,16 @@ class OKXSignalGUI:
 
             self._notification_dispatcher_instance = NotificationDispatcher(self._signal_lifecycle_store())
         return self._notification_dispatcher_instance
+
+    def _lifecycle_outbox_worker(self):
+        if self._lifecycle_outbox_worker_instance is None:
+            from okx_signal_system.signal_quality import LifecycleOutboxWorker
+
+            self._lifecycle_outbox_worker_instance = LifecycleOutboxWorker(
+                self._signal_lifecycle_store(),
+                self._notification_dispatcher(),
+            )
+        return self._lifecycle_outbox_worker_instance
 
     def _quality_model_shadow_scorer(self):
         if self._quality_model_shadow is None:
@@ -1305,6 +1318,12 @@ class OKXSignalGUI:
                     elif summary_key:
                         self.message_queue.put(('log', ("B-tier summary was not delivered; will retry", "WARNING")))
             self._write_latest_scan_status(cycle_health, base_params)
+            try:
+                outbox_summary = self._lifecycle_outbox_worker().run_once()
+                if outbox_summary.get("sent") or outbox_summary.get("failed") or outbox_summary.get("dead_letter"):
+                    self.message_queue.put(('log', (f"Lifecycle outbox processed: {outbox_summary}", "INFO")))
+            except Exception as e:
+                self.message_queue.put(('log', (f"Lifecycle outbox processing failed: {e}", "WARNING")))
             if send_health_report:
                 self._send_candidate_health_report(cycle_health, base_params)
         

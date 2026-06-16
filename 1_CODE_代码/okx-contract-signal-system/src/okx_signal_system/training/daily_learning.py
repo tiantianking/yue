@@ -12,7 +12,6 @@ from typing import Iterable
 
 import pandas as pd
 
-from okx_signal_system.backtest.research import run_shared_train_grid, select_shared_params
 from okx_signal_system.backtest.runner import run_backtest, split_train_valid, summarize_trades, validate_backtest_result
 from okx_signal_system.config import load_config, project_paths
 from okx_signal_system.data.loader import SymbolData, closed_bars, load_all_symbols
@@ -114,6 +113,7 @@ class DailyLearningReviewReport:
     overfit_checks: dict
     candidate_gate_passed: bool
     auto_promote_enabled: bool
+    promotion_eligible: bool
     promotion_allowed: bool
     reasons: list[str]
 
@@ -611,6 +611,8 @@ def _run_candidate_search(
     max_candidate_params: int,
     min_vote_approval_rate: float,
 ) -> tuple[StrategyParams, dict]:
+    from okx_signal_system.backtest.research import run_shared_train_grid, select_shared_params
+
     grid = params_grid or local_candidate_grid(
         current_params,
         signal_timeframe=signal_timeframe,
@@ -781,11 +783,15 @@ def run_daily_learning_review(
         config=cfg,
     )
 
-    auto_promote_enabled = bool(cfg.auto_promote_params and cfg.live_param_updates_enabled)
-    promotion_allowed = bool(gate["passed"] and auto_promote_enabled)
+    auto_promote_requested = bool(cfg.auto_promote_params and cfg.live_param_updates_enabled)
+    auto_promote_enabled = False
+    promotion_eligible = False
+    promotion_allowed = False
     reasons = [*search_reasons, *gate["reasons"]]
-    if gate["passed"] and not auto_promote_enabled:
-        reasons.append("auto_promotion_disabled")
+    if auto_promote_requested:
+        reasons.append("daily_learning_auto_promotion_disabled")
+    if gate["passed"]:
+        reasons.append("strict_research_pipeline_required")
 
     now = datetime.now(timezone.utc)
     report = DailyLearningReviewReport(
@@ -817,6 +823,7 @@ def run_daily_learning_review(
         overfit_checks=gate["checks"],
         candidate_gate_passed=bool(gate["passed"]),
         auto_promote_enabled=auto_promote_enabled,
+        promotion_eligible=promotion_eligible,
         promotion_allowed=promotion_allowed,
         reasons=reasons,
     )
@@ -837,6 +844,7 @@ def run_daily_learning_review(
                     "candidate_params": report.candidate_params,
                     "candidate_gate_passed": report.candidate_gate_passed,
                     "auto_promote_enabled": report.auto_promote_enabled,
+                    "promotion_eligible": report.promotion_eligible,
                     "promotion_allowed": report.promotion_allowed,
                     "reasons": report.reasons,
                     "overfit_checks": report.overfit_checks,
@@ -901,7 +909,8 @@ class DailyLearningReviewService:
             "signal_timeframe": self.signal_timeframe,
             "trend_timeframe": self.trend_timeframe,
             "candidate_gate_passed": False,
-            "auto_promote_enabled": bool(self.config.auto_promote_params and self.config.live_param_updates_enabled),
+            "auto_promote_enabled": False,
+            "promotion_eligible": False,
             "promotion_allowed": False,
             "reasons": [reason],
             "train_grid_meta": {"status": status, "reason": reason},

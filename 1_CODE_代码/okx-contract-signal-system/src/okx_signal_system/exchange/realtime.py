@@ -1,6 +1,6 @@
 """
-OKX 合约信号系统 - 实时交易所API模块
-实时获取市场数据，自动下单 + 数据持久化
+OKX 合约信号系统 - 实时行情信号模块
+实时获取市场数据，生成信号观察 + 数据持久化
 """
 from __future__ import annotations
 
@@ -37,6 +37,7 @@ from okx_signal_system.risk.model import (
 )
 from okx_signal_system.signal_runtime import seconds_until_next_signal_scan
 from okx_signal_system.signal_quality import (
+    LifecycleOutboxWorker,
     QualityModelShadowScorer,
     SignalCandidate,
     SignalLifecycleStore,
@@ -973,6 +974,7 @@ class LiveSignalMonitor:
         self._signal_notification_store = SignalNotificationStore()
         self._b_tier_summary_store = BTierSummaryNotificationStore()
         self._notification_dispatcher = NotificationDispatcher(self._lifecycle_store)
+        self._lifecycle_outbox_worker = LifecycleOutboxWorker(self._lifecycle_store, self._notification_dispatcher)
         try:
             from okx_signal_system.config import project_paths
             self._scan_status_path = project_paths().output_dir / "latest_scan_status.json"
@@ -1187,6 +1189,9 @@ class LiveSignalMonitor:
         except Exception as exc:
             log.warning("Candidate health report failed: %s", exc)
 
+    def _run_lifecycle_outbox_once(self) -> dict[str, int]:
+        return self._lifecycle_outbox_worker.run_once()
+
     async def _publish_tiered_candidates(
         self,
         selection: TieredSelection,
@@ -1301,6 +1306,16 @@ class LiveSignalMonitor:
                 cycle_health = scan_result.cycle_health
 
                 await self._publish_tiered_candidates(scan_result.selection)
+                try:
+                    outbox_summary = self._run_lifecycle_outbox_once()
+                    if (
+                        outbox_summary.get("sent")
+                        or outbox_summary.get("failed")
+                        or outbox_summary.get("dead_letter")
+                    ):
+                        log.info("Lifecycle outbox processed: %s", outbox_summary)
+                except Exception as exc:
+                    log.warning("Lifecycle outbox processing failed: %s", exc)
                 self.api.persist_data()
                 self._write_latest_scan_status(cycle_health)
                 now_ts = time.time()
@@ -1413,14 +1428,14 @@ async def start_live_trading(
     signal_callback=None,
     risk_config: dict | None = None,
 ) -> LiveSignalMonitor:
-    """启动实盘交易监控"""
+    """启动实时信号监控"""
     api = create_realtime_api()
     monitor = LiveSignalMonitor(api, signal_callback, risk_config)
 
     if await monitor.start():
         return monitor
     else:
-        raise ConnectionError("Failed to start live trading")
+        raise ConnectionError("Failed to start live signal monitor")
 
 
 # ============================================================

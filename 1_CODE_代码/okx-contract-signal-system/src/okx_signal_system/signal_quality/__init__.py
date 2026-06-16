@@ -6,7 +6,13 @@ from okx_signal_system.signal_quality.feature_builder import (
     build_signal_quality_features,
 )
 from okx_signal_system.signal_quality.labeler import SignalLabel, label_signal, label_trade_signal
-from okx_signal_system.signal_quality.lifecycle import SignalLifecycleRecord, SignalLifecycleStore, lifecycle_payload
+from okx_signal_system.signal_quality.lifecycle import (
+    DEFAULT_LIFECYCLE_OUTBOX_MAX_ATTEMPTS,
+    LifecycleOutboxWorker,
+    SignalLifecycleRecord,
+    SignalLifecycleStore,
+    lifecycle_payload,
+)
 from okx_signal_system.signal_quality.model import (
     BaselineQualityModel,
     QualityPrediction,
@@ -26,6 +32,8 @@ __all__ = [
     "QualityModelShadowScore",
     "QualityModelShadowScorer",
     "QualityPrediction",
+    "DEFAULT_LIFECYCLE_OUTBOX_MAX_ATTEMPTS",
+    "LifecycleOutboxWorker",
     "SignalCandidate",
     "SignalLabel",
     "SignalLifecycleRecord",

@@ -240,3 +240,86 @@ def test_daily_learning_review_writes_report_with_closed_frames(tmp_path, monkey
     assert report.frame_checks["closed_bars_only"]
     assert (tmp_path / "daily_learning_review.json").exists()
     assert (tmp_path / "candidate_params.json").exists()
+
+
+def test_daily_learning_report_never_marks_candidate_promotion_eligible(tmp_path, monkeypatch) -> None:
+    ts = pd.date_range("2026-01-01", periods=320, freq="15min", tz="UTC")
+    frame = pd.DataFrame(
+        {
+            "ts": ts,
+            "open": [100.0] * len(ts),
+            "high": [101.0] * len(ts),
+            "low": [99.0] * len(ts),
+            "close": [100.5] * len(ts),
+            "volume": [1000.0] * len(ts),
+            "symbol": ["BTC-USDT-SWAP"] * len(ts),
+            "timeframe": ["15m"] * len(ts),
+            "is_closed": [True] * len(ts),
+        }
+    )
+    monkeypatch.setattr(
+        daily_learning,
+        "load_all_symbols",
+        lambda dataset: [SymbolData("BTC-USDT-SWAP", tmp_path / "BTC.parquet", frame)],
+    )
+    monkeypatch.setattr(
+        daily_learning,
+        "_evaluate_params",
+        lambda *args, **kwargs: {
+            "train_summary": _summary(pf=1.6, trades=30, ret=0.10, drawdown=0.05),
+            "valid_summary": _summary(pf=1.6, trades=30, ret=0.10, drawdown=0.05),
+            "symbol_results": [{"status": "evaluated", "valid_total_return": 0.10}],
+            "symbols_evaluated": 1,
+            "train_valid_order_ok": True,
+        },
+    )
+    monkeypatch.setattr(
+        daily_learning,
+        "_anti_future_checks",
+        lambda **kwargs: {"prior_breakout_excludes_current_bar": True},
+    )
+    monkeypatch.setattr(
+        daily_learning,
+        "_stress_checks",
+        lambda params: {"baseline": True},
+    )
+    monkeypatch.setattr(
+        daily_learning,
+        "_frame_checks",
+        lambda symbols, **kwargs: {"closed_bars_only": True},
+    )
+    monkeypatch.setattr(
+        daily_learning,
+        "load_selected_strategy_params",
+        lambda output_dir: StrategyParams(),
+    )
+
+    report = run_daily_learning_review(
+        symbols=["BTC-USDT-SWAP"],
+        dataset="unit",
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+        output_dir=tmp_path,
+        history_tail=320,
+        run_candidate_search=False,
+        config=LearningReviewConfig(
+            min_validation_trades=5,
+            min_validation_profit_factor=1.05,
+            min_profit_factor_delta=0.0,
+            min_profit_factor_ratio=1.0,
+            min_profitable_symbol_ratio=0.0,
+            shadow_min_closed_signals=0,
+            auto_promote_params=True,
+            live_param_updates_enabled=True,
+        ),
+    )
+
+    candidate_payload = json.loads((tmp_path / "candidate_params.json").read_text(encoding="utf-8"))
+    assert report.candidate_gate_passed
+    assert report.auto_promote_enabled is False
+    assert report.promotion_eligible is False
+    assert report.promotion_allowed is False
+    assert "daily_learning_auto_promotion_disabled" in report.reasons
+    assert "strict_research_pipeline_required" in report.reasons
+    assert candidate_payload["promotion_eligible"] is False
+    assert candidate_payload["promotion_allowed"] is False

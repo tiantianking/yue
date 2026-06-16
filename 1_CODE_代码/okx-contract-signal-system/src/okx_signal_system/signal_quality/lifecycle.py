@@ -24,6 +24,7 @@ LifecycleStatus = Literal[
 ]
 
 _OUTCOME_SIMULATOR = SignalOutcomeSimulator()
+DEFAULT_LIFECYCLE_OUTBOX_MAX_ATTEMPTS = 3
 
 
 @dataclass
@@ -442,12 +443,12 @@ class SignalLifecycleStore:
                 channel = excluded.channel,
                 event_type = excluded.event_type,
                 status = CASE
-                    WHEN notification_outbox.status = 'SENT' THEN notification_outbox.status
+                    WHEN notification_outbox.status IN ('SENT', 'DEAD_LETTER') THEN notification_outbox.status
                     ELSE 'PENDING'
                 END,
                 available_at = excluded.available_at,
                 last_error = CASE
-                    WHEN notification_outbox.status = 'SENT' THEN notification_outbox.last_error
+                    WHEN notification_outbox.status IN ('SENT', 'DEAD_LETTER') THEN notification_outbox.last_error
                     ELSE NULL
                 END,
                 payload_json = excluded.payload_json,
@@ -561,12 +562,12 @@ class SignalLifecycleStore:
                     channel = excluded.channel,
                     event_type = excluded.event_type,
                     status = CASE
-                        WHEN notification_outbox.status = 'SENT' THEN notification_outbox.status
+                        WHEN notification_outbox.status IN ('SENT', 'DEAD_LETTER') THEN notification_outbox.status
                         ELSE 'PENDING'
                     END,
                     available_at = excluded.available_at,
                     last_error = CASE
-                        WHEN notification_outbox.status = 'SENT' THEN notification_outbox.last_error
+                        WHEN notification_outbox.status IN ('SENT', 'DEAD_LETTER') THEN notification_outbox.last_error
                         ELSE NULL
                     END,
                     payload_json = excluded.payload_json,
@@ -615,6 +616,21 @@ class SignalLifecycleStore:
                 (error[:1000], now, outbox_id),
             )
 
+    def mark_notification_dead_letter(self, outbox_id: str, error: str) -> None:
+        now = _now_text()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE notification_outbox
+                SET status = 'DEAD_LETTER',
+                    last_error = ?,
+                    attempt_count = attempt_count + 1,
+                    updated_at = ?
+                WHERE outbox_id = ?
+                """,
+                (error[:1000], now, outbox_id),
+            )
+
     def pending_notifications(self, *, limit: int = 100) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
@@ -642,6 +658,7 @@ class SignalLifecycleStore:
             "pending": counts.get("pending", 0),
             "sent": counts.get("sent", 0),
             "failed": counts.get("failed", 0),
+            "dead_letter": counts.get("dead_letter", 0),
             "updated_at": latest_updated,
         }
 
@@ -879,9 +896,16 @@ class SignalLifecycleStore:
 
 
 class LifecycleOutboxWorker:
-    def __init__(self, store: SignalLifecycleStore, dispatcher: Any):
+    def __init__(
+        self,
+        store: SignalLifecycleStore,
+        dispatcher: Any,
+        *,
+        max_attempts: int = DEFAULT_LIFECYCLE_OUTBOX_MAX_ATTEMPTS,
+    ):
         self.store = store
         self.dispatcher = dispatcher
+        self.max_attempts = max(1, int(max_attempts))
 
     def run_once(self, *, limit: int = 100) -> dict[str, int]:
         summary = {"sent": 0, "failed": 0}
@@ -890,20 +914,29 @@ class LifecycleOutboxWorker:
             try:
                 sent = bool(self.dispatcher.send_lifecycle_event(item))
             except Exception as exc:
-                self.store.mark_notification_failed(outbox_id, str(exc))
-                summary["failed"] += 1
+                self._mark_failed(item, str(exc), summary)
                 continue
             if sent:
                 self.store.mark_notification_sent(outbox_id)
                 summary["sent"] += 1
             else:
-                self.store.mark_notification_failed(outbox_id, "send_lifecycle_event_returned_false")
-                summary["failed"] += 1
+                self._mark_failed(item, "send_lifecycle_event_returned_false", summary)
         return summary
+
+    def _mark_failed(self, item: dict[str, Any], error: str, summary: dict[str, int]) -> None:
+        outbox_id = str(item["outbox_id"])
+        attempt_count = int(item.get("attempt_count") or 0)
+        if attempt_count + 1 >= self.max_attempts:
+            self.store.mark_notification_dead_letter(outbox_id, error)
+            summary["dead_letter"] = summary.get("dead_letter", 0) + 1
+            return
+        self.store.mark_notification_failed(outbox_id, error)
+        summary["failed"] += 1
 
 
 __all__ = [
     "LifecycleStatus",
+    "DEFAULT_LIFECYCLE_OUTBOX_MAX_ATTEMPTS",
     "LifecycleOutboxWorker",
     "SignalLifecycleRecord",
     "SignalLifecycleStore",

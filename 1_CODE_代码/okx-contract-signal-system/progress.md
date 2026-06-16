@@ -353,3 +353,68 @@
 ### Notes
 - Modified files: same v3.49 acceptance closure files listed in the preceding progress entry; this entry records final verification and package generation only.
 - Rollback: revert the v3.49 commit after it is created, and delete `C:\Users\26492\Desktop\okx-contract-signal-system-v3.49.0.zip` if the packaged artifact should be removed.
+
+## 2026-06-17 - Task: v3.50 version and release-safety preparation
+### What was done
+- Updated the shared package version source and package metadata to `3.50.0`; desktop, CLI, and launcher displays already read from this shared source.
+- Cleaned low-risk `realtime.py` release-facing wording from automatic/live trading language to signal-only realtime monitoring language without changing runtime behavior.
+- Documented the v3.50 release-preparation verification rule for version display and release ZIP safety.
+- Verified the release ZIP denylist still excludes sensitive environment files, runtime caches, output directories, and SQLite/database artifacts while retaining `.env.example`.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m compileall -q src\okx_signal_system\__init__.py src\okx_signal_system\exchange\realtime.py tests\test_release_safety.py` -> passed.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests\test_release_safety.py -q` -> `17 passed`.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests\test_desktop_runtime.py -q` -> `15 passed`.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe scripts\build_release_zip.py --output dist\okx-contract-signal-system-v3.50.0-check.zip` plus ZIP entry inspection -> `159` entries, `.env.example` retained, `0` denied sensitive/runtime artifacts; the temporary check ZIP was deleted after verification.
+- `rg -n "自动下单|实盘下单|下单提醒|启动实盘交易监控|Failed to start live trading|实时交易所API模块|OKX_API_KEY=.+|OKX_SECRET_KEY=.+|OKX_PASSPHRASE=.+|FEISHU_WEBHOOK_URL=https?://" -S src\okx_signal_system\exchange\realtime.py README.md docs .env.example okx_signal.spec scripts\build_release_zip.py tests\test_release_safety.py` -> no matches.
+### Notes
+- Modified files: `pyproject.toml` sets project metadata to `3.50.0`; `src/okx_signal_system/__init__.py` sets the shared runtime version to `3.50.0`; `src/okx_contract_signal_system.egg-info/PKG-INFO` aligns packaged metadata to `3.50.0`; `src/okx_signal_system/exchange/realtime.py` changes only module/docstring/error wording from trading to signal-only monitoring; `docs/RELEASE_SAFETY.md` records v3.50 release-preparation checks; `progress.md` records this round.
+- Other working-tree changes in research, runner, and lifecycle files were already present from parallel work and were not modified by this round.
+- Rollback: restore `pyproject.toml`, `src/okx_signal_system/__init__.py`, `src/okx_contract_signal_system.egg-info/PKG-INFO`, `src/okx_signal_system/exchange/realtime.py`, and `docs/RELEASE_SAFETY.md` from the previous index state, then remove this appended progress entry.
+
+## 2026-06-17 - Task: v3.50 lifecycle outbox runtime integration
+### What was done
+- Connected lifecycle outbox consumption to the actual GUI, realtime monitor, and scheduler scan loops so lifecycle events are attempted after each scan/publish pass.
+- Reused the scheduler-owned lifecycle store for scheduler scans so lifecycle events generated during a cycle are visible to the scheduler outbox worker.
+- Added a compatible worker retry cap that moves repeatedly failing outbox rows to `DEAD_LETTER` without changing the existing SQLite schema.
+- Added focused tests for worker dead-letter behavior and runtime entrypoint outbox consumption.
+### Testing
+- `pytest tests/test_signal_lifecycle.py tests/test_lifecycle_outbox_runtime.py tests/test_desktop_runtime.py -q` -> `30 passed`.
+### Notes
+- Modified files: `src/okx_signal_system/signal_quality/lifecycle.py` adds the outbox retry limit, `DEAD_LETTER` marking, summary count, and preserves sent/dead-letter rows when re-enqueued; `src/okx_signal_system/signal_quality/__init__.py` exports the lifecycle outbox worker for runtime modules; `src/okx_signal_system/scheduler.py` passes its lifecycle store into scans and runs the lifecycle outbox worker after each scheduler cycle; `src/okx_signal_system/exchange/realtime.py` owns and runs a lifecycle outbox worker after realtime scan publishing; `gui.py` lazily owns and runs a lifecycle outbox worker after GUI signal checks; `tests/test_signal_lifecycle.py` covers dead-letter transition; `tests/test_lifecycle_outbox_runtime.py` covers scheduler and realtime runtime worker calls; `docs/SYSTEM_ARCHITECTURE.md` documents the runtime consumption and dead-letter rule; `progress.md` records this round.
+- Concurrent working-tree changes in research, daily learning, version metadata, release safety, and scheduler/GUI/realtime neighboring logic were already present or made by other agents and were not reverted.
+- Rollback: revert only the lifecycle-outbox hunks in the listed source/doc/test files, delete `tests/test_lifecycle_outbox_runtime.py`, and remove this appended progress entry; avoid restoring whole files because several listed files contain concurrent non-outbox changes.
+
+## 2026-06-17 - Task: daily learning sidecar and scheduler B-tier notification consistency
+### What was done
+- Locked daily learning review to candidate discovery and sidecar reporting only: reports and candidate payloads now always expose `promotion_eligible=false` and `promotion_allowed=false`, even when old auto-promotion config flags are enabled.
+- Kept formal parameter promotion dependent on the strict research pipeline by marking daily learning candidates with `strict_research_pipeline_required` and moving strict research imports to candidate-search execution only.
+- Aligned scheduler notifications with GUI/realtime behavior by sending B-tier summaries through the existing `NotificationDispatcher` path with per-candle summary de-duplication.
+- Updated GUI daily-learning runtime status and architecture notes so operators do not see daily learning as an auto-promotion path.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m py_compile src\okx_signal_system\training\daily_learning.py src\okx_signal_system\scheduler.py gui.py tests\test_daily_learning_review.py tests\test_scheduler_notifications.py` -> passed.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests\test_daily_learning_review.py tests\test_scheduler_notifications.py -q` -> `10 passed`.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests\test_feishu_notify.py tests\test_scheduler_notifications.py -q` -> `19 passed`.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests\test_daily_learning_review.py tests\test_learning_lock.py -q` -> `10 passed`.
+### Notes
+- Modified files: `src/okx_signal_system/training/daily_learning.py` adds explicit non-promotion report fields and requires strict research for formal promotion; `src/okx_signal_system/scheduler.py` returns scan selection to the scheduler cycle and sends B-tier summaries through the dispatcher; `gui.py` displays daily learning as non-promotion in runtime module status; `tests/test_daily_learning_review.py` proves daily learning cannot auto-promote even when gate checks pass and legacy config flags are true; `tests/test_scheduler_notifications.py` proves scheduler B-tier summaries are sent and marked; `docs/SYSTEM_ARCHITECTURE.md` documents daily learning and notification boundaries; `progress.md` records this round.
+- Concurrent working-tree changes were present in research, lifecycle, scheduler, GUI, docs, and version/release files; this round did not revert them or touch `research.py`, lifecycle outbox implementation, or version metadata.
+- Rollback: revert only the hunks for daily-learning non-promotion, scheduler B-tier summary dispatch, GUI daily-learning status, the added tests, and the related architecture note; delete `tests/test_scheduler_notifications.py`; then remove this appended progress entry. Avoid whole-file restore because several listed files contain concurrent non-task changes.
+
+## 2026-06-17 - Task: v3.50 strict research acceptance closure
+### What was done
+- Changed formal research splitting to use one global timestamp boundary set for all symbols; missing bars now reduce per-symbol samples without moving train/validation/blind dates.
+- Made strict research fail closed with `STRICT_SPLIT_UNAVAILABLE` instead of silently falling back to per-symbol 75/25 splits; legacy fallback now requires explicit `--legacy-split`.
+- Changed shared-parameter ranking to aggregate portfolio PF from total winning net PnL divided by absolute total losing net PnL, while reporting symbol PF distribution, profitable-symbol ratio, and contribution concentration.
+- Locked blind-set evaluation by default and added an explicit unlock path that writes a blind access manifest with hashes, git commit, token hash, and first access time.
+- Added purged walk-forward validation to formal artifacts/checklist, strengthened neighbor stability gates, and recomputed stress costs from trade facts with fee/slippage/funding components.
+### Testing
+- `python -m compileall -q src main.py gui.py tests` -> passed.
+- `py -3.12 -m pytest tests\test_strict_research.py tests\test_signal_lifecycle.py tests\test_lifecycle_outbox_runtime.py tests\test_daily_learning_review.py tests\test_scheduler_notifications.py -q` -> passed with expected integration skips.
+- `py -3.12 -m pytest -q` -> passed with expected historical-data skips.
+- `npm.cmd run check` in `dashboard` -> lint and production build passed.
+- `py -3.12 -m pytest tests\test_release_safety.py tests\test_desktop_runtime.py tests\test_feishu_notify.py -q` -> `50 passed`.
+- `git diff --check` -> passed; Git reported LF-to-CRLF working-copy normalization warnings only.
+### Notes
+- Modified files: `src/okx_signal_system/backtest/research.py` enforces strict timestamp splits, blind locking, portfolio PF aggregation, purged walk-forward acceptance, stronger neighbor stability, and trade-fact cost replay; `src/okx_signal_system/backtest/research_cli.py` exposes explicit legacy split and blind unlock flags; `src/okx_signal_system/backtest/runner.py` records fee/slippage/funding cost components and market regime in backtest trades; `tests/test_strict_research.py` covers strict split boundaries, fail-closed split behavior, portfolio PF aggregation, real blind lock checks, neighbor ratio gating, and cost replay funding effects; `docs/SYSTEM_ARCHITECTURE.md` documents the v3.50 strict research closure; `progress.md` records this round.
+- Concurrent v3.50 changes from subagents are recorded above and were not reverted.
+- Rollback: revert this commit after it is created, or before commit restore the listed research/runner/CLI/test/doc files from the previous index state and remove this appended progress entry.

@@ -19,3 +19,7 @@ Packaging rule:
 - Build reusable release zip artifacts with `python scripts/build_release_zip.py --output dist/okx-contract-signal-system-release.zip`; zip entry names must use POSIX `/` separators so releases unpack consistently across platforms.
 - Keep release-facing product behavior limited to signal research, read-only data, and notification delivery.
 - Do not add release-facing copy, config examples, or package data that describe order submission, automatic closes, position polling, or account balance reads as available product behavior.
+
+v3.50 release preparation:
+- Keep package metadata and visible launcher displays on the shared package version source.
+- Verify release zip entries keep `.env.example`, use POSIX `/` separators, and exclude sensitive environment files, cache folders, `output/`, `outputs/`, and SQLite/database artifacts before publishing.

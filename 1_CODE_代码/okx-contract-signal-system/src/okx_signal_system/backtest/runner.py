@@ -54,6 +54,10 @@ class TradeRecord:
     risk_amount: float
     notional: float
     gross_pnl: float
+    entry_fee: float
+    exit_fee: float
+    slippage_cost: float
+    funding_fee: float
     costs: float
     net_pnl: float
     exit_reason: str
@@ -66,6 +70,7 @@ class TradeRecord:
     est_liq_buffer_pct: float
     near_liq_flag: bool
     sizing_mode: str
+    market_regime: str
 
 
 BACKTEST_RESULT_COLUMNS = tuple(TradeRecord.__dataclass_fields__)
@@ -499,6 +504,10 @@ def run_backtest_from_features(
                 risk_amount=float(risk_unit),
                 notional=float(notional),
                 gross_pnl=float(gross_pnl),
+                entry_fee=float(costs.entry_fee),
+                exit_fee=float(costs.exit_fee),
+                slippage_cost=float(costs.slippage_cost),
+                funding_fee=float(costs.funding_fee),
                 costs=float(costs.total),
                 net_pnl=float(net_pnl),
                 exit_reason=exit_reason,
@@ -511,6 +520,7 @@ def run_backtest_from_features(
                 outcome=_exit_reason_to_outcome(exit_reason),
                 final_net_r=float(net_r),
                 sizing_mode=sizing_mode,
+                market_regime=str(getattr(signal, "market_regime", "unknown") or "unknown"),
             )
         )
         cursor = max(exit_idx + 1, idx + 1)
@@ -525,6 +535,9 @@ def summarize_trades(trades: pd.DataFrame, *, initial_equity: float = 10000.0) -
             "payoff_ratio": 0.0,
             "win_rate": 0.0,
             "total_trades": 0,
+            "net_pnl": 0.0,
+            "winning_net_pnl": 0.0,
+            "losing_net_pnl": 0.0,
             "max_drawdown": 0.0,
             "avg_hold_hours": 0.0,
             "max_loss_streak": 0,
@@ -558,6 +571,9 @@ def summarize_trades(trades: pd.DataFrame, *, initial_equity: float = 10000.0) -
         "payoff_ratio": float(avg_win / abs(avg_loss)) if avg_loss < 0 else float("inf"),
         "win_rate": float((trades["net_pnl"] > 0).mean()),
         "total_trades": int(len(trades)),
+        "net_pnl": float(total),
+        "winning_net_pnl": float(wins),
+        "losing_net_pnl": float(losses),
         "max_drawdown": float(drawdown.max()) if not drawdown.empty else 0.0,
         "avg_hold_hours": float(((exit_ - entry).dt.total_seconds() / 3600).mean()),
         "max_loss_streak": int(max_loss_streak),
