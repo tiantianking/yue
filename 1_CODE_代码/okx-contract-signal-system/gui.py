@@ -27,7 +27,7 @@ if str(_src_path) not in sys.path:
 
 log = logging.getLogger(__name__)
 
-APP_VERSION = "v3.37"
+APP_VERSION = "v3.38"
 DASHBOARD_HOST = "127.0.0.1"
 DASHBOARD_PORT = 3001
 DASHBOARD_URL = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}"
@@ -144,6 +144,7 @@ class OKXSignalGUI:
         self._b_tier_summary_store = None
         self._lifecycle_store = None
         self._quality_model_shadow = None
+        self._shadow_ledger = None
         self._runtime_modules: dict[str, dict] = {}
         self._background_tasks: list[asyncio.Task] = []
         self.dashboard_process = None
@@ -478,6 +479,13 @@ class OKXSignalGUI:
 
             self._quality_model_shadow = QualityModelShadowScorer()
         return self._quality_model_shadow
+
+    def _shadow_ledger_store(self):
+        if self._shadow_ledger is None:
+            from okx_signal_system.ml.shadow_trading import ShadowTradingLedger
+
+            self._shadow_ledger = ShadowTradingLedger()
+        return self._shadow_ledger
 
     def _signal_notification_key(self, signal) -> str:
         from okx_signal_system.notify.signal_dedupe import signal_notification_key
@@ -1197,23 +1205,20 @@ class OKXSignalGUI:
     async def _check_signals(self, checked_bars: dict[str, str], send_health_report: bool = False):
         """检查各币种的 trading 信号"""
         try:
-            from dataclasses import replace
             import pandas as pd
-            from okx_signal_system.features.indicators import build_feature_frame
-            from okx_signal_system.strategy.trend_breakout import build_signal, StrategyParams
+            from okx_signal_system.strategy.trend_breakout import StrategyParams
             from okx_signal_system.config import load_config
             from okx_signal_system.ml.regime_adaptive import AdaptiveParamsManager
-            from okx_signal_system.training.startup_quality import is_latest_bar_fresh
-            from okx_signal_system.exchange.realtime import _live_signal_history_limit
-            from okx_signal_system.data.closed_backfill import latest_closed_candle_start
-            from okx_signal_system.data.loader import closed_bars
-            from okx_signal_system.signal_runtime import DEFAULT_MAX_SIGNAL_LAG_MINUTES, signal_is_stale
-            from okx_signal_system.signal_quality import SignalCandidate, assign_tiers, lifecycle_payload
-            from okx_signal_system.strategy.vote_gate import min_vote_approval_rate, vote_gate_passed
+            from okx_signal_system.risk.model import Ledger, RiskConfig
+            from okx_signal_system.signal_quality import SignalCandidate
+            from okx_signal_system.signal_service import SignalScanContext, SignalScanService
+            from okx_signal_system.strategy.vote_gate import min_vote_approval_rate
+            from okx_signal_system.exchange.position_monitor import PositionRecordStore
 
             # 加载策略参数
             config = load_config("base.yaml")
             strategy_cfg = config.get('strategy', {})
+            learning_cfg = config.get('learning', {}) if isinstance(config.get('learning', {}), dict) else {}
             min_vote_rate = min_vote_approval_rate(config)
 
             # 从配置取参数（列表取第一个，标量直接取）
@@ -1240,280 +1245,73 @@ class OKXSignalGUI:
             cycle_health: list[dict] = []
             ready_candidates: list[SignalCandidate] = []
             candidate_history: dict[str, pd.DataFrame] = {}
-            
-            for inst_id in self._watched_symbols:
-                # 通过统一行情入口读取；WebSocket 不稳时会自动走 REST 兜底刷新。
-                history_limit = _live_signal_history_limit(
-                    base_params,
+            try:
+                position_symbols = frozenset(record.inst_id for record in PositionRecordStore().load_all().values())
+            except Exception:
+                position_symbols = frozenset()
+
+            async def _load_signal_candles(inst_id: str, limit: int) -> pd.DataFrame:
+                return await self.api.get_candles(inst_id, bar=self.api.timeframe.key, limit=limit)
+
+            scan_service = SignalScanService(
+                candle_loader=_load_signal_candles,
+                regime_manager=self._adaptive_manager,
+                quality_model_shadow=self._quality_model_shadow_scorer(),
+                lifecycle_store=self._signal_lifecycle_store(),
+                shadow_ledger=self._shadow_ledger_store(),
+                notify_key_builder=self._signal_notification_key,
+            )
+            scan_result = await scan_service.scan_cycle(
+                self._watched_symbols,
+                SignalScanContext(
+                    dataset=self.api.dataset,
                     signal_timeframe=self.api.timeframe.key,
                     trend_timeframe=self.api.trend_timeframe.key,
-                )
-                df = await self.api.get_candles(inst_id, bar=self.api.timeframe.key, limit=history_limit)
-                df = closed_bars(df)
-                
-                if len(df) < 80:
-                    cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="history_too_short"))
-                    continue  # 数据不足（至少需要80根K线计算EMA60+突破位）
+                    strategy_params=base_params,
+                    risk_config=RiskConfig(max_leverage=float(_first_or_val(config.get('risk', {}).get('max_leverage'), 10.0))),
+                    ledger=Ledger(inst_id="desktop", init_capital=10000, equity=10000),
+                    quality_gate_allows_push=getattr(self, '_quality_gate_allows_push', False),
+                    min_vote_approval_rate=min_vote_rate,
+                    mode="desktop_manual_confirmation_only",
+                    min_history_bars=80,
+                    position_symbols=position_symbols,
+                    checked_bars=checked_bars,
+                    send_health_report=send_health_report,
+                    shadow_score_min_closed=int(learning_cfg.get("shadow_score_min_closed_signals", 6)),
+                ),
+            )
+            cycle_health = scan_result.cycle_health
+            ready_candidates = scan_result.ready_candidates
+            candidate_history = scan_result.candidate_history
 
-                candidate_history[inst_id] = df
-                self._signal_lifecycle_store().update_symbol(inst_id, df)
-                expected_closed = pd.Timestamp(latest_closed_candle_start(self.api.timeframe.key, settle_seconds=60))
-                latest_closed = pd.to_datetime(df["ts"].iloc[-1], utc=True)
-                if latest_closed < expected_closed:
-                    cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="missing_latest_closed_bar"))
-                    self._update_runtime_module_status(
-                        "signal_closed_bar_gate",
-                        "blocked",
-                        symbol=inst_id,
-                        latest_closed=latest_closed.isoformat(),
-                        expected_latest_closed=expected_closed.isoformat(),
-                    )
-                    continue
-                if signal_is_stale(
-                    latest_closed,
-                    timeframe=self.api.timeframe.key,
-                    max_lag_minutes=DEFAULT_MAX_SIGNAL_LAG_MINUTES,
-                ):
-                    cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="stale_signal_bar"))
-                    continue
-                self._update_runtime_module_status(
-                    "signal_closed_bar_gate",
-                    "healthy",
-                    expected_latest_closed=expected_closed.isoformat(),
-                )
-                
-                # 检查是否有新K线
-                last_ts = str(df["ts"].iloc[-1]) if len(df) > 0 else ""
-                is_new_bar = checked_bars.get(inst_id) != last_ts
-                if not is_new_bar and not send_health_report:
-                    cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="waiting_next_bar"))
-                    continue  # 没有新数据
-                
-                if is_new_bar:
-                    checked_bars[inst_id] = last_ts
+            signal_closed_bar_blocked = any(item.get("reason") == "missing_latest_closed_bar" for item in cycle_health)
+            self._update_runtime_module_status(
+                "signal_closed_bar_gate",
+                "blocked" if signal_closed_bar_blocked else "healthy",
+            )
+            for candidate in ready_candidates:
+                signal = candidate.signal
+                decision = candidate.decision
+                detect_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')
+                kline_time = signal.ts.strftime('%Y-%m-%d %H:%M') if hasattr(signal.ts, 'strftime') else str(signal.ts)
+                ts_str = detect_time if kline_time == detect_time else f"{detect_time} (Kline {kline_time})"
+                leverage_text = f"{decision.leverage_used:.1f}x" if decision.accepted and decision.leverage_used else "N/A"
+                rr_text = f"{decision.risk_reward_ratio:.1f}:1" if decision.risk_reward_ratio else ""
+                self.message_queue.put(('signal', {
+                    'time': ts_str,
+                    'symbol': signal.inst_id,
+                    'type': f"{signal.side.upper()} breakout {leverage_text} {rr_text}",
+                    'price': f"{signal.entry_ref:.2f}" if signal.entry_ref else "N/A",
+                    'confidence': f"{float(candidate.raw_score):.1f}/10",
+                }))
+                status = "risk passed" if decision.accepted else f"risk rejected({decision.reason})"
+                self.message_queue.put(('log', (
+                    f"Signal: {signal.inst_id} {signal.side.upper()} @ {signal.entry_ref:.2f} "
+                    f"| leverage {leverage_text} | RR {rr_text} | {status}",
+                    "INFO",
+                )))
 
-                if not is_latest_bar_fresh(df, max_lag_hours=self.api.timeframe.fresh_lag_hours):
-                    self.message_queue.put(('log', (f"{inst_id} 最新K线超过{self.api.timeframe.fresh_lag_hours:g}小时，等待实时数据后再发信号", "WARNING")))
-                    cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="stale_data"))
-                    continue
-                
-                # 计算特征
-                try:
-                    params = base_params
-                    features = build_feature_frame(
-                        df,
-                        fast_ema=params.fast_ema,
-                        slow_ema=params.slow_ema,
-                        breakout_window=params.breakout_window,
-                        atr_window=params.atr_window,
-                        signal_timeframe=self.api.timeframe.key,
-                        trend_timeframe=self.api.trend_timeframe.key,
-                    )
-                except Exception as e:
-                    self.message_queue.put(('log', (f"特征计算失败 {inst_id}: {e}", "WARNING")))
-                    cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="feature_error"))
-                    continue
-
-                # 环境只用于降分/降杠杆；策略参数使用历史训练冻结参数
-                regime, _adaptive_params = self._adaptive_manager.update_regime(features)
-                score_penalty = self._adaptive_manager.get_score_penalty()
-                leverage_factor = self._adaptive_manager.get_leverage_factor()
-                
-                # 取最后一行检测信号
-                last_row = features.iloc[-1]
-                
-                # 检查关键列是否有效
-                if pd.isna(last_row.get("atr")) or pd.isna(last_row.get("breakout_high")):
-                    cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="invalid_features", row=last_row))
-                    continue
-                
-                signal = build_signal(
-                    last_row, inst_id=inst_id, params=params,
-                    frame=features, idx=len(features) - 1
-                )
-                
-                if not signal.accepted:
-                    cycle_health.append(
-                        self._candidate_health_item(
-                            inst_id=inst_id,
-                            reason=signal.reject_reason or "signal_rejected",
-                            row=last_row,
-                            signal=signal,
-                            regime=regime,
-                        )
-                    )
-                    continue
-
-                if signal.accepted:
-                    # 时间格式：检测时间 + K线时间（解决历史数据时间偏移问题）
-                    detect_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')
-                    kline_time = signal.ts.strftime('%Y-%m-%d %H:%M') if hasattr(signal.ts, 'strftime') else str(signal.ts)
-                    # 如果K线时间与检测时间差超过2小时，说明是历史数据回放，同时显示两个时间
-                    ts_str = f"{detect_time}" if kline_time == detect_time else f"{detect_time} (K线{kline_time})"
-
-                    # P2: 环境自适应 - 应用杠杆调整
-                    regime_cn = self._adaptive_manager.get_regime_name_cn()
-
-                    # P4: 多策略投票（用策略评分作为base_score）
-                    from okx_signal_system.strategy.ensemble import ensemble_vote
-                    base_score_val = signal.signal_score if (signal.signal_score and not pd.isna(signal.signal_score)) else 5.0
-                    ensemble_result = ensemble_vote(
-                        last_row, params, features, len(features) - 1,
-                        base_score=base_score_val,
-                    )
-
-                    # 计算有效评分（综合风控+投票+环境惩罚）
-                    effective_score = base_score_val
-
-                    # 投票调整
-                    if ensemble_result.final_side == "flat":
-                        self.message_queue.put(('log', (
-                            f"🗳️ 多策略投票否决: {signal.inst_id} | {ensemble_result.details}", "WARNING"
-                        )))
-                        effective_score = max(1.0, effective_score - 3.0)
-                    elif ensemble_result.final_side != signal.side:
-                        effective_score = max(1.0, effective_score - 1.5)
-                        self.message_queue.put(('log', (
-                            f"⚠️ 投票方向不一致: 信号{signal.side} 投票{ensemble_result.final_side} | {ensemble_result.details}", "WARNING"
-                        )))
-                    else:
-                        # 投票一致 → 使用投票增强后的评分
-                        effective_score = ensemble_result.final_score
-
-                    # P2: 应用环境评分惩罚
-                    if score_penalty < 0:
-                        effective_score = max(1.0, effective_score + score_penalty)
-
-                    # 风控校验：使用投票+环境后的综合分决定建议杠杆
-                    from okx_signal_system.risk.model import validate_signal, Ledger, RiskConfig
-                    max_lev = float(_first_or_val(config.get('risk', {}).get('max_leverage'), 10.0))
-                    max_lev_adjusted = max(1.0, min(10.0, max_lev * leverage_factor))
-                    risk_config = RiskConfig(max_leverage=max_lev_adjusted)
-                    ledger = Ledger(inst_id=inst_id, init_capital=10000, equity=10000)
-                    signal = replace(signal, signal_score=effective_score)
-                    vote_ok = vote_gate_passed(
-                        ensemble_result.final_side,
-                        signal.side,
-                        ensemble_result.approval_rate,
-                        min_vote_rate,
-                    )
-                    decision = validate_signal(signal, ledger, risk_config)
-                    quality_model = self._quality_model_shadow_scorer().score(signal, features).as_dict()
-                    would_push = bool(
-                        decision.accepted
-                        and effective_score >= 6.0
-                        and getattr(self, '_quality_gate_allows_push', False)
-                        and vote_ok
-                    )
-                    if ensemble_result.final_side == "flat":
-                        health_reason = "vote_flat"
-                    elif ensemble_result.final_side != signal.side:
-                        health_reason = "vote_side_mismatch"
-                    elif ensemble_result.approval_rate < min_vote_rate:
-                        health_reason = "vote_support_too_low"
-                    elif would_push:
-                        health_reason = "ready"
-                    elif not getattr(self, '_quality_gate_allows_push', False):
-                        health_reason = "quality_gate_blocked"
-                    elif not decision.accepted:
-                        health_reason = f"risk_{decision.reason or 'rejected'}"
-                    elif effective_score < 6.0:
-                        health_reason = "score_below_6"
-                    else:
-                        health_reason = "not_ready"
-                    health_item = self._candidate_health_item(
-                        inst_id=inst_id,
-                        reason=health_reason,
-                        row=last_row,
-                        signal=signal,
-                        regime=regime,
-                        final_score=effective_score,
-                        risk_reason=decision.reason,
-                        quality_model=quality_model,
-                        would_push=would_push,
-                    )
-                    cycle_health.append(health_item)
-
-                    signal_type = f"{'多' if signal.side == 'long' else '空'}头突破"
-                    leverage_text = f"{decision.leverage_used:.1f}x" if decision.accepted and decision.leverage_used else "N/A"
-                    rr_text = f"{decision.risk_reward_ratio:.1f}:1" if decision.risk_reward_ratio else ""
-
-                    # 在信号类型中加入环境和投票信息
-                    regime_short = {
-                        "high_vol_trend": "🔥高波趋势",
-                        "low_vol_trend": "📈低波趋势",
-                        "high_vol_range": "⚡高波震荡",
-                        "low_vol_range": "😴低波震荡",
-                        "unknown": "❓未知",
-                    }.get(regime, "")
-
-                    # 投票标记
-                    vote_mark = "🗳️" if ensemble_result.approval_rate >= 0.7 else ("⚠️" if ensemble_result.approval_rate >= 0.5 else "❌")
-
-                    self.message_queue.put(('signal', {
-                        'time': ts_str,
-                        'symbol': signal.inst_id,
-                        'type': f"{signal_type} {leverage_text} {rr_text} {regime_short} {vote_mark}",
-                        'price': f"{signal.entry_ref:.2f}" if signal.entry_ref else "N/A",
-                        'confidence': f"{effective_score:.1f}/10",
-                    }))
-                    
-                    status = "✅ 风控通过" if decision.accepted else f"❌ 风控拒绝({decision.reason})"
-                    self.message_queue.put(('log', (
-                        f"🚨 信号: {signal.inst_id} {signal.side.upper()} @ {signal.entry_ref:.2f} "
-                        f"| 杠杆{leverage_text} | 盈亏比{rr_text} | {status}", "INFO"
-                    )))
-                    
-                    if would_push:
-                        notify_key = self._signal_notification_key(signal)
-                        lifecycle_record = self._signal_lifecycle_store().record_signal(
-                            signal,
-                            signal_id=notify_key,
-                            invalidation_price=signal.stop_loss,
-                            signal_timeframe=self.api.timeframe.key if self.api else None,
-                            trend_timeframe=self.api.trend_timeframe.key if self.api else None,
-                        )
-                        payload = {
-                            "signal": asdict(signal),
-                            "risk": asdict(decision),
-                            "live_order_enabled": False,
-                            "mode": "desktop_manual_confirmation_only",
-                            "dataset": self.api.dataset,
-                            "signal_timeframe": self.api.timeframe.key,
-                            "trend_timeframe": self.api.trend_timeframe.key,
-                            "selected_params": asdict(params),
-                            "quality_model": quality_model,
-                        }
-                        if lifecycle_record is not None:
-                            lifecycle = lifecycle_payload(lifecycle_record)
-                            payload["signal"]["invalidation_price"] = lifecycle_record.invalidation_price
-                            payload["lifecycle"] = lifecycle
-                            health_item["invalidation_price"] = lifecycle_record.invalidation_price
-                            health_item["lifecycle_status"] = lifecycle_record.status
-                            health_item["lifecycle"] = lifecycle
-                        ready_candidates.append(
-                            SignalCandidate(
-                                signal=signal,
-                                decision=decision,
-                                notify_key=notify_key,
-                                payload=payload,
-                                health_item=health_item,
-                                rank_score=float(effective_score)
-                                + min(float(decision.risk_reward_ratio or 0.0), 8.0) * 0.15
-                                - max(0.0, float((decision.leverage_used or 0.0) - 5.0)) * 0.05,
-                                raw_score=float(effective_score),
-                            )
-                        )
-                    elif decision.accepted and effective_score < 6.0:
-                        self.message_queue.put(('log', (f"🔕 低分信号不推送飞书 (评分{effective_score:.1f}<6)", "INFO")))
-                    elif decision.accepted and effective_score >= 6.0:
-                        self.message_queue.put(('log', ("质量门未通过，高分候选信号暂不推送飞书", "WARNING")))
-            selection = assign_tiers(ready_candidates, max_tier_a=2, price_history=candidate_history)
-            for candidate in selection.ranked:
-                candidate.health_item["tier"] = candidate.tier
-                candidate.health_item["rank"] = candidate.rank
-                candidate.health_item["rank_score"] = candidate.rank_score
-                candidate.health_item["correlation_group"] = candidate.correlation_group
+            selection = scan_result.selection
             for candidate in selection.tier_a:
                 signal = candidate.signal
                 decision = candidate.decision

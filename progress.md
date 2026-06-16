@@ -205,3 +205,33 @@
 - `docs/okx-signal-quality-next-steps.md`: moved the trend resample boundary fix into completed v3.37 work.
 - `progress.md`: appended this task record.
 - Rollback method: revert the upcoming commit `fix: correct trend resample boundary`.
+
+## 2026-06-16 - Task: Unify GUI and CLI Signal Scan Core
+### What was done
+- Added a shared signal scan service for GUI and CLI candidate decision logic.
+- Unified closed-bar checks, stale-signal blocking, feature generation, signal building, ensemble voting, risk validation, quality shadow scoring, lifecycle recording, and A/B tier selection behind one scan result.
+- Kept notifications, status files, data persistence, GUI display, and position management at the caller boundary.
+- Aligned GUI and CLI context inputs for position-symbol skipping and shadow-score minimum closed-signal support.
+- Bumped version metadata to v3.38.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m compileall gui.py main.py src` passed.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests/test_signal_scan_service.py tests/test_desktop_runtime.py tests/test_shadow_trading.py tests/test_signal_quality_shadow.py tests/test_signal_runtime.py tests/test_feishu_notify.py` passed, 32 tests.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest` passed, 133 tests.
+- `npm.cmd run lint` passed from `D:\JIAOYI-CX\1_CODE_浠ｇ爜\okx-contract-signal-system\dashboard`.
+- `npm.cmd run build` passed from `D:\JIAOYI-CX\1_CODE_浠ｇ爜\okx-contract-signal-system\dashboard`.
+- `git diff --check` passed.
+### Notes
+- `1_CODE_浠ｇ爜/okx-contract-signal-system/src/okx_signal_system/signal_service/scan.py`: added the shared scan decision service and result/context structures.
+- `1_CODE_浠ｇ爜/okx-contract-signal-system/src/okx_signal_system/signal_service/__init__.py`: exported the scan service interfaces.
+- `1_CODE_浠ｇ爜/okx-contract-signal-system/src/okx_signal_system/exchange/realtime.py`: routed CLI monitoring through the shared scan service while keeping side effects outside it.
+- `1_CODE_浠ｇ爜/okx-contract-signal-system/gui.py`: routed desktop scans through the shared scan service and preserved GUI notification/status behavior.
+- `1_CODE_浠ｇ爜/okx-contract-signal-system/tests/test_signal_scan_service.py`: covered ready-candidate output, checked-bar gating, and shadow-score support propagation.
+- `1_CODE_浠ｇ爜/okx-contract-signal-system/main.py`: bumped app version to v3.38.
+- `1_CODE_浠ｇ爜/okx-contract-signal-system/pyproject.toml`: bumped package version to 3.38.0.
+- `1_CODE_浠ｇ爜/okx-contract-signal-system/src/okx_signal_system/__init__.py`: bumped package runtime version to 3.38.0.
+- `1_CODE_浠ｇ爜/okx-contract-signal-system/start.bat`: bumped launcher version text to v3.38.
+- `docs/okx-runtime-health-v3.38.md`: added the v3.38 runtime health note.
+- `docs/okx-signal-quality-next-steps.md`: moved scan-service unification into completed v3.38 work and left Phase 10 as an explicit decision point.
+- `progress.md`: appended this task record.
+- Runtime outputs such as `outputs/pushed_signals.sqlite3` and `outputs/signal_lifecycle.json` were left uncommitted.
+- Rollback method: revert the upcoming commit `feat: unify signal scan service`.

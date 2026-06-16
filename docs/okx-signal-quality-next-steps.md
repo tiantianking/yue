@@ -4,7 +4,7 @@
 
 - Repository root: `D:\JIAOYI-CX`
 - Project path: `D:\JIAOYI-CX\1_CODE_代码\okx-contract-signal-system`
-- Current completed version: v3.37
+- Current completed version: v3.38
 - Latest completed commits:
   - `a26f0d9 feat: batch rank and tier signal pushes`
   - `feat: add correlation-aware signal tiers`
@@ -12,6 +12,9 @@
   - `feat: track signal lifecycle states`
   - `feat: label historical signal outcomes`
   - `feat: build baseline signal quality model`
+  - `feat: score candidates with quality model shadow mode`
+  - `fix: correct trend resample boundary`
+  - `feat: unify signal scan service`
 
 ## Completed Work
 
@@ -88,6 +91,13 @@
 - Added a focused regression test for the 15m to 1h resample boundary.
 - Version metadata was bumped to v3.37.
 
+### v3.38
+- Added `SignalScanService` as the shared GUI and CLI scan decision core.
+- Unified closed-bar checks, stale-signal blocking, feature generation, signal building, ensemble vote, risk validation, shadow quality scoring, lifecycle recording, and A/B tier selection behind one service result.
+- Kept caller-owned side effects outside the service: GUI display, Feishu pushes, status files, persistence, and position management remain at their existing boundaries.
+- Preserved manual-confirmation mode, `min_signal_score=6.0`, fixed strategy parameters, and no-real-order posture.
+- Version metadata was bumped to v3.38.
+
 ## Absolute Constraints
 
 - Do not enable real orders.
@@ -106,6 +116,8 @@
 - Every code update must bump version and commit to git.
 
 ## Remaining Decision Point
+
+The v3.38 scan-service cleanup does not approve model-assisted ranking. Phase 10 still requires an explicit decision before any behavior change.
 
 ### Phase 10: Optional Model-Assisted Ranking
 
