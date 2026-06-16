@@ -9,6 +9,7 @@ def test_base_config_locks_okx_and_disables_live_orders() -> None:
     assert cfg["data"]["timeframe"] == "15m"
     assert cfg["data"]["trend_timeframe"] == "1h"
     assert cfg["execution"]["live_order_enabled"] is False
+    assert cfg["execution"]["auto_close_enabled"] is False
     assert cfg["learning"]["live_param_updates_enabled"] is False
 
 

@@ -52,6 +52,13 @@ log = logging.getLogger(__name__)
 DEFAULT_LOCAL_PROXY = "http://127.0.0.1:1088"
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _tcp_port_open(host: str, port: int, timeout: float = 0.25) -> bool:
     try:
         with socket.create_connection((host, port), timeout=timeout):
@@ -888,6 +895,7 @@ class OKXRealtimeAPI:
                 price=order.price,
                 stop_loss=order.stop_loss,
                 take_profit=order.take_profit,
+                reduce_only=order.reduce_only,
             )
 
             result = place_order(params)
@@ -961,6 +969,11 @@ class LiveSignalMonitor:
             "stop_loss_pct": 0.02,
             "take_profit_pct": 0.04,
         }
+        execution_cfg = self.api.config.get("execution", {}) if isinstance(self.api.config, dict) else {}
+        self._auto_close_enabled = bool(
+            execution_cfg.get("auto_close_enabled", False)
+            or _env_bool("OKX_AUTO_CLOSE_ENABLED", False)
+        )
         self._running = False
         self._monitor_task: asyncio.Task | None = None
 
@@ -1396,6 +1409,9 @@ class LiveSignalMonitor:
             stop_price = position.entry_price * (1 - self.risk_config.get("stop_loss_pct", 0.02))
             if market.last_price <= stop_price:
                 log.warning(f"Stop loss triggered: {position.inst_id}")
+                if not self._auto_close_enabled:
+                    log.warning("Auto close disabled; manual confirmation required for %s", position.inst_id)
+                    return
                 await self.api.place_order(OrderRequest(
                     inst_id=position.inst_id,
                     side="close_long",
@@ -1407,6 +1423,9 @@ class LiveSignalMonitor:
             tp_price = position.entry_price * (1 + self.risk_config.get("take_profit_pct", 0.04))
             if market.last_price >= tp_price:
                 log.info(f"Take profit reached: {position.inst_id}")
+                if not self._auto_close_enabled:
+                    log.info("Auto close disabled; manual confirmation required for %s", position.inst_id)
+                    return
                 await self.api.place_order(OrderRequest(
                     inst_id=position.inst_id,
                     side="close_long",
@@ -1417,6 +1436,9 @@ class LiveSignalMonitor:
             stop_price = position.entry_price * (1 + self.risk_config.get("stop_loss_pct", 0.02))
             if market.last_price >= stop_price:
                 log.warning(f"Stop loss triggered: {position.inst_id}")
+                if not self._auto_close_enabled:
+                    log.warning("Auto close disabled; manual confirmation required for %s", position.inst_id)
+                    return
                 await self.api.place_order(OrderRequest(
                     inst_id=position.inst_id,
                     side="close_short",
@@ -1427,6 +1449,9 @@ class LiveSignalMonitor:
             tp_price = position.entry_price * (1 - self.risk_config.get("take_profit_pct", 0.04))
             if market.last_price <= tp_price:
                 log.info(f"Take profit reached: {position.inst_id}")
+                if not self._auto_close_enabled:
+                    log.info("Auto close disabled; manual confirmation required for %s", position.inst_id)
+                    return
                 await self.api.place_order(OrderRequest(
                     inst_id=position.inst_id,
                     side="close_short",
@@ -1459,6 +1484,9 @@ class LiveSignalMonitor:
             log.warning(
                 f"⏰ {inst_id} 持仓超时 ({bars_held} bars >= {max_bars}), 强制平仓"
             )
+            if not self._auto_close_enabled:
+                log.warning("Auto close disabled; manual confirmation required for expired %s", inst_id)
+                return
             try:
                 side = "close_long" if position.side == "long" else "close_short"
                 await self.api.place_order(OrderRequest(

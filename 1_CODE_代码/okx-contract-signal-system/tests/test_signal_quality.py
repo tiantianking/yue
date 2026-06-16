@@ -7,11 +7,11 @@ from okx_signal_system.signal_quality import SignalCandidate, assign_tiers
 from okx_signal_system.strategy.trend_breakout import TradeSignal
 
 
-def _candidate(symbol: str, score: float) -> SignalCandidate:
+def _candidate(symbol: str, score: float, *, side: str = "long") -> SignalCandidate:
     signal = TradeSignal(
         ts=pd.Timestamp("2026-01-01T00:00:00Z"),
         inst_id=symbol,
-        side="long",
+        side=side,
         entry_ref=100.0,
         stop_loss=98.0,
         take_profit=107.0,
@@ -53,6 +53,12 @@ def _history(symbol: str, returns: list[float]) -> pd.DataFrame:
             "symbol": symbol,
         }
     )
+
+
+def _history_with_closed_flags(symbol: str, returns: list[float], is_closed: list[object]) -> pd.DataFrame:
+    frame = _history(symbol, returns)
+    frame["is_closed"] = is_closed
+    return frame
 
 
 def test_assign_tiers_keeps_all_candidates_and_limits_a_tier() -> None:
@@ -141,3 +147,83 @@ def test_assign_tiers_keeps_correlated_demoted_candidates_in_ranked_output() -> 
     ]
     assert [item.tier for item in selection.ranked] == ["A", "B", "A"]
     assert len(selection.ranked) == 3
+
+
+def test_assign_tiers_does_not_merge_opposite_side_high_correlation_candidates() -> None:
+    shared_returns = [0.01, 0.02, -0.01, 0.015, -0.005, 0.02, -0.015, 0.01]
+    selection = assign_tiers(
+        [
+            _candidate("BTC-USDT-SWAP", 9.0, side="long"),
+            _candidate("ETH-USDT-SWAP", 8.8, side="short"),
+        ],
+        max_tier_a=2,
+        price_history={
+            "BTC-USDT-SWAP": _history("BTC-USDT-SWAP", shared_returns),
+            "ETH-USDT-SWAP": _history("ETH-USDT-SWAP", shared_returns),
+        },
+    )
+
+    assert [item.tier for item in selection.ranked] == ["A", "A"]
+    assert selection.ranked[0].correlation_group != selection.ranked[1].correlation_group
+    assert len(selection.tier_a) == 2
+
+
+def test_assign_tiers_marks_insufficient_correlation_samples_as_c_observation() -> None:
+    short_returns = [0.01, 0.02, -0.01]
+    selection = assign_tiers(
+        [
+            _candidate("BTC-USDT-SWAP", 9.0),
+            _candidate("ETH-USDT-SWAP", 8.8),
+        ],
+        max_tier_a=2,
+        price_history={
+            "BTC-USDT-SWAP": _history("BTC-USDT-SWAP", short_returns),
+            "ETH-USDT-SWAP": _history("ETH-USDT-SWAP", short_returns),
+        },
+        min_correlation_samples=8,
+    )
+
+    assert [item.tier for item in selection.ranked] == ["C", "C"]
+    assert all(item.correlation_group.startswith("unknown:") for item in selection.ranked)
+    assert len(selection.tier_a) == 0
+    assert len(selection.tier_c) == 2
+    assert len(selection.ranked) == 2
+
+
+def test_assign_tiers_treats_string_false_is_closed_as_unclosed_for_correlation() -> None:
+    returns = [0.01, 0.02, -0.01, 0.015, -0.005, 0.02, -0.015, 0.01]
+    is_closed = [True, True, True, "false", "0", "no", "", True, True]
+    selection = assign_tiers(
+        [
+            _candidate("BTC-USDT-SWAP", 9.0),
+            _candidate("ETH-USDT-SWAP", 8.8),
+        ],
+        max_tier_a=2,
+        price_history={
+            "BTC-USDT-SWAP": _history_with_closed_flags("BTC-USDT-SWAP", returns, is_closed),
+            "ETH-USDT-SWAP": _history_with_closed_flags("ETH-USDT-SWAP", returns, is_closed),
+        },
+        min_correlation_samples=5,
+    )
+
+    assert [item.tier for item in selection.ranked] == ["C", "C"]
+    assert all(item.correlation_group.startswith("unknown:") for item in selection.ranked)
+
+
+def test_assign_tiers_places_close_non_a_candidates_in_c_observation() -> None:
+    selection = assign_tiers(
+        [
+            _candidate("BTC-USDT-SWAP", 9.0),
+            _candidate("ETH-USDT-SWAP", 8.7),
+            _candidate("SOL-USDT-SWAP", 7.9),
+        ],
+        max_tier_a=1,
+    )
+
+    assert [item.inst_id for item in selection.ranked] == [
+        "BTC-USDT-SWAP",
+        "ETH-USDT-SWAP",
+        "SOL-USDT-SWAP",
+    ]
+    assert [item.tier for item in selection.ranked] == ["A", "C", "B"]
+    assert selection.tier_c == [selection.ranked[1]]

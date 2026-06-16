@@ -31,6 +31,7 @@ OKX_API_KEY = os.environ.get("OKX_API_KEY", "")
 OKX_SECRET_KEY = os.environ.get("OKX_SECRET_KEY", "")
 OKX_PASSPHRASE = os.environ.get("OKX_PASSPHRASE", "")
 OKX_IS_SIMULATED = os.environ.get("OKX_IS_SIMULATED", "true").lower() != "false"
+LIVE_ORDER_ENV = "OKX_LIVE_ORDER_ENABLED"
 
 
 def _utc_now() -> str:
@@ -43,6 +44,39 @@ def _is_private_path(path: str) -> bool:
 
 def _credentials_ready() -> bool:
     return bool(OKX_API_KEY and OKX_SECRET_KEY and OKX_PASSPHRASE)
+
+
+def _env_bool(name: str) -> bool | None:
+    value = os.environ.get(name)
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off", ""}:
+        return False
+    return None
+
+
+def _live_order_enabled() -> bool:
+    env_value = _env_bool(LIVE_ORDER_ENV)
+    if env_value is not None:
+        return env_value
+    try:
+        from okx_signal_system.config import load_config
+
+        cfg = load_config("base.yaml")
+        return bool(cfg.get("execution", {}).get("live_order_enabled", False))
+    except Exception:
+        return False
+
+
+def _assert_live_order_allowed() -> None:
+    if not _live_order_enabled():
+        raise RuntimeError(
+            "live order execution is disabled; enable execution.live_order_enabled "
+            f"or set {LIVE_ORDER_ENV}=true only after manual approval"
+        )
 
 
 def _sign(message: str) -> str:
@@ -208,6 +242,9 @@ def place_order(params: OrderParams) -> dict[str, Any]:
         raise ValueError("side must be buy or sell")
     if float(params.size) <= 0:
         raise ValueError("size must be positive")
+    if params.stop_loss is not None or params.take_profit is not None:
+        raise ValueError("TP/SL protection must be handled explicitly; place_order does not attach TP/SL orders")
+    _assert_live_order_allowed()
 
     body: dict[str, Any] = {
         "instId": params.inst_id,

@@ -185,6 +185,110 @@ def test_auto_stop_price_trigger_logic() -> None:
     assert monitor._check_price(short_record, 89.9) == (True, "take_profit")
 
 
+def test_manual_confirmation_auto_stop_trigger_does_not_close_live_order(monkeypatch, tmp_path) -> None:
+    from okx_signal_system.exchange import okx
+
+    calls = []
+    monkeypatch.setattr(okx, "close_position", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    monitor = AutoStopMonitor(auto_close_enabled=False, store=PositionRecordStore(tmp_path))
+    results = []
+    monitor.set_on_close_callback(results.append)
+    record = PositionRecord(
+        inst_id="BTC-USDT-SWAP",
+        side="long",
+        entry_price=100.0,
+        size=1.0,
+        stop_loss=95.0,
+        take_profit=110.0,
+        leverage=5.0,
+        entry_time=pd.Timestamp("2026-01-01T00:00:00Z").isoformat(),
+    )
+
+    monitor._handle_trigger(record, 94.5, "stop_loss")
+
+    assert calls == []
+    assert len(results) == 1
+    assert results[0].exit_reason == "stop_loss"
+
+
+def test_realtime_place_order_preserves_reduce_only(monkeypatch) -> None:
+    from okx_signal_system.exchange import realtime
+
+    captured = []
+
+    def fake_place_order(params):
+        captured.append(params)
+        return {"ordId": "ord-1", "fillSz": "1", "avgPx": "100"}
+
+    monkeypatch.setattr(realtime, "place_order", fake_place_order)
+    api = realtime.OKXRealtimeAPI({})
+    api._connected = True
+
+    asyncio.run(
+        api.place_order(
+            realtime.OrderRequest(
+                inst_id="BTC-USDT-SWAP",
+                side="close_long",
+                size=1.0,
+                reduce_only=True,
+            )
+        )
+    )
+
+    assert captured
+    assert captured[0].reduce_only is True
+
+
+def test_live_signal_monitor_auto_close_disabled_by_default(monkeypatch) -> None:
+    from okx_signal_system.exchange import realtime
+
+    calls = []
+
+    class FakeApi:
+        def __init__(self):
+            self.config = {"execution": {"live_order_enabled": False}}
+            self.timeframe = type("Timeframe", (), {"hours": 0.25})()
+
+        async def place_order(self, order):  # pragma: no cover - should not be called
+            calls.append(order)
+            return None
+
+    monitor = realtime.LiveSignalMonitor(FakeApi())
+    position = realtime.Position(
+        inst_id="BTC-USDT-SWAP",
+        side="long",
+        size=1.0,
+        entry_price=100.0,
+        unrealized_pnl=0.0,
+        margin=20.0,
+        leverage=5.0,
+        liquidation_price=None,
+    )
+    market = realtime.MarketData(
+        inst_id="BTC-USDT-SWAP",
+        last_price=94.0,
+        bid_price=94.0,
+        ask_price=94.1,
+        volume_24h=1000.0,
+        timestamp=pd.Timestamp("2026-01-01T00:00:00Z").to_pydatetime(),
+        open=95.0,
+        high=95.0,
+        low=94.0,
+        close=94.0,
+        volume=100.0,
+    )
+
+    asyncio.run(monitor._check_exit_conditions(position, market))
+    monitor._position_entries[position.inst_id] = (
+        pd.Timestamp("2025-12-31T00:00:00Z"),
+        StrategyParams(max_hold_bars=1),
+    )
+    asyncio.run(monitor._check_hold_timeout(position, market))
+
+    assert calls == []
+
+
 def test_ensemble_vote_returns_bounded_score() -> None:
     frame = pd.DataFrame(
         {

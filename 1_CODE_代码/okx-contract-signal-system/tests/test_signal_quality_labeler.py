@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from okx_signal_system.risk.costs import CostConfig, estimate_costs
+from okx_signal_system.signal_quality.execution import simulate_signal_execution
 from okx_signal_system.signal_quality.labeler import label_signal
 from okx_signal_system.strategy.trend_breakout import TradeSignal
 
@@ -234,3 +235,73 @@ def test_label_signal_only_uses_later_closed_candles() -> None:
     assert _field(label, "final_net_r") == pytest.approx(_expected_net_r(signal, 110.0, "2026-01-01T01:00:00Z"))
     assert _field(label, "mae") == pytest.approx(-0.2)
     assert _field(label, "mfe") == pytest.approx(2.2)
+
+
+def test_label_signal_uses_entry_ref_as_quality_reference() -> None:
+    signal = _signal(entry_ref=103.0, stop_loss=98.0, take_profit=108.0)
+    frame = _frame(
+        [
+            {
+                "ts": pd.Timestamp("2026-01-01T00:15:00Z"),
+                "open": 100.0,
+                "high": 104.0,
+                "low": 102.0,
+                "close": 100.5,
+                "is_closed": True,
+            },
+            {
+                "ts": pd.Timestamp("2026-01-01T00:30:00Z"),
+                "open": 100.5,
+                "high": 109.0,
+                "low": 100.0,
+                "close": 108.5,
+                "is_closed": True,
+            },
+        ]
+    )
+
+    label = label_signal(signal, frame)
+
+    assert _outcome(label) == "TP"
+    _assert_exit_time(label, "2026-01-01T00:30:00Z")
+    assert _field(label, "exit_price") == pytest.approx(108.0)
+    assert _field(label, "final_net_r") == pytest.approx(_expected_net_r(signal, 108.0, "2026-01-01T00:30:00Z"))
+    assert _field(label, "mae") == pytest.approx(-0.6)
+    assert _field(label, "mfe") == pytest.approx(1.2)
+
+
+def test_label_signal_matches_execution_simulator_result() -> None:
+    signal = _signal()
+    frame = _frame(
+        [
+            {
+                "ts": pd.Timestamp("2026-01-01T00:15:00Z"),
+                "open": 100.0,
+                "high": 103.0,
+                "low": 99.0,
+                "close": 102.0,
+                "is_closed": True,
+            },
+            {
+                "ts": pd.Timestamp("2026-01-01T00:30:00Z"),
+                "open": 102.0,
+                "high": 112.0,
+                "low": 101.0,
+                "close": 111.0,
+                "is_closed": True,
+            },
+        ]
+    )
+
+    execution = simulate_signal_execution(signal, frame)
+    label = label_signal(signal, frame)
+
+    assert execution is not None
+    assert label is not None
+    assert _outcome(label) == execution.outcome
+    assert _field(label, "final_net_r") == execution.final_net_r
+    assert _field(label, "mae") == execution.mae
+    assert _field(label, "mfe") == execution.mfe
+    assert _field(label, "holding_bars") == execution.holding_bars
+    assert _field(label, "exit_time") == execution.exit_time
+    assert _field(label, "exit_price") == execution.exit_price

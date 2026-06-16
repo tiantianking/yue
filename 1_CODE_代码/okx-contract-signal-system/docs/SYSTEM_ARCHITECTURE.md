@@ -190,6 +190,14 @@ if not df.loc[idx, "is_reliable"]:
 
 ## 运行周期
 
+## v3.40 Runtime Safety
+
+- Live order submission remains disabled by default through `execution.live_order_enabled: false`.
+- Automatic position close remains disabled by default through `execution.auto_close_enabled: false` and `OKX_AUTO_CLOSE_ENABLED` must be explicitly enabled before monitor-triggered closes are attempted.
+- The OKX order adapter rejects `stop_loss` or `take_profit` values on a plain order so TP/SL protection cannot be silently dropped.
+- Reduce-only close intent is propagated from the realtime API to the OKX order adapter.
+- Signal selection now separates same-direction correlation groups, marks insufficient correlation samples as Tier C observations, and keeps all ranked candidates visible.
+
 ```
 15分钟扫描周期:
 │

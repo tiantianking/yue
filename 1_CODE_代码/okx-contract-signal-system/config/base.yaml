@@ -34,6 +34,7 @@ data:
 
 execution:
   live_order_enabled: false
+  auto_close_enabled: false
   dry_run_enabled: true
   exchange_adapter: okx
 

@@ -25,6 +25,7 @@ def assign_tiers(
     price_history: Mapping[str, pd.DataFrame] | None = None,
     high_correlation_threshold: float = 0.75,
     correlation_window_days: int = 30,
+    min_correlation_samples: int = 8,
 ) -> TieredSelection:
     ranked = rank_candidates(candidates)
     group_by_symbol = assign_correlation_groups(
@@ -32,21 +33,29 @@ def assign_tiers(
         price_history,
         threshold=high_correlation_threshold,
         window_days=correlation_window_days,
+        min_samples=min_correlation_samples,
     )
     used_groups: set[str] = set()
     tier_a_count = 0
     tiered: list[SignalCandidate] = []
+    tier_a_scores: list[float] = []
     for candidate in ranked:
-        group = group_by_symbol.get(candidate.inst_id, f"solo:{candidate.inst_id}")
+        key = f"{candidate.side}:{candidate.inst_id}"
+        group = group_by_symbol.get(key, f"solo:{key}")
         tier = "B"
-        if tier_a_count < max_tier_a and group not in used_groups:
+        if group.startswith("unknown:"):
+            tier = "C"
+        elif tier_a_count < max_tier_a and group not in used_groups:
             tier = "A"
             tier_a_count += 1
             used_groups.add(group)
+            tier_a_scores.append(float(candidate.rank_score))
+        elif tier_a_scores and group not in used_groups and float(candidate.rank_score) >= min(tier_a_scores) - 0.5:
+            tier = "C"
         tiered.append(replace(candidate, tier=tier, correlation_group=group))
     return TieredSelection(
         ranked=tiered,
         tier_a=[item for item in tiered if item.tier == "A"],
         tier_b=[item for item in tiered if item.tier == "B"],
-        tier_c=[],
+        tier_c=[item for item in tiered if item.tier == "C"],
     )

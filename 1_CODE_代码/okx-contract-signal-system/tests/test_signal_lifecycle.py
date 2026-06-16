@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
+
 import pandas as pd
 
-from okx_signal_system.signal_quality import SignalLifecycleStore
+from okx_signal_system.signal_quality import SignalLifecycleStore, lifecycle_payload
 from okx_signal_system.strategy.trend_breakout import TradeSignal
 
 
@@ -47,7 +49,23 @@ def test_lifecycle_confirmed_after_later_closed_candle(tmp_path) -> None:
         ]
     )
     assert store.update_symbol("BTC-USDT-SWAP", second) == 1
-    assert store.get("sig-1").status == "CONFIRMED"
+    record = store.get("sig-1")
+    assert record.status == "CONFIRMED"
+    payload = lifecycle_payload(record)
+    assert payload["state"] == "CONFIRMED"
+    assert payload["lifecycle_event"] == {
+        "type": "CONFIRMED",
+        "at": "2026-01-01T00:30:00+00:00",
+    }
+    assert payload["last_updated_at"]
+
+    summary = store.summary()
+    assert summary["triggered"] == 0
+    assert summary["confirmed"] == 1
+    assert summary["active"] == 1
+    assert summary["terminal"] == 0
+    assert summary["latest_event_type"] == "CONFIRMED"
+    assert summary["latest_event_at"] == "2026-01-01T00:30:00+00:00"
 
 
 def test_lifecycle_invalidates_on_immediate_reversal(tmp_path) -> None:
@@ -64,6 +82,14 @@ def test_lifecycle_invalidates_on_immediate_reversal(tmp_path) -> None:
     record = store.get("sig-2")
     assert record.status == "INVALIDATED"
     assert record.invalidated_at is not None
+    payload = lifecycle_payload(record)
+    assert payload["lifecycle_event"]["type"] == "INVALIDATED"
+    assert payload["invalidated_at"] == "2026-01-01T00:15:00+00:00"
+
+    summary = store.summary()
+    assert summary["invalidated"] == 1
+    assert summary["terminal"] == 1
+    assert summary["latest_event_type"] == "INVALIDATED"
 
 
 def test_lifecycle_ignores_unclosed_reversal(tmp_path) -> None:
@@ -95,6 +121,17 @@ def test_lifecycle_expires_after_hold_limit(tmp_path) -> None:
     record = store.get("sig-3")
     assert record.status == "EXPIRED"
     assert record.expired_at is not None
+    payload = lifecycle_payload(record)
+    assert payload["lifecycle_event"] == {
+        "type": "EXPIRED",
+        "at": "2026-01-01T00:30:00+00:00",
+    }
+    assert payload["expired_at"] == "2026-01-01T00:30:00+00:00"
+
+    summary = store.summary()
+    assert summary["expired"] == 1
+    assert summary["active"] == 0
+    assert summary["terminal"] == 1
 
 
 def test_lifecycle_persists_records(tmp_path) -> None:
@@ -106,3 +143,27 @@ def test_lifecycle_persists_records(tmp_path) -> None:
     assert record is not None
     assert record.invalidation_price == 105.0
     assert record.status == "TRIGGERED"
+    assert lifecycle_payload(record)["lifecycle_event"] == {
+        "type": "TRIGGERED",
+        "at": "2026-01-01T00:00:00+00:00",
+    }
+    json.dumps(lifecycle_payload(record))
+    json.dumps(reloaded.summary())
+
+
+def test_lifecycle_record_signal_is_idempotent_and_persistence_is_stable(tmp_path) -> None:
+    path = tmp_path / "lifecycle.json"
+    store = SignalLifecycleStore(path)
+    first = store.record_signal(_signal(), signal_id="sig-stable")
+    second = store.record_signal(_signal(), signal_id="sig-stable")
+
+    assert first is second
+    assert len(store.records) == 1
+
+    first_payload = json.loads(path.read_text(encoding="utf-8"))
+    reloaded = SignalLifecycleStore(path)
+    assert len(reloaded.records) == 1
+    reloaded.record_signal(_signal(), signal_id="sig-stable")
+    second_payload = json.loads(path.read_text(encoding="utf-8"))
+
+    assert second_payload == first_payload

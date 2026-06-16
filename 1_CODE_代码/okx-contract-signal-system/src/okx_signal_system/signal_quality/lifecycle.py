@@ -31,6 +31,8 @@ class SignalLifecycleRecord:
     confirmed_at: str | None = None
     invalidated_at: str | None = None
     expired_at: str | None = None
+    last_event_type: str = "TRIGGERED"
+    last_event_at: str = ""
     signal_timeframe: str | None = None
     trend_timeframe: str | None = None
     created_at: str = ""
@@ -62,7 +64,12 @@ def _is_closed_value(value: Any) -> bool:
 def lifecycle_payload(record: SignalLifecycleRecord) -> dict[str, Any]:
     return {
         "signal_id": record.signal_id,
+        "state": record.status,
         "status": record.status,
+        "lifecycle_event": {
+            "type": record.last_event_type,
+            "at": record.last_event_at or record.updated_at or record.created_at or record.signal_time,
+        },
         "triggered_at": record.signal_time,
         "invalidation_price": record.invalidation_price,
         "bars_seen": record.bars_seen,
@@ -71,6 +78,7 @@ def lifecycle_payload(record: SignalLifecycleRecord) -> dict[str, Any]:
         "confirmed_at": record.confirmed_at,
         "invalidated_at": record.invalidated_at,
         "expired_at": record.expired_at,
+        "last_updated_at": record.updated_at,
     }
 
 
@@ -132,11 +140,12 @@ class SignalLifecycleStore:
         if existing is not None:
             return existing
         now = _now_text()
+        signal_time = _timestamp_text(getattr(signal, "ts"))
         record = SignalLifecycleRecord(
             signal_id=sid,
             inst_id=str(getattr(signal, "inst_id", "")),
             side=side,
-            signal_time=_timestamp_text(getattr(signal, "ts")),
+            signal_time=signal_time,
             entry_ref=float(entry_ref),
             invalidation_price=float(invalidation),
             max_hold_bars=int(getattr(signal, "max_hold_bars", 0) or 0),
@@ -144,6 +153,7 @@ class SignalLifecycleStore:
             trend_timeframe=trend_timeframe,
             created_at=now,
             updated_at=now,
+            last_event_at=signal_time,
         )
         self.records.append(record)
         self._by_id[sid] = record
@@ -166,13 +176,29 @@ class SignalLifecycleStore:
 
     def summary(self) -> dict[str, Any]:
         counts = Counter(item.status for item in self.records)
+        latest_updated = max((item.updated_at for item in self.records if item.updated_at), default=None)
+        latest_event_at = max(
+            (item.last_event_at or item.updated_at or item.created_at for item in self.records if (item.last_event_at or item.updated_at or item.created_at)),
+            default=None,
+        )
+        latest_event_type = None
+        if latest_event_at is not None:
+            for item in reversed(self.records):
+                item_event_at = item.last_event_at or item.updated_at or item.created_at
+                if item_event_at == latest_event_at:
+                    latest_event_type = item.last_event_type
+                    break
         return {
             "total": len(self.records),
             "triggered": counts.get("TRIGGERED", 0),
             "confirmed": counts.get("CONFIRMED", 0),
             "invalidated": counts.get("INVALIDATED", 0),
             "expired": counts.get("EXPIRED", 0),
-            "updated_at": _now_text(),
+            "active": counts.get("TRIGGERED", 0) + counts.get("CONFIRMED", 0),
+            "terminal": counts.get("INVALIDATED", 0) + counts.get("EXPIRED", 0),
+            "latest_event_type": latest_event_type,
+            "latest_event_at": latest_event_at,
+            "updated_at": latest_updated or _now_text(),
         }
 
     def get(self, signal_id: str) -> SignalLifecycleRecord | None:
@@ -213,17 +239,23 @@ class SignalLifecycleStore:
             if self._invalidates(record, close):
                 record.status = "INVALIDATED"
                 record.invalidated_at = closed_time
+                record.last_event_type = "INVALIDATED"
+                record.last_event_at = closed_time
                 record.updated_at = _now_text()
                 return True
 
             if record.status == "TRIGGERED" and self._confirms(record, close):
                 record.status = "CONFIRMED"
                 record.confirmed_at = closed_time
+                record.last_event_type = "CONFIRMED"
+                record.last_event_at = closed_time
                 changed = True
 
             if record.max_hold_bars > 0 and bars_seen >= record.max_hold_bars:
                 record.status = "EXPIRED"
                 record.expired_at = closed_time
+                record.last_event_type = "EXPIRED"
+                record.last_event_at = closed_time
                 record.updated_at = _now_text()
                 return True
 
