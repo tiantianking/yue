@@ -1231,6 +1231,10 @@ class LiveSignalMonitor:
                         total_candidates=len(selection.ranked),
                         lifecycle_status=(candidate.payload.get("lifecycle") or {}).get("status"),
                         invalidation_price=candidate.invalidation_price,
+                        quality_model=(
+                            candidate.payload.get("quality_model")
+                            or candidate.health_item.get("quality_model")
+                        ),
                     )
                     if signal_recorded:
                         self._lifecycle_store.mark_notification_sent(candidate.notify_key)

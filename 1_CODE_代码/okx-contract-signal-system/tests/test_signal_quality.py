@@ -6,6 +6,7 @@ import pandas as pd
 
 from okx_signal_system.risk.model import RiskDecision
 from okx_signal_system.signal_quality import SignalCandidate, assign_tiers
+from okx_signal_system.signal_quality.candidate import ObservationCandidate
 from okx_signal_system.strategy.trend_breakout import TradeSignal
 
 
@@ -233,9 +234,33 @@ def test_assign_tiers_places_close_non_a_candidates_in_c_observation() -> None:
 
 def test_assign_tiers_keeps_non_formal_observation_in_c() -> None:
     formal = _candidate("BTC-USDT-SWAP", 9.0)
-    observation = replace(_candidate("ETH-USDT-SWAP", 8.7), health_item={"symbol": "ETH-USDT-SWAP", "would_push": False})
+    observation = ObservationCandidate(
+        inst_id="ETH-USDT-SWAP",
+        side="long",
+        candle_time=pd.Timestamp("2026-01-01T00:00:00Z"),
+        close=100.0,
+        breakout_level=100.4,
+        breakout_gap_pct=0.004,
+        payload={"observation": {"type": "near_breakout"}},
+        health_item={"symbol": "ETH-USDT-SWAP", "would_push": False, "observation": True},
+        rank_score=8.7,
+        raw_score=8.7,
+    )
 
-    selection = assign_tiers([formal, observation], max_tier_a=1)
+    selection = assign_tiers([formal], observation_candidates=[observation], max_tier_a=1)
 
     assert [item.tier for item in selection.ranked] == ["A", "C"]
     assert selection.tier_c == [selection.ranked[1]]
+
+
+def test_assign_tiers_drops_non_push_formal_candidates_from_ranked_tiers() -> None:
+    formal = _candidate("BTC-USDT-SWAP", 9.0)
+    non_push = replace(
+        _candidate("ETH-USDT-SWAP", 8.7),
+        health_item={"symbol": "ETH-USDT-SWAP", "would_push": False},
+    )
+
+    selection = assign_tiers([formal, non_push], max_tier_a=1)
+
+    assert [item.inst_id for item in selection.ranked] == ["BTC-USDT-SWAP"]
+    assert selection.tier_c == []

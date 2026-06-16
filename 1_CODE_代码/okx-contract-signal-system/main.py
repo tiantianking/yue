@@ -142,6 +142,13 @@ def setup_logging() -> logging.Logger:
 
 logger = setup_logging()
 
+try:
+    from okx_signal_system.config import write_effective_config
+
+    write_effective_config()
+except Exception as exc:
+    logger.warning("effective config snapshot was not written: %s", exc)
+
 
 async def run_closed_kline_backfill_service(symbols: list[str]) -> None:
     """Keep local closed K-line files fresh without touching unfinished candles."""
@@ -175,19 +182,16 @@ async def run_dashboard_5m_backfill_service(symbols: list[str]) -> None:
     """Keep dashboard 5m candles local and fresh for fast chart rendering."""
     from okx_signal_system.config import load_config, project_paths
     from okx_signal_system.data.closed_backfill import ClosedCandleBackfillService
-    from okx_signal_system.paths import find_lightweight_history
 
     try:
         cfg = load_config("base.yaml")
         data_cfg = cfg.get("data", {})
-        history_parent = find_lightweight_history(data_cfg.get("historical_dataset", "okx_15m_extended")).parent
         service = ClosedCandleBackfillService(
             symbols=symbols,
             timeframe="5m",
             dataset="okx_5m_extended",
             settle_seconds=20,
             output_path=project_paths().output_dir / "closed_kline_backfill_status_5m.json",
-            data_dir=history_parent / "okx_5m_extended",
             fetch_limit=300,
         )
         await service.run_forever()

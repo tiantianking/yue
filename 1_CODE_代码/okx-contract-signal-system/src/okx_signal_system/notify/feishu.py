@@ -40,6 +40,43 @@ def _entry_type_from_reason(reason: str) -> str:
     return "策略信号"
 
 
+QUALITY_MODEL_FIELDS = ("p_tp", "p_sl", "p_timeout", "expected_net_r", "uncertainty")
+
+
+def _candidate_quality_model(candidate: Any) -> dict[str, Any] | None:
+    quality_model = _candidate_value(candidate, "quality_model")
+    if isinstance(quality_model, dict):
+        return quality_model
+    payload = _candidate_value(candidate, "payload")
+    if isinstance(payload, dict):
+        quality_model = payload.get("quality_model")
+        if isinstance(quality_model, dict):
+            return quality_model
+    health = _candidate_value(candidate, "health_item")
+    if isinstance(health, dict):
+        quality_model = health.get("quality_model")
+        if isinstance(quality_model, dict):
+            return quality_model
+    return None
+
+
+def _quality_model_line(quality_model: dict[str, Any] | None) -> str | None:
+    if not isinstance(quality_model, dict):
+        return None
+    parts: list[str] = []
+    for key in QUALITY_MODEL_FIELDS:
+        value = quality_model.get(key)
+        if value is None:
+            continue
+        try:
+            parts.append(f"{key}={float(value):.3f}")
+        except (TypeError, ValueError):
+            parts.append(f"{key}={value}")
+    if not parts:
+        return None
+    return "质量模型旁路: " + ", ".join(parts)
+
+
 def _health_reason_label(reason: str) -> str:
     reason = str(reason or "unknown")
     mapping = {
@@ -120,6 +157,7 @@ def send_signal_observation(
     total_candidates: int | None = None,
     lifecycle_status: str | None = None,
     invalidation_price: float | None = None,
+    quality_model: dict[str, Any] | None = None,
 ) -> bool:
     direction = "LONG" if side == "long" else "SHORT"
     stop_pct = abs(entry_ref - stop_loss) / entry_ref * 100 if entry_ref else 0.0
@@ -145,6 +183,9 @@ def send_signal_observation(
         lines.append(f"signal_status: {lifecycle_status}")
     if invalidation_price is not None:
         lines.append(f"invalidation_price: {invalidation_price:.8f}")
+    quality_line = _quality_model_line(quality_model)
+    if quality_line:
+        lines.append(quality_line)
     if kline_time:
         lines.append(f"K线时间: {_format_beijing_time(kline_time)}")
     if signal_timeframe:
@@ -181,6 +222,7 @@ def send_signal_alert(
     total_candidates: int | None = None,
     lifecycle_status: str | None = None,
     invalidation_price: float | None = None,
+    quality_model: dict[str, Any] | None = None,
 ) -> bool:
     return send_signal_observation(
         inst_id=inst_id,
@@ -201,6 +243,7 @@ def send_signal_alert(
         total_candidates=total_candidates,
         lifecycle_status=lifecycle_status,
         invalidation_price=invalidation_price,
+        quality_model=quality_model,
     )
 
 
@@ -293,9 +336,11 @@ def send_b_tier_summary(
         rr_text = f"{float(rr):.2f}R" if rr is not None else "-"
         lifecycle_text = f" status={lifecycle_status}" if lifecycle_status else ""
         invalidation_text = f" invalidation={float(invalidation_price):.8f}" if invalidation_price is not None else ""
+        quality_line = _quality_model_line(_candidate_quality_model(candidate))
+        quality_text = f" {quality_line}" if quality_line else ""
         lines.append(
             f"- #{rank} {symbol} {side} "
-            f"score={score_text} rr={rr_text} reason={reason}{lifecycle_text}{invalidation_text}"
+            f"score={score_text} rr={rr_text} reason={reason}{lifecycle_text}{invalidation_text}{quality_text}"
         )
     return send_text("\n".join(lines))
 

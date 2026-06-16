@@ -1,4 +1,6 @@
-from okx_signal_system.config import load_config
+import json
+
+from okx_signal_system.config import load_config, load_runtime_config, write_effective_config
 from okx_signal_system.paths import find_lightweight_history, find_runtime_cache_root
 
 
@@ -70,3 +72,22 @@ def test_find_runtime_cache_uses_config_runtime_cache_root(tmp_path, monkeypatch
 
     assert find_runtime_cache_root(dataset) == expected
     assert expected.is_dir()
+
+
+def test_runtime_config_merges_declared_config_files() -> None:
+    runtime_config = load_runtime_config()
+
+    assert runtime_config.base["project"]["exchange"] == "OKX"
+    assert "risk" in runtime_config.risk
+    assert "fees" in runtime_config.fees
+    assert len(runtime_config.sha256) == 64
+
+
+def test_effective_config_writes_hash_and_inputs(tmp_path) -> None:
+    path = write_effective_config(tmp_path)
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["base"]["project"]["mode"] == "SIGNAL_ONLY"
+    assert "risk" in payload
+    assert "fees" in payload
+    assert len(payload["sha256"]) == 64

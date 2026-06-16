@@ -13,6 +13,7 @@ from okx_signal_system.config import project_paths
 from okx_signal_system.data.gap_handler import DataGapHandler, summarize_sync_error
 from okx_signal_system.exchange.candles import okx_candles_to_frame
 from okx_signal_system.exchange.okx import get_candles
+from okx_signal_system.paths import find_runtime_cache_root
 from okx_signal_system.timeframe import timeframe_spec
 
 log = logging.getLogger(__name__)
@@ -132,8 +133,10 @@ def sync_latest_closed_symbol(
     limit: int = 100,
 ) -> ClosedBackfillSymbolStatus:
     spec = timeframe_spec(timeframe)
+    dataset_name = dataset or f"okx_{spec.file_suffix}_extended"
     expected = expected_latest_closed or latest_closed_candle_start(spec.key)
-    handler = DataGapHandler(data_dir=data_dir, timeframe=spec.key, dataset=dataset)
+    resolved_data_dir = data_dir or find_runtime_cache_root(dataset_name)
+    handler = DataGapHandler(resolved_data_dir, timeframe=spec.key, dataset=dataset_name)
     path = handler.data_dir / handler._inst_to_filename(inst_id)
     existing = _read_existing(path)
     rows_before = len(existing)
@@ -147,7 +150,8 @@ def sync_latest_closed_symbol(
             expected_latest_closed=expected,
         )
         if not latest.empty:
-            handler.merge_and_save(inst_id, latest, mode="merge")
+            if not handler.merge_and_save(inst_id, latest, mode="merge"):
+                raise PermissionError(f"refusing to write closed backfill data dir: {handler.data_dir}")
             existing = _read_existing(path)
 
         rows_after = len(existing)
@@ -199,10 +203,9 @@ class ClosedCandleBackfillService:
         self.dataset = dataset or f"okx_{timeframe_spec(timeframe).file_suffix}_extended"
         self.settle_seconds = settle_seconds
         self.output_path = output_path or project_paths().output_dir / "closed_kline_backfill_status.json"
-        self.data_dir = data_dir
+        self.data_dir = Path(data_dir) if data_dir is not None else find_runtime_cache_root(self.dataset)
         self.fetch_limit = fetch_limit
-        if self.data_dir is not None:
-            self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.data_dir.mkdir(parents=True, exist_ok=True)
 
     def next_run_at(self, *, now: datetime | None = None) -> datetime:
         base = pd.Timestamp(now or datetime.now(timezone.utc))

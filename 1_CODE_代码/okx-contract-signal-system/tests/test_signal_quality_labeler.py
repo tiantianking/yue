@@ -6,6 +6,7 @@ import pytest
 from okx_signal_system.risk.costs import CostConfig, estimate_costs
 from okx_signal_system.signal_quality.execution import simulate_signal_execution
 from okx_signal_system.signal_quality.labeler import label_signal
+from okx_signal_system.signal_quality.outcome import SIGNAL_OUTCOME_POLICY, SignalOutcomeSimulator
 from okx_signal_system.strategy.trend_breakout import TradeSignal
 
 
@@ -321,3 +322,64 @@ def test_label_signal_matches_execution_simulator_result() -> None:
     assert _field(label, "holding_bars") == execution.holding_bars
     assert _field(label, "exit_time") == execution.exit_time
     assert _field(label, "exit_price") == execution.exit_price
+    expected = SignalOutcomeSimulator().simulate_signal(signal, frame, policy=SIGNAL_OUTCOME_POLICY)
+    assert expected is not None
+    assert execution.exit_reason == expected.exit_reason
+    assert execution.entry_idx == expected.entry_idx
+    assert execution.exit_idx == expected.exit_idx
+    assert execution.holding_bars == expected.holding_bars
+
+
+def test_label_signal_trend_reverse_matches_execution_policy() -> None:
+    signal = _signal(max_hold_bars=3)
+    frame = _frame(
+        [
+            {
+                "ts": pd.Timestamp("2026-01-01T00:15:00Z"),
+                "open": 100.0,
+                "high": 100.8,
+                "low": 99.6,
+                "close": 100.2,
+                "trend_bias": "long",
+                "is_closed": True,
+            },
+            {
+                "ts": pd.Timestamp("2026-01-01T00:30:00Z"),
+                "open": 100.1,
+                "high": 100.6,
+                "low": 99.7,
+                "close": 100.0,
+                "trend_bias": "short",
+                "is_closed": True,
+            },
+            {
+                "ts": pd.Timestamp("2026-01-01T00:45:00Z"),
+                "open": 99.7,
+                "high": 100.0,
+                "low": 99.1,
+                "close": 99.5,
+                "trend_bias": "short",
+                "is_closed": True,
+            },
+        ]
+    )
+
+    execution = simulate_signal_execution(signal, frame)
+    label = label_signal(signal, frame)
+    expected = SignalOutcomeSimulator().simulate_signal(signal, frame, policy=SIGNAL_OUTCOME_POLICY)
+
+    assert execution is not None
+    assert label is not None
+    assert expected is not None
+    assert _outcome(label) == "TIMEOUT"
+    assert execution.outcome == "TIMEOUT"
+    assert execution.exit_reason == "trend_reverse"
+    assert execution.exit_idx == 2
+    assert execution.holding_bars == 3
+    assert _field(label, "holding_bars") == 3
+    assert _field(label, "exit_price") == pytest.approx(99.7)
+    assert _field(label, "exit_time") == pd.Timestamp("2026-01-01T00:45:00Z")
+    assert execution.exit_time == pd.Timestamp("2026-01-01T00:45:00Z")
+    assert expected.exit_reason == "trend_reverse"
+    assert expected.exit_idx == 2
+    assert expected.holding_bars == 3

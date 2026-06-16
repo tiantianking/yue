@@ -129,6 +129,35 @@ def test_signal_alert_includes_lifecycle_status(monkeypatch) -> None:
     assert "K线时间: 2026-06-16 08:00:00 北京时间" in sent[0]
 
 
+def test_signal_alert_includes_quality_model(monkeypatch) -> None:
+    sent: list[str] = []
+
+    def fake_send_text(text: str, *args, **kwargs) -> bool:
+        sent.append(text)
+        return True
+
+    monkeypatch.setattr(feishu, "send_text", fake_send_text)
+
+    ok = feishu.send_signal_alert(
+        inst_id="BTC-USDT-SWAP",
+        side="long",
+        entry_ref=100.0,
+        stop_loss=95.0,
+        take_profit=117.5,
+        quality_model={
+            "p_tp": 0.42,
+            "p_sl": 0.18,
+            "p_timeout": 0.40,
+            "expected_net_r": 1.27,
+            "uncertainty": 0.11,
+        },
+    )
+
+    assert ok
+    assert "质量模型旁路: p_tp=0.420" in sent[0]
+    assert "expected_net_r=1.270" in sent[0]
+
+
 def test_candidate_health_report_is_not_a_trade_signal(monkeypatch) -> None:
     sent: list[str] = []
 
@@ -230,6 +259,46 @@ def test_b_tier_summary_text_is_understandable(monkeypatch) -> None:
     assert "B-tier candidates: 1" in text
     assert "not immediate A-tier alerts" in text
     assert "#3 ETH-USDT-SWAP long score=7.1 rr=3.50R reason=correlation_group_demoted" in text
+
+
+def test_b_tier_summary_includes_quality_model(monkeypatch) -> None:
+    sent: list[str] = []
+
+    def fake_send_text(text: str, *args, **kwargs) -> bool:
+        sent.append(text)
+        return True
+
+    monkeypatch.setattr(feishu, "send_text", fake_send_text)
+
+    ok = feishu.send_b_tier_summary(
+        [
+            {
+                "inst_id": "ETH-USDT-SWAP",
+                "side": "long",
+                "rank": 3,
+                "raw_score": 7.1,
+                "decision": {"risk_reward_ratio": 3.5},
+                "health_item": {"reason": "correlation_group_demoted"},
+                "signal": {"ts": "2026-06-16T00:00:00+00:00"},
+                "payload": {
+                    "quality_model": {
+                        "p_tp": 0.4,
+                        "p_sl": 0.2,
+                        "p_timeout": 0.4,
+                        "expected_net_r": 1.1,
+                        "uncertainty": 0.2,
+                    }
+                },
+            }
+        ],
+        total_candidates=4,
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+    )
+
+    assert ok
+    assert "质量模型旁路: p_tp=0.400" in sent[0]
+    assert "expected_net_r=1.100" in sent[0]
 
 
 def test_status_and_health_reports_use_beijing_time(monkeypatch) -> None:

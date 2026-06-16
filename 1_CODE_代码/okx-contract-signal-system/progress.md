@@ -218,3 +218,31 @@
 ### Notes
 - Modified files: `src/okx_signal_system/signal_quality/lifecycle.py` replaces JSON lifecycle persistence with SQLite records/events/outbox tables and legacy JSON migration; `src/okx_signal_system/exchange/realtime.py` records formal A-tier push outbox status; `gui.py` records GUI A-tier push outbox status; `tests/test_signal_lifecycle.py` covers schema, events, outbox, idempotency, and migration; `tests/test_desktop_runtime.py` covers realtime outbox status updates; `docs/SYSTEM_ARCHITECTURE.md`, `pyproject.toml`, `src/okx_signal_system/__init__.py`, and `src/okx_contract_signal_system.egg-info/PKG-INFO` document and version the v3.46 boundary; `progress.md` records this round.
 - Rollback: revert this commit after it is created, or before commit restore the listed files from the previous index state and remove this appended progress entry.
+
+## 2026-06-17 - Task: P0-2 runtime backfill read-only history protection
+### What was done
+- Added a read-only guard to `DataGapHandler` so runtime backfill paths cannot write to the configured read-only historical data root.
+- Changed closed-candle runtime backfill to resolve and write the runtime cache by default instead of falling back to `find_lightweight_history`.
+- Removed the dashboard 5m closed-backfill entrypoint's explicit historical-root write target so it follows the runtime cache default.
+- Added focused regressions proving read-only files keep the same hash/mtime while closed backfill writes the runtime cache.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests/test_data_layer.py::test_gap_handler_respects_read_only_guard tests/test_data_layer.py::test_closed_backfill_service_writes_runtime_cache_without_mutating_history tests/test_config.py::test_find_runtime_cache_uses_config_runtime_cache_root` -> `3 passed`.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests/test_data_layer.py -m "not integration"` -> `20 passed, 4 deselected`.
+### Notes
+- Modified files: `src/okx_signal_system/data/gap_handler.py` adds `read_only` protection and marks sync failed if a write is refused; `src/okx_signal_system/data/closed_backfill.py` writes closed backfill output to runtime cache by default; `main.py` stops directing the 5m dashboard backfill to the historical dataset parent; `tests/test_data_layer.py` adds focused hash/mtime and runtime-cache regressions; `progress.md` records this round.
+- Rollback: restore the listed files from the previous index state and remove this appended progress entry; no database, outcome policy, notification, version, or documentation files were intentionally changed for this task.
+
+## 2026-06-17 - Task: v3.45 acceptance follow-up closure
+### What was done
+- Unified the remaining v3.45 follow-up surfaces so true observation candidates stay separate from formal signals, non-push formal candidates no longer leak into tier C, and A/B Feishu messages carry the quality-model旁路字段.
+- Bumped release metadata and visible package versioning to v3.47 so code, GUI, package metadata, and docs stay aligned.
+- Locked the new behavior with focused regressions for tiering, near-breakout observation, Feishu quality-model rendering, config snapshotting, read-only history protection, and signal outcome consistency.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests/test_signal_quality.py tests/test_signal_scan_service.py tests/test_feishu_notify.py tests/test_signal_quality_labeler.py tests/test_data_layer.py tests/test_config.py -q` -> passed.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m compileall src tests main.py gui.py` -> passed.
+- `npm.cmd run check` in `dashboard` -> lint and production build passed.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest -q` -> passed with historical-data integration tests skipped.
+- `git diff --check` -> passed.
+### Notes
+- Modified files: `src/okx_signal_system/signal_quality/selector.py`, `src/okx_signal_system/signal_quality/observation.py`, `src/okx_signal_system/signal_service/scan.py`, `tests/test_signal_quality.py`, and `tests/test_signal_scan_service.py` tighten tiering/observation behavior; `src/okx_signal_system/notify/feishu.py`, `src/okx_signal_system/exchange/realtime.py`, `gui.py`, and `tests/test_feishu_notify.py` carry quality-model fields into A/B signal messages; `pyproject.toml`, `src/okx_signal_system/__init__.py`, `src/okx_contract_signal_system.egg-info/PKG-INFO`, and `docs/SYSTEM_ARCHITECTURE.md` sync version/doc release notes; `progress.md` records this round.
+- Rollback: restore the listed files from the previous index state and remove this appended progress entry; this round does not require database migration rollback or runtime-cache cleanup.

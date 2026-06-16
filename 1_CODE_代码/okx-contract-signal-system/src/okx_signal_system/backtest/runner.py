@@ -14,7 +14,7 @@ from okx_signal_system.risk.model import (
     RiskConfig,
     validate_signal,
 )
-from okx_signal_system.signal_quality.outcome import SignalOutcomeLevels, SignalOutcomeSimulator
+from okx_signal_system.signal_quality.outcome import SIGNAL_OUTCOME_POLICY, SignalOutcomeLevels, SignalOutcomeSimulator
 from okx_signal_system.strategy.ensemble import ensemble_vote
 from okx_signal_system.strategy.vote_gate import DEFAULT_MIN_VOTE_APPROVAL_RATE, vote_gate_passed
 from okx_signal_system.strategy.trend_breakout import (
@@ -266,7 +266,7 @@ def exit_trade(features: pd.DataFrame, entry_idx: int, signal, params: StrategyP
         features,
         start_idx=entry_idx,
         after_signal_time=False,
-        include_trend_reverse=True,
+        policy=SIGNAL_OUTCOME_POLICY.with_max_hold_bars(params.max_hold_bars),
     )
     if result is None:
         end_idx = min(entry_idx + params.max_hold_bars, len(features) - 1)
@@ -315,7 +315,7 @@ def exit_trade_from_arrays(
         frame=frame,
         start_idx=entry_idx,
         max_hold_bars=max_hold_bars,
-        include_trend_reverse=True,
+        policy=SIGNAL_OUTCOME_POLICY.with_max_hold_bars(max_hold_bars),
     )
     if result is None:
         end_idx = min(entry_idx + max_hold_bars, len(open_) - 1)
@@ -474,7 +474,7 @@ def run_backtest_from_features(
             features,
             start_idx=entry_idx,
             after_signal_time=False,
-            include_trend_reverse=True,
+            policy=SIGNAL_OUTCOME_POLICY.with_max_hold_bars(params.max_hold_bars),
         )
         if outcome is None:
             continue

@@ -1,3 +1,5 @@
+import hashlib
+
 import pandas as pd
 from pathlib import Path
 
@@ -139,6 +141,107 @@ def test_gap_handler_uses_configured_history_root(tmp_path, monkeypatch) -> None
     handler = DataGapHandler(timeframe="15m")
 
     assert handler.data_dir == dataset_root
+
+
+def test_gap_handler_respects_read_only_guard(tmp_path) -> None:
+    path = tmp_path / "BTC_USDT_USDT_15m.parquet"
+    pd.DataFrame(
+        {
+            "ts": [pd.Timestamp("2026-06-15T18:00:00Z")],
+            "open": [100.0],
+            "high": [101.0],
+            "low": [99.0],
+            "close": [100.5],
+            "volume": [10.0],
+            "quote_volume": [1000.0],
+        }
+    ).to_parquet(path, index=False)
+    before_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+    before_mtime = path.stat().st_mtime_ns
+
+    handler = DataGapHandler(tmp_path, timeframe="15m", read_only=True)
+    result = handler.merge_and_save(
+        "BTC-USDT-SWAP",
+        pd.DataFrame(
+            {
+                "ts": [pd.Timestamp("2026-06-15T18:15:00Z")],
+                "open": [101.0],
+                "high": [102.0],
+                "low": [100.0],
+                "close": [101.5],
+                "volume": [12.0],
+                "quote_volume": [1200.0],
+            }
+        ),
+        mode="merge",
+    )
+
+    assert not result
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == before_hash
+    assert path.stat().st_mtime_ns == before_mtime
+
+
+def test_closed_backfill_service_writes_runtime_cache_without_mutating_history(tmp_path, monkeypatch) -> None:
+    dataset = "okx_15m_extended"
+    history_root = tmp_path / "history" / "lightweight_history" / dataset
+    runtime_root = tmp_path / "runtime" / "lightweight_history" / dataset
+    history_root.mkdir(parents=True)
+    history_path = history_root / "BTC_USDT_USDT_15m.parquet"
+    pd.DataFrame(
+        {
+            "ts": [pd.Timestamp("2026-06-15T18:00:00Z")],
+            "open": [100.0],
+            "high": [101.0],
+            "low": [99.0],
+            "close": [100.0],
+            "volume": [10.0],
+            "quote_volume": [1000.0],
+        }
+    ).to_parquet(history_path, index=False)
+    before_hash = hashlib.sha256(history_path.read_bytes()).hexdigest()
+    before_mtime = history_path.stat().st_mtime_ns
+
+    def fail_history_lookup(*args, **kwargs):
+        raise AssertionError("history lookup not allowed")
+
+    monkeypatch.setattr("okx_signal_system.data.gap_handler.find_lightweight_history", fail_history_lookup)
+    monkeypatch.setattr("okx_signal_system.data.closed_backfill.find_runtime_cache_root", lambda _dataset: runtime_root)
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.latest_closed_candle_start",
+        lambda *args, **kwargs: pd.Timestamp("2026-06-15T18:15:00Z").to_pydatetime(),
+    )
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.seconds_until_next_closed_run",
+        lambda *args, **kwargs: 60.0,
+    )
+
+    def fake_get_candles(inst_id, bar, limit):
+        return [
+            ["1781546400000", "100", "101", "99", "100", "10", "1000", "1000", "1"],
+            ["1781547300000", "100.5", "102", "100", "101.5", "12", "1200", "1200", "1"],
+        ]
+
+    monkeypatch.setattr("okx_signal_system.data.closed_backfill.get_candles", fake_get_candles)
+
+    from okx_signal_system.data.closed_backfill import ClosedCandleBackfillService
+
+    service = ClosedCandleBackfillService(
+        ["BTC-USDT-SWAP"],
+        timeframe="15m",
+        dataset=dataset,
+        settle_seconds=60,
+        output_path=tmp_path / "status.json",
+    )
+    status = service.run_once()
+
+    runtime_path = runtime_root / "BTC_USDT_USDT_15m.parquet"
+    assert service.data_dir == runtime_root
+    assert status.all_complete
+    assert runtime_path.exists()
+    runtime_frame = pd.read_parquet(runtime_path)
+    assert len(runtime_frame) == 2
+    assert hashlib.sha256(history_path.read_bytes()).hexdigest() == before_hash
+    assert history_path.stat().st_mtime_ns == before_mtime
 
 
 @pytest.mark.integration

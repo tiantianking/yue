@@ -25,6 +25,18 @@ MAX_GAP_BARS = 200  # 单次最大回补量
 GAP_THRESHOLD_BARS = 3  # 超过3根周期视为数据断裂
 
 
+def _configured_read_only() -> bool:
+    try:
+        from okx_signal_system.config import load_config
+
+        data_cfg = load_config("base.yaml").get("data", {})
+        if isinstance(data_cfg, dict):
+            return bool(data_cfg.get("read_only", False))
+    except Exception as exc:
+        log.debug("Data read_only config unavailable: %s", exc)
+    return False
+
+
 def _to_okx_ms(value: datetime | pd.Timestamp) -> str:
     ts = pd.Timestamp(value)
     if ts.tzinfo is None:
@@ -75,8 +87,16 @@ class DataGapHandler:
     4. 提供增量数据同步机制
     """
 
-    def __init__(self, data_dir: Path | str | None = None, *, timeframe: str = "1h", dataset: str | None = None):
+    def __init__(
+        self,
+        data_dir: Path | str | None = None,
+        *,
+        timeframe: str = "1h",
+        dataset: str | None = None,
+        read_only: bool | None = None,
+    ):
         self.timeframe = timeframe_spec(timeframe)
+        uses_default_history_root = data_dir is None
         if data_dir is None:
             dataset = dataset or f"okx_{self.timeframe.file_suffix}_extended"
             data_dir = find_lightweight_history(dataset)
@@ -84,6 +104,7 @@ class DataGapHandler:
         if isinstance(data_dir, str):
             data_dir = Path(data_dir)
         self.data_dir = data_dir
+        self.read_only = _configured_read_only() if read_only is None and uses_default_history_root else bool(read_only)
         self._api_unavailable_reason: str | None = None
 
     def detect_gaps(self, inst_id: str) -> list[DataGap]:
@@ -231,6 +252,10 @@ class DataGapHandler:
         fname = self._inst_to_filename(inst_id)
         path = self.data_dir / fname
 
+        if self.read_only:
+            log.error("Refusing to write read-only data directory for %s: %s", inst_id, self.data_dir)
+            return False
+
         try:
             if mode == "replace" or not path.exists():
                 df = new_data
@@ -295,7 +320,10 @@ class DataGapHandler:
 
             new_data = self.backfill_gap(gap)
             if new_data is not None and len(new_data) > 0:
-                self.merge_and_save(inst_id, new_data, mode="merge")
+                if not self.merge_and_save(inst_id, new_data, mode="merge"):
+                    result.success = False
+                    result.errors.append(f"data directory is read-only or not writable: {self.data_dir}")
+                    break
                 result.gaps_filled += 1
                 result.bars_added += len(new_data)
 

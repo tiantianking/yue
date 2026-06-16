@@ -20,6 +20,48 @@ class SignalOutcomeLevels:
 
 
 @dataclass(frozen=True)
+class SignalOutcomePolicy:
+    max_hold_bars: int | None = None
+    include_entry_bar: bool = True
+    include_trend_reverse: bool = True
+
+    def resolve_max_hold_bars(self, signal_max_hold_bars: Any = None) -> int | None:
+        value = self.max_hold_bars if self.max_hold_bars is not None else signal_max_hold_bars
+        if value is None:
+            return None
+        try:
+            max_hold_bars = int(value)
+        except (TypeError, ValueError):
+            return None
+        if max_hold_bars < 0:
+            return None
+        return max_hold_bars
+
+    def timeout_offset(self, max_hold_bars: int) -> int:
+        if self.include_entry_bar:
+            return max(max_hold_bars, 1) - 1
+        return max_hold_bars
+
+    def scan_start_pos(self, entry_pos: int) -> int:
+        return entry_pos if self.include_entry_bar else entry_pos + 1
+
+    def holding_bars(self, entry_pos: int, exit_pos: int) -> int:
+        if self.include_entry_bar:
+            return int(exit_pos - entry_pos + 1)
+        return int(exit_pos - entry_pos)
+
+    def with_max_hold_bars(self, max_hold_bars: int | None) -> "SignalOutcomePolicy":
+        return SignalOutcomePolicy(
+            max_hold_bars=max_hold_bars,
+            include_entry_bar=self.include_entry_bar,
+            include_trend_reverse=self.include_trend_reverse,
+        )
+
+
+SIGNAL_OUTCOME_POLICY = SignalOutcomePolicy()
+
+
+@dataclass(frozen=True)
 class SignalOutcomeResult:
     outcome: LabelOutcome
     exit_reason: ExitReason
@@ -80,20 +122,13 @@ class SignalOutcomeSimulator:
         entry_price: float | None = None,
         closed_only: bool = True,
         after_signal_time: bool = True,
-        include_entry_bar: bool = True,
-        include_trend_reverse: bool = False,
+        policy: SignalOutcomePolicy = SIGNAL_OUTCOME_POLICY,
         require_complete_timeout: bool = False,
     ) -> SignalOutcomeResult | None:
         if not bool(getattr(signal, "accepted", True)):
             return None
-        max_hold_bars = getattr(signal, "max_hold_bars", None)
-        if max_hold_bars is None:
-            return None
-        try:
-            max_hold = int(max_hold_bars)
-        except (TypeError, ValueError):
-            return None
-        if max_hold < 0:
+        max_hold = policy.resolve_max_hold_bars(getattr(signal, "max_hold_bars", None))
+        if max_hold is None:
             return None
         df = self._market_frame(
             frame,
@@ -105,27 +140,33 @@ class SignalOutcomeSimulator:
         if df.empty:
             return None
 
-        entry_idx = 0 if start_idx is None else int(start_idx)
-        if entry_idx < 0 or entry_idx >= len(df):
+        entry_pos = self._entry_pos(df, start_idx)
+        if entry_pos is None:
             return None
-        entry_row = df.iloc[entry_idx]
+        entry_row = df.iloc[entry_pos]
         levels = self.levels_from_signal(signal, entry_price=entry_price if entry_price is not None else float(entry_row["open"]))
         if levels is None:
             return None
 
-        if not include_entry_bar and max_hold <= 0:
+        scan_start_pos = policy.scan_start_pos(entry_pos)
+        if scan_start_pos >= len(df):
             return None
-        hold_span = max_hold if include_entry_bar else max_hold - 1
-        end_idx = min(entry_idx + max(0, hold_span), len(df) - 1)
+        expected_end_pos = entry_pos + policy.timeout_offset(max_hold)
+        end_pos = min(expected_end_pos, len(df) - 1)
+        if scan_start_pos > end_pos:
+            return None
         result = self._scan_window(
             signal=signal,
             df=df,
-            entry_idx=entry_idx,
-            end_idx=end_idx,
+            entry_pos=entry_pos,
+            scan_start_pos=scan_start_pos,
+            end_pos=end_pos,
             levels=levels,
-            include_trend_reverse=include_trend_reverse,
+            policy=policy,
         )
-        if result.exit_reason == "max_hold" and require_complete_timeout and end_idx < entry_idx + max(0, hold_span):
+        if result is None:
+            return None
+        if result.exit_reason == "max_hold" and require_complete_timeout and end_pos < expected_end_pos:
             return None
         return result
 
@@ -136,9 +177,9 @@ class SignalOutcomeSimulator:
         levels: SignalOutcomeLevels,
         frame: pd.DataFrame,
         start_idx: int,
-        max_hold_bars: int,
+        max_hold_bars: int | None = None,
         closed_only: bool = True,
-        include_trend_reverse: bool = False,
+        policy: SignalOutcomePolicy = SIGNAL_OUTCOME_POLICY,
     ) -> SignalOutcomeResult | None:
         df = self._market_frame(
             frame,
@@ -147,17 +188,24 @@ class SignalOutcomeSimulator:
             closed_only=closed_only,
             after_signal_time=False,
         )
-        if df.empty or start_idx < 0 or start_idx >= len(df) or max_hold_bars < 0:
+        max_hold = policy.resolve_max_hold_bars(max_hold_bars)
+        entry_pos = self._entry_pos(df, start_idx)
+        if df.empty or entry_pos is None or max_hold is None:
+            return None
+        scan_start_pos = policy.scan_start_pos(entry_pos)
+        expected_end_pos = entry_pos + policy.timeout_offset(max_hold)
+        end_pos = min(expected_end_pos, len(df) - 1)
+        if scan_start_pos >= len(df) or scan_start_pos > end_pos:
             return None
         signal = type("OutcomeSignal", (), {"side": side})()
-        end_idx = min(start_idx + max_hold_bars, len(df) - 1)
         return self._scan_window(
             signal=signal,
             df=df,
-            entry_idx=start_idx,
-            end_idx=end_idx,
+            entry_pos=entry_pos,
+            scan_start_pos=scan_start_pos,
+            end_pos=end_pos,
             levels=levels,
-            include_trend_reverse=include_trend_reverse,
+            policy=policy,
         )
 
     def _scan_window(
@@ -165,62 +213,67 @@ class SignalOutcomeSimulator:
         *,
         signal: Any,
         df: pd.DataFrame,
-        entry_idx: int,
-        end_idx: int,
+        entry_pos: int,
+        scan_start_pos: int,
+        end_pos: int,
         levels: SignalOutcomeLevels,
-        include_trend_reverse: bool,
-    ) -> SignalOutcomeResult:
+        policy: SignalOutcomePolicy,
+    ) -> SignalOutcomeResult | None:
+        if scan_start_pos > end_pos:
+            return None
         side = str(getattr(signal, "side"))
-        exit_idx = end_idx
-        exit_price = float(df.iloc[end_idx]["close"])
+        exit_pos = end_pos
+        exit_price = float(df.iloc[end_pos]["close"])
         exit_reason: ExitReason = "max_hold"
         outcome: LabelOutcome = "TIMEOUT"
 
-        for idx in range(entry_idx, end_idx + 1):
+        for idx in range(scan_start_pos, end_pos + 1):
             row = df.iloc[idx]
             high = float(row["high"])
             low = float(row["low"])
             open_price = float(row["open"])
             if side == "long":
                 if low <= levels.stop_loss:
-                    exit_idx = idx
+                    exit_pos = idx
                     exit_price = min(float(levels.stop_loss), open_price)
                     exit_reason = "stop_loss"
                     outcome = "SL"
                     break
                 if high >= levels.take_profit:
-                    exit_idx = idx
+                    exit_pos = idx
                     exit_price = float(levels.take_profit)
                     exit_reason = "take_profit"
                     outcome = "TP"
                     break
-                if include_trend_reverse and self._bias_at(row) == "short" and idx + 1 < len(df):
-                    exit_idx = idx + 1
-                    exit_price = float(df.iloc[exit_idx]["open"])
+                if policy.include_trend_reverse and self._bias_at(row) == "short" and idx + 1 <= end_pos:
+                    exit_pos = idx + 1
+                    exit_price = float(df.iloc[exit_pos]["open"])
                     exit_reason = "trend_reverse"
                     outcome = "TIMEOUT"
                     break
             else:
                 if high >= levels.stop_loss:
-                    exit_idx = idx
+                    exit_pos = idx
                     exit_price = max(float(levels.stop_loss), open_price)
                     exit_reason = "stop_loss"
                     outcome = "SL"
                     break
                 if low <= levels.take_profit:
-                    exit_idx = idx
+                    exit_pos = idx
                     exit_price = float(levels.take_profit)
                     exit_reason = "take_profit"
                     outcome = "TP"
                     break
-                if include_trend_reverse and self._bias_at(row) == "long" and idx + 1 < len(df):
-                    exit_idx = idx + 1
-                    exit_price = float(df.iloc[exit_idx]["open"])
+                if policy.include_trend_reverse and self._bias_at(row) == "long" and idx + 1 <= end_pos:
+                    exit_pos = idx + 1
+                    exit_price = float(df.iloc[exit_pos]["open"])
                     exit_reason = "trend_reverse"
                     outcome = "TIMEOUT"
                     break
 
-        observed = df.iloc[entry_idx : exit_idx + 1]
+        observed = df.iloc[scan_start_pos : exit_pos + 1]
+        if observed.empty:
+            return None
         if side == "long":
             mfe = float((observed["high"].max() - levels.entry_price) / levels.stop_dist)
             mae = float((observed["low"].min() - levels.entry_price) / levels.stop_dist)
@@ -230,10 +283,10 @@ class SignalOutcomeSimulator:
         return SignalOutcomeResult(
             outcome=outcome,
             exit_reason=exit_reason,
-            entry_idx=int(entry_idx),
-            exit_idx=int(exit_idx),
-            entry_time=pd.Timestamp(df.iloc[entry_idx]["ts"]),
-            exit_time=pd.Timestamp(df.iloc[exit_idx]["ts"]),
+            entry_idx=self._source_idx(df, entry_pos),
+            exit_idx=self._source_idx(df, exit_pos),
+            entry_time=pd.Timestamp(df.iloc[entry_pos]["ts"]),
+            exit_time=pd.Timestamp(df.iloc[exit_pos]["ts"]),
             entry_price=float(levels.entry_price),
             exit_price=float(exit_price),
             stop_loss=float(levels.stop_loss),
@@ -241,7 +294,7 @@ class SignalOutcomeSimulator:
             stop_dist=float(levels.stop_dist),
             mae=mae,
             mfe=mfe,
-            holding_bars=int(exit_idx - entry_idx + 1),
+            holding_bars=policy.holding_bars(entry_pos, exit_pos),
         )
 
     @staticmethod
@@ -257,6 +310,7 @@ class SignalOutcomeSimulator:
         if frame.empty or not required.issubset(frame.columns):
             return pd.DataFrame()
         df = frame.copy()
+        df["_source_idx"] = np.arange(len(df), dtype=int)
         if closed_only and "is_closed" in df.columns:
             df = df[df["is_closed"].map(_is_closed_value)]
         if df.empty:
@@ -271,6 +325,25 @@ class SignalOutcomeSimulator:
             start = _utc_timestamp(signal_time)
             df = df[df["ts"] > start].reset_index(drop=True)
         return df
+
+    @staticmethod
+    def _entry_pos(df: pd.DataFrame, start_idx: int | None) -> int | None:
+        if df.empty:
+            return None
+        if start_idx is None:
+            return 0
+        try:
+            source_idx = int(start_idx)
+        except (TypeError, ValueError):
+            return None
+        matches = df.index[df["_source_idx"] == source_idx].tolist()
+        if not matches:
+            return None
+        return int(matches[0])
+
+    @staticmethod
+    def _source_idx(df: pd.DataFrame, pos: int) -> int:
+        return int(df.iloc[pos].get("_source_idx", pos))
 
     @staticmethod
     def _bias_at(row: pd.Series) -> str:
@@ -305,7 +378,9 @@ def _is_closed_value(value: Any) -> bool:
 __all__ = [
     "ExitReason",
     "LabelOutcome",
+    "SIGNAL_OUTCOME_POLICY",
     "SignalOutcomeLevels",
+    "SignalOutcomePolicy",
     "SignalOutcomeResult",
     "SignalOutcomeSimulator",
 ]

@@ -6,7 +6,7 @@ from typing import Literal
 import pandas as pd
 
 from okx_signal_system.risk.costs import CostBreakdown, CostConfig, estimate_costs, participation_rate, slippage_bps_for_participation
-from okx_signal_system.signal_quality.outcome import SignalOutcomeSimulator
+from okx_signal_system.signal_quality.outcome import SIGNAL_OUTCOME_POLICY, ExitReason, SignalOutcomeSimulator
 from okx_signal_system.strategy.trend_breakout import TradeSignal
 
 LabelOutcome = Literal["TP", "SL", "TIMEOUT"]
@@ -15,6 +15,9 @@ LabelOutcome = Literal["TP", "SL", "TIMEOUT"]
 @dataclass(frozen=True)
 class SignalExecutionResult:
     outcome: LabelOutcome
+    exit_reason: ExitReason
+    entry_idx: int
+    exit_idx: int
     final_net_r: float
     mae: float
     mfe: float
@@ -29,7 +32,7 @@ def simulate_signal_execution(signal: TradeSignal, future_bars: pd.DataFrame, *,
     result = SignalOutcomeSimulator().simulate_signal(
         signal,
         future_bars,
-        include_entry_bar=False,
+        policy=SIGNAL_OUTCOME_POLICY,
         require_complete_timeout=True,
     )
     if result is None:
@@ -37,9 +40,12 @@ def simulate_signal_execution(signal: TradeSignal, future_bars: pd.DataFrame, *,
 
     side_mult = 1.0 if signal.side == "long" else -1.0
     df = _future_closed_bars(signal.ts, future_bars)
-    if df.empty or result.entry_idx >= len(df):
+    if df.empty:
         return None
-    slippage_bps = _slippage_bps_for_row(df.iloc[result.entry_idx], result.entry_price, cost_config=cost_config)
+    entry_rows = df[df["ts"] == _utc_timestamp(result.entry_time)]
+    if entry_rows.empty:
+        return None
+    slippage_bps = _slippage_bps_for_row(entry_rows.iloc[0], result.entry_price, cost_config=cost_config)
     costs = estimate_costs(
         entry_price=result.entry_price,
         exit_price=result.exit_price,
@@ -52,6 +58,9 @@ def simulate_signal_execution(signal: TradeSignal, future_bars: pd.DataFrame, *,
     final_net_r = float((((result.exit_price - result.entry_price) * side_mult) - costs.total) / result.stop_dist)
     return SignalExecutionResult(
         outcome=result.outcome,
+        exit_reason=result.exit_reason,
+        entry_idx=result.entry_idx,
+        exit_idx=result.exit_idx,
         final_net_r=final_net_r,
         mae=result.mae,
         mfe=result.mfe,

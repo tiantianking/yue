@@ -5,29 +5,32 @@ from dataclasses import dataclass, replace
 
 import pandas as pd
 
-from okx_signal_system.signal_quality.candidate import SignalCandidate
+from okx_signal_system.signal_quality.candidate import CandidateLike, ObservationCandidate, SignalCandidate
 from okx_signal_system.signal_quality.correlation import assign_correlation_groups
 from okx_signal_system.signal_quality.ranker import rank_candidates
 
 
 @dataclass(frozen=True)
 class TieredSelection:
-    ranked: list[SignalCandidate]
+    ranked: list[CandidateLike]
     tier_a: list[SignalCandidate]
     tier_b: list[SignalCandidate]
-    tier_c: list[SignalCandidate]
+    tier_c: list[ObservationCandidate]
 
 
 def assign_tiers(
     candidates: list[SignalCandidate],
     *,
+    observation_candidates: list[ObservationCandidate] | None = None,
     max_tier_a: int = 2,
     price_history: Mapping[str, pd.DataFrame] | None = None,
     high_correlation_threshold: float = 0.75,
     correlation_window_days: int = 30,
     min_correlation_samples: int = 8,
 ) -> TieredSelection:
-    ranked = rank_candidates(candidates)
+    observations = observation_candidates or []
+    formal_candidates = [candidate for candidate in candidates if bool(candidate.health_item.get("would_push"))]
+    ranked = rank_candidates(formal_candidates + observations)
     group_by_symbol = assign_correlation_groups(
         ranked,
         price_history,
@@ -37,13 +40,16 @@ def assign_tiers(
     )
     used_groups: set[str] = set()
     tier_a_count = 0
-    tiered: list[SignalCandidate] = []
+    tiered: list[CandidateLike] = []
     for candidate in ranked:
         key = f"{candidate.side}:{candidate.inst_id}"
         group = group_by_symbol.get(key, f"solo:{key}")
-        is_formal_trigger = bool(candidate.health_item.get("would_push"))
-        tier = "B" if is_formal_trigger else "C"
-        if is_formal_trigger and tier_a_count < max_tier_a and group not in used_groups:
+        if isinstance(candidate, ObservationCandidate):
+            tiered.append(replace(candidate, tier="C", correlation_group=group))
+            continue
+
+        tier = "B"
+        if tier_a_count < max_tier_a and group not in used_groups:
             tier = "A"
             tier_a_count += 1
             used_groups.add(group)

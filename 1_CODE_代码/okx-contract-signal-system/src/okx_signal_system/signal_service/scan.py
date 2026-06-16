@@ -18,6 +18,8 @@ from okx_signal_system.signal_quality import (
     assign_tiers,
     lifecycle_payload,
 )
+from okx_signal_system.signal_quality.candidate import CandidateLike, ObservationCandidate
+from okx_signal_system.signal_quality.observation import NEAR_BREAKOUT_GAP_PCT, near_breakout_observation
 from okx_signal_system.signal_quality.selector import TieredSelection
 from okx_signal_system.signal_runtime import DEFAULT_MAX_SIGNAL_LAG_MINUTES, signal_is_stale
 from okx_signal_system.strategy.ensemble import ensemble_vote
@@ -102,6 +104,7 @@ class SignalScanContext:
 class SignalScanResult:
     cycle_health: list[dict[str, Any]]
     ready_candidates: list[SignalCandidate]
+    observation_candidates: list[ObservationCandidate]
     candidate_history: dict[str, pd.DataFrame]
     selection: TieredSelection
 
@@ -135,6 +138,7 @@ class SignalScanService:
     async def scan_cycle(self, symbols: Iterable[str], context: SignalScanContext) -> SignalScanResult:
         cycle_health: list[dict[str, Any]] = []
         ready_candidates: list[SignalCandidate] = []
+        observation_candidates: list[ObservationCandidate] = []
         candidate_history: dict[str, pd.DataFrame] = {}
         completed_checked_bars: dict[str, str] = {}
 
@@ -217,15 +221,26 @@ class SignalScanService:
                 if self._lifecycle_store is not None:
                     self._lifecycle_store.update_symbol(inst_id, df)
                 if not signal.accepted:
-                    cycle_health.append(
-                        self._candidate_health_item(
-                            inst_id=inst_id,
-                            reason=signal.reject_reason or "signal_rejected",
-                            row=latest_row,
-                            signal=signal,
-                            regime=regime,
-                        )
+                    observation = self._observation_candidate(
+                        inst_id=inst_id,
+                        row=latest_row,
+                        signal=signal,
+                        context=context,
+                        regime=regime,
                     )
+                    if observation is not None:
+                        observation_candidates.append(observation)
+                        cycle_health.append(observation.health_item)
+                    else:
+                        cycle_health.append(
+                            self._candidate_health_item(
+                                inst_id=inst_id,
+                                reason=signal.reject_reason or "signal_rejected",
+                                row=latest_row,
+                                signal=signal,
+                                regime=regime,
+                            )
+                        )
                     if checked_bar_ts is not None:
                         completed_checked_bars[inst_id] = checked_bar_ts
                     continue
@@ -322,7 +337,7 @@ class SignalScanService:
                             health_item["invalidation_price"] = lifecycle_record.invalidation_price
                             health_item["lifecycle_status"] = lifecycle_record.status
                             health_item["lifecycle"] = lifecycle
-                if self._is_observable(signal):
+                if would_push and self._is_observable(signal):
                     ready_candidates.append(
                         self._candidate(
                             signal=signal,
@@ -346,7 +361,12 @@ class SignalScanService:
             if checked_bar_ts is not None:
                 completed_checked_bars[inst_id] = checked_bar_ts
 
-        selection = assign_tiers(ready_candidates, max_tier_a=2, price_history=candidate_history)
+        selection = assign_tiers(
+            ready_candidates,
+            observation_candidates=observation_candidates,
+            max_tier_a=2,
+            price_history=candidate_history,
+        )
         for candidate in selection.ranked:
             candidate.health_item["tier"] = candidate.tier
             candidate.health_item["rank"] = candidate.rank
@@ -358,7 +378,8 @@ class SignalScanService:
 
         return SignalScanResult(
             cycle_health=cycle_health,
-            ready_candidates=selection.ranked,
+            ready_candidates=selection.tier_a + selection.tier_b,
+            observation_candidates=selection.tier_c,
             candidate_history=candidate_history,
             selection=selection,
         )
@@ -472,6 +493,84 @@ class SignalScanService:
                 decision=decision,
             ),
             raw_score=effective_score,
+        )
+
+    @staticmethod
+    def _observation_candidate(
+        *,
+        inst_id: str,
+        row: pd.Series,
+        signal: TradeSignal,
+        context: SignalScanContext,
+        regime: str | None,
+    ) -> ObservationCandidate | None:
+        if signal.reject_reason != "no_breakout":
+            return None
+        observation = near_breakout_observation(row)
+        if observation is None:
+            return None
+
+        side, close, breakout_level, gap_pct = observation
+        health_item = SignalScanService._candidate_health_item(
+            inst_id=inst_id,
+            reason="near_breakout_observation",
+            row=row,
+            signal=None,
+            regime=regime,
+            risk_reason=signal.reject_reason,
+            would_push=False,
+        )
+        health_item.update(
+            {
+                "side": side,
+                "observation": True,
+                "observation_status": "not_triggered",
+                "breakout_level": breakout_level,
+                "breakout_gap_pct": gap_pct,
+            }
+        )
+        candle_time = pd.Timestamp(row.get("ts"))
+        score = max(0.0, 1.0 - gap_pct / NEAR_BREAKOUT_GAP_PCT)
+        payload = {
+            "signal": {
+                "ts": candle_time.isoformat(),
+                "inst_id": inst_id,
+                "side": side,
+                "entry_ref": None,
+                "stop_loss": None,
+                "take_profit": None,
+                "max_hold_bars": None,
+                "reason_codes": ("NEAR_BREAKOUT_OBSERVATION",),
+                "reject_reason": "not_triggered",
+                "signal_score": None,
+                "risk_reward_ratio": None,
+            },
+            "risk": {"accepted": False, "reason": "not_triggered"},
+            "observation": {
+                "type": "near_breakout",
+                "status": "not_triggered",
+                "close": close,
+                "breakout_level": breakout_level,
+                "breakout_gap_pct": gap_pct,
+            },
+            "live_order_enabled": False,
+            "mode": context.mode,
+            "dataset": context.dataset,
+            "signal_timeframe": context.signal_timeframe,
+            "trend_timeframe": context.trend_timeframe,
+            "selected_params": asdict(context.strategy_params),
+        }
+        return ObservationCandidate(
+            inst_id=inst_id,
+            side=side,
+            candle_time=candle_time,
+            close=close,
+            breakout_level=breakout_level,
+            breakout_gap_pct=gap_pct,
+            payload=payload,
+            health_item=health_item,
+            rank_score=score,
+            raw_score=score,
         )
 
     @staticmethod
