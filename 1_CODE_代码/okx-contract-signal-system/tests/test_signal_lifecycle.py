@@ -167,3 +167,31 @@ def test_lifecycle_record_signal_is_idempotent_and_persistence_is_stable(tmp_pat
     second_payload = json.loads(path.read_text(encoding="utf-8"))
 
     assert second_payload == first_payload
+
+
+def test_gui_lifecycle_table_values_match_visible_columns(tmp_path) -> None:
+    from gui import lifecycle_table_values
+
+    store = SignalLifecycleStore(tmp_path / "lifecycle.json")
+    record = store.record_signal(_signal(ts="2026-01-01T00:00:00Z"), signal_id="sig-gui")
+    store.update_symbol(
+        "BTC-USDT-SWAP",
+        _frame(
+            [
+                {"ts": pd.Timestamp("2026-01-01T00:15:00Z"), "close": 99.0, "is_closed": True},
+            ]
+        ),
+    )
+
+    values = lifecycle_table_values(record)
+
+    assert values == (
+        "BTC-USDT-SWAP",
+        "多",
+        "100.00",
+        "99.00",
+        "95.00",
+        "TRIGGERED",
+        "1",
+        "-",
+    )

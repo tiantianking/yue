@@ -177,23 +177,40 @@ class RealtimeDataStore:
         dataset: str | None = None,
     ):
         self.timeframe = timeframe_spec(timeframe)
-        if data_dir is None:
-            data_dir = find_lightweight_history(dataset or f"okx_{self.timeframe.file_suffix}_extended")
-        self.data_dir = Path(data_dir)
-        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.dataset = dataset or f"okx_{self.timeframe.file_suffix}_extended"
+        self.data_dir = Path(data_dir) if data_dir is not None else None
+        self._history_lookup_failed = False
+        if self.data_dir is not None:
+            self.data_dir.mkdir(parents=True, exist_ok=True)
 
         # 内存缓存: {inst_id: DataFrame}
         self._cache: dict[str, pd.DataFrame] = {}
         # 最后写入时间
         self._last_write: dict[str, datetime] = {}
 
-    def _get_file_path(self, inst_id: str) -> Path:
+    def _resolve_data_dir(self, *, create: bool = False) -> Path | None:
+        if self.data_dir is None:
+            try:
+                self.data_dir = find_lightweight_history(self.dataset)
+            except FileNotFoundError as exc:
+                if not self._history_lookup_failed:
+                    log.warning("Local history dataset unavailable; using in-memory cache only: %s", exc)
+                    self._history_lookup_failed = True
+                return None
+        if create:
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+        return self.data_dir
+
+    def _get_file_path(self, inst_id: str, *, create_dir: bool = False) -> Path | None:
         """获取文件路径"""
+        data_dir = self._resolve_data_dir(create=create_dir)
+        if data_dir is None:
+            return None
         normalized = inst_id.replace("-", "_").replace("_SWAP", "").upper()
         # BTC-USDT-SWAP -> BTC_USDT_USDT_<timeframe>.parquet
         if normalized.count("USDT") == 1:
             normalized = f"{normalized}_USDT"
-        return self.data_dir / f"{normalized}_{self.timeframe.file_suffix}.parquet"
+        return data_dir / f"{normalized}_{self.timeframe.file_suffix}.parquet"
 
     def load(self, inst_id: str) -> pd.DataFrame:
         """加载数据"""
@@ -201,7 +218,7 @@ class RealtimeDataStore:
             return self._cache[inst_id]
 
         path = self._get_file_path(inst_id)
-        if path.exists():
+        if path is not None and path.exists():
             df = _read_parquet_with_retry(path)
             df["ts"] = pd.to_datetime(df["ts"], utc=True)
             self._cache[inst_id] = df
@@ -271,7 +288,9 @@ class RealtimeDataStore:
 
         try:
             df = self._cache[inst_id]
-            path = self._get_file_path(inst_id)
+            path = self._get_file_path(inst_id, create_dir=True)
+            if path is None:
+                return False
 
             # 读取现有数据合并
             if path.exists():
@@ -1121,23 +1140,19 @@ class LiveSignalMonitor:
                     signal_recorded = False
             else:
                 try:
-                    from okx_signal_system.notify.feishu import send_signal_alert
+                    from okx_signal_system.notify.feishu import send_signal_observation
 
-                    signal_recorded = send_signal_alert(
+                    signal_recorded = send_signal_observation(
                         inst_id=signal.inst_id,
                         side=signal.side,
                         entry_ref=signal.entry_ref or 0,
                         stop_loss=signal.stop_loss or 0,
                         take_profit=signal.take_profit or 0,
-                        qty=decision.qty or 0,
-                        leverage=decision.leverage_used,
                         reason=", ".join(signal.reason_codes) if signal.reason_codes else "",
                         signal_score=decision.signal_score,
                         risk_reward_ratio=decision.risk_reward_ratio,
                         stop_reason=decision.stop_reason or "",
                         tp_reason=decision.tp_reason or "",
-                        max_loss_pct=getattr(decision, "max_loss_pct", None),
-                        margin_loss_pct=getattr(decision, "margin_loss_pct", None),
                         kline_time=pd.Timestamp(signal.ts).isoformat(),
                         signal_timeframe=self.api.timeframe.key,
                         trend_timeframe=self.api.trend_timeframe.key,

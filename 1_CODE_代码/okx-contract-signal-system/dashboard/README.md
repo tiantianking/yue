@@ -28,6 +28,9 @@ Optional environment variables:
 - `JIAOYI_DATA_DIR`
 - `OKX_DASHBOARD_PYTHON`
 
+`OKX_DASHBOARD_PYTHON` overrides the Python command; otherwise the dashboard uses `PYTHON`, then `python`.
+`OKX_HISTORY_DIR` and `OKX_HISTORY_BASE` are explicit dashboard history overrides. Without them, dashboard scripts let the Python backend resolve `JIAOYI_DATA_DIR` or `config/base.yaml` `data.root_dir` using the same rules as the signal runtime.
+
 ## Check
 
 ```powershell

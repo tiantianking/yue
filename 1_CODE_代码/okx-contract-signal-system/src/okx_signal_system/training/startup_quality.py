@@ -9,7 +9,7 @@ from typing import Iterable, TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
-from okx_signal_system.backtest.runner import run_backtest, split_train_valid, summarize_trades
+from okx_signal_system.backtest.runner import run_backtest, split_train_valid, summarize_trades, validate_backtest_result
 from okx_signal_system.config import load_config, project_paths
 from okx_signal_system.features.indicators import prior_breakout_levels, resample_trend
 from okx_signal_system.risk.model import Ledger, RiskConfig, smart_leverage_for_signal, validate_signal
@@ -27,7 +27,9 @@ PUSH_BLOCKING_REASONS = frozenset(
         "smart_leverage_check_failed",
         "near_liq_in_train_or_validation",
         "training_no_trades",
+        "training_no_valid_backtest",
         "validation_no_trades",
+        "validation_no_valid_backtest",
         "validation_return_not_positive",
         "validation_profit_factor_below_1",
     }
@@ -153,8 +155,9 @@ def _anti_future_checks(*, signal_timeframe: str = "15m", trend_timeframe: str |
 def _combine_summaries(trade_frames: Iterable[pd.DataFrame], *, initial_equity: float) -> dict:
     frames = [frame for frame in trade_frames if frame is not None and not frame.empty]
     if not frames:
-        return summarize_trades(pd.DataFrame(), initial_equity=initial_equity)
+        raise ValueError("no valid backtest rows for startup quality summary")
     combined = pd.concat(frames, ignore_index=True).sort_values("exit_time").reset_index(drop=True)
+    validate_backtest_result(combined, context="startup_quality_summary")
     return summarize_trades(combined, initial_equity=initial_equity)
 
 
@@ -249,30 +252,49 @@ def run_startup_quality_gate(
             reasons.append(f"{symbol_data.inst_id}:history_too_short")
             continue
         train_frame, valid_frame = split_train_valid(frame, valid_fraction=0.25)
-        train_trades.append(
-            run_backtest(
-                train_frame,
-                inst_id=symbol_data.inst_id,
-                params=params,
-                signal_timeframe=signal_timeframe,
-                trend_timeframe=trend_timeframe,
-                min_vote_approval_rate=min_vote_rate,
+        try:
+            train = validate_backtest_result(
+                run_backtest(
+                    train_frame,
+                    inst_id=symbol_data.inst_id,
+                    params=params,
+                    signal_timeframe=signal_timeframe,
+                    trend_timeframe=trend_timeframe,
+                    min_vote_approval_rate=min_vote_rate,
+                ),
+                context=f"{symbol_data.inst_id} train",
             )
-        )
-        valid_trades.append(
-            run_backtest(
-                valid_frame,
-                inst_id=symbol_data.inst_id,
-                params=params,
-                signal_timeframe=signal_timeframe,
-                trend_timeframe=trend_timeframe,
-                min_vote_approval_rate=min_vote_rate,
+            valid = validate_backtest_result(
+                run_backtest(
+                    valid_frame,
+                    inst_id=symbol_data.inst_id,
+                    params=params,
+                    signal_timeframe=signal_timeframe,
+                    trend_timeframe=trend_timeframe,
+                    min_vote_approval_rate=min_vote_rate,
+                ),
+                context=f"{symbol_data.inst_id} validation",
             )
-        )
+        except ValueError as exc:
+            reasons.append(f"{symbol_data.inst_id}:invalid_backtest_result")
+            log.warning("Startup quality skipped %s: %s", symbol_data.inst_id, exc)
+            continue
+        train_trades.append(train)
+        valid_trades.append(valid)
 
     initial_equity = 10000.0 * max(1, len(all_symbols))
-    train_summary = _combine_summaries(train_trades, initial_equity=initial_equity)
-    valid_summary = _combine_summaries(valid_trades, initial_equity=initial_equity)
+    try:
+        train_summary = _combine_summaries(train_trades, initial_equity=initial_equity)
+    except ValueError:
+        train_summary = summarize_trades(pd.DataFrame(), initial_equity=initial_equity)
+        train_summary["status"] = "failed_no_valid_backtest"
+        reasons.append("training_no_valid_backtest")
+    try:
+        valid_summary = _combine_summaries(valid_trades, initial_equity=initial_equity)
+    except ValueError:
+        valid_summary = summarize_trades(pd.DataFrame(), initial_equity=initial_equity)
+        valid_summary["status"] = "failed_no_valid_backtest"
+        reasons.append("validation_no_valid_backtest")
     anti_future = _anti_future_checks(signal_timeframe=signal_timeframe, trend_timeframe=trend_timeframe)
     stress = _stress_checks(params)
 

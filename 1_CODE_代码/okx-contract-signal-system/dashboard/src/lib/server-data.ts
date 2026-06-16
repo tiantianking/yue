@@ -15,7 +15,7 @@ import type {
   SummaryMetrics,
   SymbolRow,
 } from "./types";
-import { dashboardExecTimeoutMs, historyDir, pythonPath } from "./runtime-paths";
+import { dashboardExecTimeoutMs, historyScriptArgs, pythonPath } from "./runtime-paths";
 
 const execFileAsync = promisify(execFile);
 const SCAN_STALE_MINUTES = 20;
@@ -146,7 +146,7 @@ async function readActualHistory(symbols: string[]) {
     const script = path.join(process.cwd(), "scripts", "read-history-summary.py");
     const { stdout } = await execFileAsync(
       pythonPath(),
-      [script, "--history-dir", historyDir("15m"), "--timeframe", "15m", ...symbols],
+      [script, "--timeframe", "15m", ...historyScriptArgs("15m"), ...symbols],
       {
         maxBuffer: 1024 * 1024 * 8,
         windowsHide: true,

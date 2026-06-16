@@ -1,13 +1,8 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-title OKX Signal Platform v3.42
+title OKX Signal Platform
 
 cd /d "%~dp0"
-
-echo ========================================
-echo  OKX Signal Platform v3.42
-echo ========================================
-echo.
 
 set "PYTHON_EXE="
 set "LOCAL_PY=%~dp0..\..\LOCAL_DEPS\venv\Scripts\python.exe"
@@ -45,6 +40,13 @@ exit /b 1
 
 :python_found
 %PYTHON_EXE% --version
+echo.
+for /f "usebackq delims=" %%V in (`%PYTHON_EXE% -c "import sys; sys.path.insert(0, 'src'); from okx_signal_system import __version__; print('v' + __version__)"`) do set "APP_VERSION=%%V"
+if not defined APP_VERSION set "APP_VERSION=unknown"
+title OKX Signal Platform %APP_VERSION%
+echo ========================================
+echo  OKX Signal Platform %APP_VERSION%
+echo ========================================
 echo.
 
 if not defined OKX_IS_SIMULATED set "OKX_IS_SIMULATED=true"

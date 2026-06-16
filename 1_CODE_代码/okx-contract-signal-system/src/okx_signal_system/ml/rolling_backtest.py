@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from okx_signal_system.backtest.runner import run_backtest, summarize_trades
+from okx_signal_system.backtest.runner import run_backtest, summarize_trades, validate_backtest_result
 from okx_signal_system.data.loader import file_symbol_to_inst_id, load_symbol_file
 from okx_signal_system.paths import find_lightweight_history
 from okx_signal_system.strategy.trend_breakout import StrategyParams
@@ -111,21 +111,27 @@ class RollingBacktestValidator:
                 if len(frame) < 100:
                     continue
                 current_trades.append(
-                    run_backtest(
-                        frame,
-                        inst_id=inst_id,
-                        params=current_params,
-                        signal_timeframe=self.signal_timeframe,
-                        trend_timeframe=self.trend_timeframe,
+                    validate_backtest_result(
+                        run_backtest(
+                            frame,
+                            inst_id=inst_id,
+                            params=current_params,
+                            signal_timeframe=self.signal_timeframe,
+                            trend_timeframe=self.trend_timeframe,
+                        ),
+                        context=f"{inst_id} current rolling",
                     )
                 )
                 best_trades.append(
-                    run_backtest(
-                        frame,
-                        inst_id=inst_id,
-                        params=best_params,
-                        signal_timeframe=self.signal_timeframe,
-                        trend_timeframe=self.trend_timeframe,
+                    validate_backtest_result(
+                        run_backtest(
+                            frame,
+                            inst_id=inst_id,
+                            params=best_params,
+                            signal_timeframe=self.signal_timeframe,
+                            trend_timeframe=self.trend_timeframe,
+                        ),
+                        context=f"{inst_id} best rolling",
                     )
                 )
             except Exception as exc:
@@ -137,7 +143,7 @@ class RollingBacktestValidator:
         best_score = _score(best_summary)
 
         recommendation = "keep_current"
-        if current_summary["total_trades"] < MIN_TRADES_TO_COMPARE:
+        if current_summary["total_trades"] < MIN_TRADES_TO_COMPARE or best_summary["total_trades"] < MIN_TRADES_TO_COMPARE:
             recommendation = "insufficient_data"
         elif best_score > current_score * 1.3:
             recommendation = "switch_to_best"

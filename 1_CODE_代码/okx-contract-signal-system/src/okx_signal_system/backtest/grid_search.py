@@ -5,7 +5,7 @@ from itertools import product
 
 import pandas as pd
 
-from okx_signal_system.backtest.runner import run_backtest_from_features, summarize_trades
+from okx_signal_system.backtest.runner import run_backtest_from_features, summarize_trades, validate_backtest_result
 from okx_signal_system.features.indicators import build_feature_frame
 from okx_signal_system.strategy.trend_breakout import StrategyParams
 from okx_signal_system.strategy.vote_gate import DEFAULT_MIN_VOTE_APPROVAL_RATE
@@ -78,12 +78,18 @@ def run_grid_search(
                 signal_timeframe=signal_timeframe,
                 trend_timeframe=trend_timeframe,
             )
-        trades = run_backtest_from_features(
-            feature_cache[feature_key],
-            inst_id=inst_id,
-            params=params,
-            min_vote_approval_rate=min_vote_approval_rate,
-        )
+        try:
+            trades = validate_backtest_result(
+                run_backtest_from_features(
+                    feature_cache[feature_key],
+                    inst_id=inst_id,
+                    params=params,
+                    min_vote_approval_rate=min_vote_approval_rate,
+                ),
+                context="grid_search",
+            )
+        except ValueError:
+            continue
         summary = summarize_trades(trades)
         rows.append({**asdict(params), **{f"train_{key}": value for key, value in summary.items()}})
     return pd.DataFrame(rows)

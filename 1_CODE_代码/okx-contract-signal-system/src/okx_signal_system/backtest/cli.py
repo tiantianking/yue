@@ -5,7 +5,7 @@ import json
 
 import pandas as pd
 
-from okx_signal_system.backtest.runner import run_backtest, summarize_trades
+from okx_signal_system.backtest.runner import run_backtest, summarize_trades, validate_backtest_result
 from okx_signal_system.config import project_paths
 from okx_signal_system.data.loader import load_symbol_file
 from okx_signal_system.paths import find_lightweight_history
@@ -22,11 +22,14 @@ def main() -> None:
 
     root = find_lightweight_history(args.dataset)
     data = load_symbol_file(root / args.symbol_file)
-    trades = run_backtest(
-        data.frame,
-        inst_id=args.inst_id,
-        signal_timeframe=args.signal_timeframe,
-        trend_timeframe=args.trend_timeframe,
+    trades = validate_backtest_result(
+        run_backtest(
+            data.frame,
+            inst_id=args.inst_id,
+            signal_timeframe=args.signal_timeframe,
+            trend_timeframe=args.trend_timeframe,
+        ),
+        context="backtest_cli",
     )
     paths = project_paths()
     paths.output_dir.mkdir(parents=True, exist_ok=True)

@@ -4,6 +4,7 @@ import inspect
 import asyncio
 from pathlib import Path
 
+import okx_signal_system
 from okx_signal_system.exchange.position_monitor import (
     AutoStopMonitor,
     PositionRecord,
@@ -22,7 +23,7 @@ def test_gui_runtime_dependencies_import() -> None:
 
     assert "auto_start" in inspect.signature(gui.start_gui).parameters
     assert gui.OKXSignalGUI._breakout_gap_pct(None) is None
-    assert gui.APP_VERSION == "v3.42"
+    assert gui.APP_VERSION == f"v{okx_signal_system.__version__}"
     assert gui._format_beijing_time(pd.Timestamp("2026-06-16T00:00:00Z")) == "2026-06-16 08:00"
 
 
@@ -209,9 +210,13 @@ def test_manual_confirmation_auto_stop_trigger_only_reports_signal_outcome(tmp_p
     assert results[0].exit_reason == "stop_loss"
 
 
-def test_realtime_runtime_api_is_signal_only() -> None:
+def test_realtime_runtime_api_is_signal_only(monkeypatch) -> None:
     from okx_signal_system.exchange import realtime
 
+    def _fail_lookup(_dataset: str):  # pragma: no cover - defensive
+        raise AssertionError("history lookup should be lazy")
+
+    monkeypatch.setattr(realtime, "find_lightweight_history", _fail_lookup)
     api = realtime.OKXRealtimeAPI({})
 
     assert not hasattr(api, "place_order")

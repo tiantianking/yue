@@ -128,12 +128,19 @@ def main() -> None:
     parser.add_argument("symbol")
     parser.add_argument("--limit", type=int, default=260)
     parser.add_argument("--timeframe", default="15m")
-    parser.add_argument("--history-dir", required=True)
+    parser.add_argument("--history-dir")
+    parser.add_argument("--dataset")
     args = parser.parse_args()
 
     timeframe = args.timeframe.strip().lower()
     limit = max(20, min(args.limit, 60000))
-    path = Path(args.history_dir) / normalize_symbol(args.symbol, timeframe)
+    if args.history_dir:
+        history_dir = Path(args.history_dir)
+    else:
+        from okx_signal_system.paths import find_lightweight_history
+
+        history_dir = find_lightweight_history(args.dataset or f"okx_{timeframe}_extended")
+    path = history_dir / normalize_symbol(args.symbol, timeframe)
     source = "local"
     warning = None
     if path.exists():

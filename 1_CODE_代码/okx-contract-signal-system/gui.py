@@ -27,7 +27,9 @@ if str(_src_path) not in sys.path:
 
 log = logging.getLogger(__name__)
 
-APP_VERSION = "v3.42"
+from okx_signal_system import __version__ as _PACKAGE_VERSION
+
+APP_VERSION = f"v{_PACKAGE_VERSION}"
 DASHBOARD_HOST = "127.0.0.1"
 DASHBOARD_PORT = 3001
 DASHBOARD_URL = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}"
@@ -96,6 +98,20 @@ def _header_summary() -> dict:
     except Exception:
         pass
     return summary
+
+
+def lifecycle_table_values(rec) -> tuple[str, str, str, str, str, str, str, str]:
+    """Return values in the same order as the lifecycle table columns."""
+    return (
+        rec.inst_id,
+        '多' if rec.side == 'long' else '空',
+        f"{rec.entry_ref:.2f}",
+        f"{rec.last_close:.2f}" if rec.last_close is not None else '-',
+        f"{rec.invalidation_price:.2f}",
+        rec.status,
+        str(rec.bars_seen),
+        rec.signal_timeframe or "-",
+    )
 
 
 class GUILogHandler:
@@ -671,12 +687,12 @@ class OKXSignalGUI:
 
         self.pos_tree.heading('inst_id', text='合约')
         self.pos_tree.heading('side', text='方向')
-        self.pos_tree.heading('entry', text='观察价')
-        self.pos_tree.heading('current', text='现价')
-        self.pos_tree.heading('sl', text='风险价')
-        self.pos_tree.heading('tp', text='目标价')
-        self.pos_tree.heading('pnl', text='样本变化')
-        self.pos_tree.heading('score', text='信号评分')
+        self.pos_tree.heading('entry', text='入场参考')
+        self.pos_tree.heading('current', text='最新收盘')
+        self.pos_tree.heading('sl', text='失效价')
+        self.pos_tree.heading('tp', text='生命周期')
+        self.pos_tree.heading('pnl', text='已观察K线')
+        self.pos_tree.heading('score', text='信号周期')
 
         self.pos_tree.column('inst_id', width=120)
         self.pos_tree.column('side', width=40)
@@ -703,16 +719,7 @@ class OKXSignalGUI:
 
             # 填充数据
             for rec in records:
-                self.pos_tree.insert('', 'end', values=(
-                    rec.inst_id,
-                    '多' if rec.side == 'long' else '空',
-                    f"{rec.entry_price:.2f}",
-                    f"{rec.last_close:.2f}" if rec.last_close is not None else '-',
-                    f"{rec.invalidation_price:.2f}",
-                    rec.status,
-                    str(rec.bars_seen),
-                    rec.signal_timeframe or "-",
-                ))
+                self.pos_tree.insert('', 'end', values=lifecycle_table_values(rec))
         except Exception as e:
             self.log(f"刷新观察记录失败: {e}", "WARNING")
 
@@ -1234,22 +1241,18 @@ class OKXSignalGUI:
                     self.message_queue.put(('log', (f"已通知过同一根K线A级信号，跳过重复推送: {signal.inst_id} {signal.side}", "INFO")))
                     continue
                 try:
-                    from okx_signal_system.notify.feishu import send_signal_alert
-                    sent = send_signal_alert(
+                    from okx_signal_system.notify.feishu import send_signal_observation
+                    sent = send_signal_observation(
                         inst_id=signal.inst_id,
                         side=signal.side,
                         entry_ref=signal.entry_ref,
                         stop_loss=signal.stop_loss,
                         take_profit=signal.take_profit,
-                        qty=decision.qty or 0,
-                        leverage=decision.leverage_used or decision.leverage_cap,
                         reason=",".join(signal.reason_codes),
                         signal_score=float(candidate.raw_score),
                         risk_reward_ratio=decision.risk_reward_ratio,
                         stop_reason=decision.stop_reason,
                         tp_reason=decision.tp_reason,
-                        max_loss_pct=decision.max_position_loss_pct,
-                        margin_loss_pct=decision.margin_loss_pct,
                         kline_time=signal.ts.isoformat() if hasattr(signal.ts, 'isoformat') else str(signal.ts),
                         signal_timeframe=self.api.timeframe.key,
                         trend_timeframe=self.api.trend_timeframe.key,

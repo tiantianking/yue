@@ -10,7 +10,7 @@ import pandas as pd
 
 from okx_signal_system.backtest.evaluation import evaluate_portfolio, evaluate_symbol
 from okx_signal_system.backtest.grid_search import parameter_grid, run_grid_search, select_best_params
-from okx_signal_system.backtest.runner import run_backtest, split_train_valid, summarize_trades
+from okx_signal_system.backtest.runner import run_backtest, split_train_valid, summarize_trades, validate_backtest_result
 from okx_signal_system.data.loader import SymbolData, load_all_symbols
 from okx_signal_system.strategy.trend_breakout import StrategyParams
 from okx_signal_system.timeframe import default_trend_timeframe, timeframe_spec
@@ -50,8 +50,9 @@ def combine_trade_summaries(
 ) -> dict:
     frames = [frame for frame in trade_frames if frame is not None and not frame.empty]
     if not frames:
-        return summarize_trades(pd.DataFrame(), initial_equity=initial_equity_per_symbol * max(1, symbol_count or 1))
+        raise ValueError("no valid backtest rows for combined summary")
     combined = pd.concat(frames, ignore_index=True).sort_values("exit_time").reset_index(drop=True)
+    validate_backtest_result(combined, context="combined_summary")
     denominator_symbols = max(1, symbol_count or combined["inst_id"].nunique())
     return summarize_trades(combined, initial_equity=initial_equity_per_symbol * denominator_symbols)
 
@@ -92,19 +93,25 @@ def run_train_valid_symbol(
         trend_timeframe=trend_key,
     )
     selected = select_best_params(grid)
-    train_trades = run_backtest(
-        train_frame,
-        inst_id=inst_id,
-        params=selected,
-        signal_timeframe=signal_key,
-        trend_timeframe=trend_key,
+    train_trades = validate_backtest_result(
+        run_backtest(
+            train_frame,
+            inst_id=inst_id,
+            params=selected,
+            signal_timeframe=signal_key,
+            trend_timeframe=trend_key,
+        ),
+        context=f"{inst_id} train",
     )
-    valid_trades = run_backtest(
-        valid_frame,
-        inst_id=inst_id,
-        params=selected,
-        signal_timeframe=signal_key,
-        trend_timeframe=trend_key,
+    valid_trades = validate_backtest_result(
+        run_backtest(
+            valid_frame,
+            inst_id=inst_id,
+            params=selected,
+            signal_timeframe=signal_key,
+            trend_timeframe=trend_key,
+        ),
+        context=f"{inst_id} validation",
     )
     train_summary = summarize_trades(train_trades)
     valid_summary = summarize_trades(valid_trades)
@@ -426,20 +433,54 @@ def run_dataset_research_artifacts(
                 )
                 continue
             train_frame, valid_frame = split_train_valid(symbol_data.frame, valid_fraction=0.25)
-            train_trades = run_backtest(
-                train_frame,
-                inst_id=symbol_data.inst_id,
-                params=selected,
-                signal_timeframe=signal_key,
-                trend_timeframe=trend_key,
-            )
-            valid_trades = run_backtest(
-                valid_frame,
-                inst_id=symbol_data.inst_id,
-                params=selected,
-                signal_timeframe=signal_key,
-                trend_timeframe=trend_key,
-            )
+            try:
+                train_trades = validate_backtest_result(
+                    run_backtest(
+                        train_frame,
+                        inst_id=symbol_data.inst_id,
+                        params=selected,
+                        signal_timeframe=signal_key,
+                        trend_timeframe=trend_key,
+                    ),
+                    context=f"{symbol_data.inst_id} train",
+                )
+                valid_trades = validate_backtest_result(
+                    run_backtest(
+                        valid_frame,
+                        inst_id=symbol_data.inst_id,
+                        params=selected,
+                        signal_timeframe=signal_key,
+                        trend_timeframe=trend_key,
+                    ),
+                    context=f"{symbol_data.inst_id} validation",
+                )
+            except ValueError as exc:
+                train_summary = summarize_trades(pd.DataFrame())
+                valid_summary = summarize_trades(pd.DataFrame())
+                evaluation = {
+                    "pass_fail": "failed",
+                    "reasons": f"BACKTEST_RESULT_INVALID:{exc}",
+                }
+                rows.append(
+                    {
+                        "symbol": symbol_data.inst_id,
+                        **_prefixed(train_summary, "train"),
+                        **_prefixed(valid_summary, "valid"),
+                        **asdict(selected),
+                        "shared_params": bool(shared_params),
+                        "pass_fail": evaluation["pass_fail"],
+                        "fail_reasons": evaluation["reasons"],
+                    }
+                )
+                validation_rows.append(
+                    {
+                        "symbol": symbol_data.inst_id,
+                        **_prefixed(valid_summary, "valid"),
+                        "pass_fail": evaluation["pass_fail"],
+                        "fail_reasons": evaluation["reasons"],
+                    }
+                )
+                continue
             train_summary = summarize_trades(train_trades)
             valid_summary = summarize_trades(valid_trades)
             evaluation = evaluate_symbol(train_summary, valid_summary)
@@ -482,8 +523,16 @@ def run_dataset_research_artifacts(
 
     single_results = pd.DataFrame(rows)
     validation_results = pd.DataFrame(validation_rows)
-    train_portfolio = combine_trade_summaries(train_trades_by_symbol, symbol_count=len(symbols))
-    valid_portfolio = combine_trade_summaries(valid_trades_by_symbol, symbol_count=len(symbols))
+    try:
+        train_portfolio = combine_trade_summaries(train_trades_by_symbol, symbol_count=len(symbols))
+    except ValueError:
+        train_portfolio = summarize_trades(pd.DataFrame(), initial_equity=10000.0 * max(1, len(symbols)))
+        train_portfolio["status"] = "failed_no_valid_backtest"
+    try:
+        valid_portfolio = combine_trade_summaries(valid_trades_by_symbol, symbol_count=len(symbols))
+    except ValueError:
+        valid_portfolio = summarize_trades(pd.DataFrame(), initial_equity=10000.0 * max(1, len(symbols)))
+        valid_portfolio["status"] = "failed_no_valid_backtest"
     profitable_ratio = float((single_results["valid_total_return"] > 0).mean()) if not single_results.empty else 0.0
     hit27_ratio = float((single_results["valid_hit_27pct_stop"] > 0).mean()) if not single_results.empty else 0.0
     portfolio_eval = evaluate_portfolio(
@@ -492,6 +541,11 @@ def run_dataset_research_artifacts(
         profitable_symbol_ratio=profitable_ratio,
         hit_27pct_symbol_ratio=hit27_ratio,
     )
+    if train_portfolio.get("status") == "failed_no_valid_backtest" or valid_portfolio.get("status") == "failed_no_valid_backtest":
+        portfolio_eval = {
+            "pass_fail": "failed",
+            "reasons": "BACKTEST_RESULT_INVALID",
+        }
     portfolio_results = pd.DataFrame(
         [
             {
@@ -604,6 +658,19 @@ def build_acceptance_checklist(
 
 
 def write_research_artifacts(artifacts: dict[str, pd.DataFrame | dict | StrategyParams], output_dir: str | Path) -> dict[str, Path]:
+    sample_trades = artifacts.get("sample_trades")
+    if not isinstance(sample_trades, pd.DataFrame):
+        raise ValueError("research artifacts missing sample_trades")
+    validate_backtest_result(sample_trades, context="research sample_trades")
+
+    portfolio_results = artifacts.get("portfolio_results")
+    if not isinstance(portfolio_results, pd.DataFrame) or portfolio_results.empty:
+        raise ValueError("research artifacts missing portfolio_results")
+    required_portfolio = {"valid_total_trades", "valid_total_return", "valid_profit_factor", "pass_fail"}
+    missing_portfolio = sorted(required_portfolio.difference(portfolio_results.columns))
+    if missing_portfolio:
+        raise ValueError(f"portfolio_results missing columns: {', '.join(missing_portfolio)}")
+
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     paths = {

@@ -1,7 +1,10 @@
 ﻿from __future__ import annotations
 
+import re
+import tomllib
 from pathlib import Path
 
+import okx_signal_system
 from okx_signal_system.config import load_config
 
 
@@ -49,6 +52,34 @@ def _manifest_lines() -> list[str]:
 
 def _gitattributes_lines() -> list[str]:
     return [line.strip() for line in _read(".gitattributes").splitlines() if line.strip()]
+
+
+def test_release_tests_package_can_import_integration_helpers() -> None:
+    assert (ROOT / "tests" / "__init__.py").is_file()
+
+    from tests._integration import require_lightweight_history
+
+    assert callable(require_lightweight_history)
+
+
+def test_release_version_sources_stay_consistent() -> None:
+    pyproject = tomllib.loads(_read("pyproject.toml"))
+    package_version = okx_signal_system.__version__
+    main_text = _read("main.py")
+    gui_text = _read("gui.py")
+    start_text = _read("start.bat")
+
+    assert pyproject["project"]["version"] == package_version
+    assert "from okx_signal_system import __version__ as _PACKAGE_VERSION" in main_text
+    assert 'APP_VERSION = f"v{_PACKAGE_VERSION}"' in main_text
+    assert "from okx_signal_system import __version__ as _PACKAGE_VERSION" in gui_text
+    assert 'APP_VERSION = f"v{_PACKAGE_VERSION}"' in gui_text
+    assert "from okx_signal_system import __version__; print('v' + __version__)" in start_text
+    assert "title OKX Signal Platform %APP_VERSION%" in start_text
+    assert "echo  OKX Signal Platform %APP_VERSION%" in start_text
+
+    for text in [main_text, gui_text, start_text]:
+        assert not re.search(r"v\d+\.\d+(?:\.\d+)?", text)
 
 
 def test_env_example_is_signal_only_and_has_no_private_okx_keys() -> None:

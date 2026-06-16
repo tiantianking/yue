@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
 import pyarrow.parquet as pq
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SRC = PROJECT_ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
 
 
 def normalize_symbol(inst_id: str, timeframe: str) -> str:
@@ -63,11 +69,17 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("symbols", nargs="+")
     parser.add_argument("--timeframe", default="15m")
-    parser.add_argument("--history-dir", required=True)
+    parser.add_argument("--history-dir")
+    parser.add_argument("--dataset")
     args = parser.parse_args()
 
-    history_dir = Path(args.history_dir)
     timeframe = args.timeframe.strip().lower()
+    if args.history_dir:
+        history_dir = Path(args.history_dir)
+    else:
+        from okx_signal_system.paths import find_lightweight_history
+
+        history_dir = find_lightweight_history(args.dataset or f"okx_{timeframe}_extended")
     payload = {
         "symbols": [
             summarize_symbol(history_dir, symbol, timeframe)

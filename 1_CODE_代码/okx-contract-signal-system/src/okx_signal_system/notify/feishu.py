@@ -100,22 +100,18 @@ def send_text(text: str, webhook_url: str | None = None, max_retries: int = 3) -
     return False
 
 
-def send_signal_alert(
+def send_signal_observation(
     inst_id: str,
     side: str,
     entry_ref: float,
     stop_loss: float,
     take_profit: float,
-    qty: float,
-    leverage: float,
     reason: str = "",
     *,
     signal_score: float | None = None,
     risk_reward_ratio: float | None = None,
     stop_reason: str = "",
     tp_reason: str = "",
-    max_loss_pct: float | None = None,
-    margin_loss_pct: float | None = None,
     kline_time: str | None = None,
     signal_timeframe: str | None = None,
     trend_timeframe: str | None = None,
@@ -163,6 +159,49 @@ def send_signal_alert(
         lines.append(f"触发原因: {reason}")
     lines.append("提示: 仅用于信号研究和人工复核，不包含自动下单指令。")
     return send_text("\n".join(lines))
+
+
+def send_signal_alert(
+    inst_id: str,
+    side: str,
+    entry_ref: float,
+    stop_loss: float,
+    take_profit: float,
+    reason: str = "",
+    *,
+    signal_score: float | None = None,
+    risk_reward_ratio: float | None = None,
+    stop_reason: str = "",
+    tp_reason: str = "",
+    kline_time: str | None = None,
+    signal_timeframe: str | None = None,
+    trend_timeframe: str | None = None,
+    tier: str | None = None,
+    rank: int | None = None,
+    total_candidates: int | None = None,
+    lifecycle_status: str | None = None,
+    invalidation_price: float | None = None,
+) -> bool:
+    return send_signal_observation(
+        inst_id=inst_id,
+        side=side,
+        entry_ref=entry_ref,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        reason=reason,
+        signal_score=signal_score,
+        risk_reward_ratio=risk_reward_ratio,
+        stop_reason=stop_reason,
+        tp_reason=tp_reason,
+        kline_time=kline_time,
+        signal_timeframe=signal_timeframe,
+        trend_timeframe=trend_timeframe,
+        tier=tier,
+        rank=rank,
+        total_candidates=total_candidates,
+        lifecycle_status=lifecycle_status,
+        invalidation_price=invalidation_price,
+    )
 
 
 def _candidate_value(candidate: Any, name: str, default: Any = None) -> Any:
@@ -413,14 +452,12 @@ def feishu_send_signal_card(
 ) -> bool:
     side = "long" if direction in {"long", "buy", "open_long"} else "short"
     return send_signal_alert(
-        inst_id,
-        side,
-        entry_price or 0.0,
-        stop_loss or 0.0,
-        take_profit or 0.0,
-        qty,
-        leverage,
-        reason,
+        inst_id=inst_id,
+        side=side,
+        entry_ref=entry_price or 0.0,
+        stop_loss=stop_loss or 0.0,
+        take_profit=take_profit or 0.0,
+        reason=reason,
     )
 
 

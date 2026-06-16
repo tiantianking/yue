@@ -1,12 +1,21 @@
 ﻿import json
 
+import pandas as pd
 import pytest
 
 from tests._integration import require_lightweight_history
-from okx_signal_system.backtest.runner import run_backtest
+from okx_signal_system.backtest.runner import empty_backtest_frame, run_backtest
 from okx_signal_system.data.loader import load_symbol_file
 from okx_signal_system.reporting.report_builder import build_markdown_report
 from okx_signal_system.signal_service.job import latest_signal_payload
+
+
+def test_markdown_report_rejects_empty_or_incomplete_backtest() -> None:
+    with pytest.raises(ValueError, match="markdown_report produced no backtest rows"):
+        build_markdown_report(empty_backtest_frame())
+
+    with pytest.raises(ValueError, match="markdown_report missing backtest columns"):
+        build_markdown_report(pd.DataFrame([{"net_pnl": 1.0}]))
 
 
 @pytest.mark.integration

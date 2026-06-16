@@ -1,4 +1,5 @@
 import pytest
+import pandas as pd
 
 from tests._integration import require_lightweight_history
 from okx_signal_system.backtest.evaluation import evaluate_symbol
@@ -44,6 +45,25 @@ def test_evaluation_flags_failed_validation() -> None:
     assert "valid_profit_factor_below_1_05" in result["reasons"]
 
 
+def test_write_research_artifacts_rejects_empty_sample_trades(tmp_path) -> None:
+    artifacts = {
+        "sample_trades": pd.DataFrame(),
+        "portfolio_results": pd.DataFrame(
+            [
+                {
+                    "valid_total_trades": 0,
+                    "valid_total_return": 0.0,
+                    "valid_profit_factor": 0.0,
+                    "pass_fail": "failed",
+                }
+            ]
+        ),
+    }
+
+    with pytest.raises(ValueError, match="research sample_trades"):
+        write_research_artifacts(artifacts, tmp_path)
+
+
 @pytest.mark.integration
 def test_train_valid_symbol_returns_required_sections() -> None:
     result = run_train_valid_symbol(
@@ -78,9 +98,8 @@ def test_shared_research_artifacts_use_one_param_set(tmp_path) -> None:
     assert artifacts["selected_params"] == {}
     assert single["fail_reasons"].eq("NO_VALID_PARAMETER_SET").all()
     assert {"train_grid_results", "selected_params", "validation_results", "portfolio_results", "leverage_risk", "acceptance_checklist"}.issubset(artifacts)
-    paths = write_research_artifacts(artifacts, tmp_path)
-    for key in ["train_grid_results", "selected_params", "validation_results", "single_symbol_results", "portfolio_results", "leverage_risk", "acceptance_checklist", "final_report"]:
-        assert paths[key].exists()
+    with pytest.raises(ValueError, match="research sample_trades"):
+        write_research_artifacts(artifacts, tmp_path)
 
 
 @pytest.mark.integration

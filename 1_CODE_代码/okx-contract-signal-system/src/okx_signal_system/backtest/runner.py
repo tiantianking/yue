@@ -56,11 +56,79 @@ class TradeRecord:
     costs: float
     net_pnl: float
     exit_reason: str
+    outcome: str
+    net_r: float
+    final_net_r: float
     leverage_cap: float
     leverage_used: float
     stop_distance_pct: float
     est_liq_buffer_pct: float
     near_liq_flag: bool
+    sizing_mode: str
+
+
+BACKTEST_RESULT_COLUMNS = tuple(TradeRecord.__dataclass_fields__)
+REQUIRED_BACKTEST_RESULT_COLUMNS = frozenset(
+    {
+        "inst_id",
+        "entry_time",
+        "exit_time",
+        "side",
+        "entry_price",
+        "exit_price",
+        "stop_loss",
+        "take_profit",
+        "qty",
+        "risk_amount",
+        "notional",
+        "gross_pnl",
+        "costs",
+        "net_pnl",
+        "exit_reason",
+        "outcome",
+        "net_r",
+        "final_net_r",
+    }
+)
+
+
+def empty_backtest_frame() -> pd.DataFrame:
+    return pd.DataFrame(columns=BACKTEST_RESULT_COLUMNS)
+
+
+def validate_backtest_result(trades: pd.DataFrame | None, *, context: str = "backtest") -> pd.DataFrame:
+    if trades is None:
+        raise ValueError(f"{context} produced no backtest result")
+    missing = sorted(REQUIRED_BACKTEST_RESULT_COLUMNS.difference(trades.columns))
+    if missing:
+        raise ValueError(f"{context} missing backtest columns: {', '.join(missing)}")
+    if trades.empty:
+        raise ValueError(f"{context} produced no backtest rows")
+    return trades
+
+
+def _exit_reason_to_outcome(exit_reason: str) -> str:
+    if exit_reason == "take_profit":
+        return "TP"
+    if exit_reason == "stop_loss":
+        return "SL"
+    if exit_reason == "trend_reverse":
+        return "TREND_REVERSE"
+    return "TIMEOUT"
+
+
+def _research_position_size(
+    *,
+    entry_price: float,
+    stop_distance: float,
+    risk_config: RiskConfig,
+) -> tuple[float, float, float]:
+    risk_unit = float(risk_config.initial_equity) * float(risk_config.risk_per_trade_pct)
+    if entry_price <= 0 or stop_distance <= 0 or risk_unit <= 0:
+        raise ValueError("invalid_research_position_size")
+    qty = risk_unit / stop_distance
+    notional = abs(entry_price * qty)
+    return float(qty), float(risk_unit), float(notional)
 
 
 def split_train_valid(frame: pd.DataFrame, *, valid_fraction: float = 0.25) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -286,7 +354,7 @@ def run_backtest_from_features(
     )
     trades: list[TradeRecord] = []
     if len(features) < 3:
-        return pd.DataFrame()
+        return empty_backtest_frame()
 
     ts = features["ts"].to_numpy()
     open_ = features["open"].to_numpy(dtype=float)
@@ -366,9 +434,23 @@ def run_backtest_from_features(
             take_profit = entry_price - stop_dist * params.take_profit_mult
         signal = replace(signal, entry_ref=entry_price, stop_loss=stop_loss, take_profit=take_profit, signal_score=effective_score)
         decision = validate_signal(signal, ledger, risk_config)
-        if not decision.accepted or decision.qty is None:
+        if not decision.accepted:
             continue
-        notional = abs(entry_price * decision.qty)
+        if decision.qty is None:
+            try:
+                qty, risk_unit, notional = _research_position_size(
+                    entry_price=entry_price,
+                    stop_distance=stop_dist,
+                    risk_config=risk_config,
+                )
+            except ValueError:
+                continue
+            sizing_mode = "signal_only_research_risk"
+        else:
+            qty = float(decision.qty)
+            risk_unit = float(decision.risk_amount or abs(stop_dist * qty))
+            notional = float(decision.notional or abs(entry_price * qty))
+            sizing_mode = "risk_decision_qty"
         try:
             slip_bps = slippage_bps_for_participation(
                 participation_rate(
@@ -394,16 +476,17 @@ def run_backtest_from_features(
         )
 
         side_mult = 1 if signal.side == "long" else -1
-        gross_pnl = (exit_price - entry_price) * decision.qty * side_mult
+        gross_pnl = (exit_price - entry_price) * qty * side_mult
         costs = estimate_costs(
             entry_price=entry_price,
             exit_price=exit_price,
-            qty=decision.qty,
+            qty=qty,
             entry_time=pd.Timestamp(ts[entry_idx]),
             exit_time=pd.Timestamp(ts[exit_idx]),
             slippage_bps=slip_bps,
         )
         net_pnl = gross_pnl - costs.total
+        net_r = net_pnl / risk_unit if risk_unit > 0 else 0.0
 
         # 更新ledger状态
         new_equity = ledger.equity + net_pnl
@@ -437,9 +520,9 @@ def run_backtest_from_features(
                 stop_loss=stop_loss,
                 take_profit=take_profit,
                 max_hold_bars=int(params.max_hold_bars),
-                qty=float(decision.qty),
-                risk_amount=float(decision.risk_amount or 0.0),
-                notional=float(decision.notional or notional),
+                qty=float(qty),
+                risk_amount=float(risk_unit),
+                notional=float(notional),
                 gross_pnl=float(gross_pnl),
                 costs=float(costs.total),
                 net_pnl=float(net_pnl),
@@ -449,10 +532,14 @@ def run_backtest_from_features(
                 stop_distance_pct=float(decision.stop_distance_pct or 0.0),
                 est_liq_buffer_pct=float(decision.est_liq_buffer_pct or 0.0),
                 near_liq_flag=bool(decision.near_liq_flag),
+                net_r=float(net_r),
+                outcome=_exit_reason_to_outcome(exit_reason),
+                final_net_r=float(net_r),
+                sizing_mode=sizing_mode,
             )
         )
         cursor = max(exit_idx + 1, idx + 1)
-    return pd.DataFrame([asdict(trade) for trade in trades])
+    return pd.DataFrame([asdict(trade) for trade in trades], columns=BACKTEST_RESULT_COLUMNS)
 
 
 def summarize_trades(trades: pd.DataFrame, *, initial_equity: float = 10000.0) -> dict[str, float | int | str]:

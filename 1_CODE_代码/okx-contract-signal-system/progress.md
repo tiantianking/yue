@@ -132,3 +132,36 @@
 ### Notes
 - Modified files: `gui.py` now shows Beijing time in the signal table and top-right clock; `src/okx_signal_system/notify/feishu.py` standardizes visible notification times; `src/okx_signal_system/scheduler.py` shows Beijing time in summaries; `src/okx_signal_system/signal_service/app.py` renders the current signal time in Beijing time; `docs/SYSTEM_ARCHITECTURE.md` documents the display rule; `tests/test_desktop_runtime.py`, `tests/test_feishu_notify.py`, and `tests/test_panel_view.py` lock in the behavior; `progress.md` records this round.
 - Rollback: revert the listed files to the previous git diff state and remove this appended progress entry.
+
+## 2026-06-16 - Task: P1-13/P1-14/P1-15 user-visible signal surface audit
+### What was done
+- Added a signal-only Feishu observation interface and moved formal GUI, CLI, and realtime A-tier push paths off the legacy trading-parameter signature.
+- Fixed the GUI lifecycle table so visible headers match lifecycle values: entry reference, latest close, invalidation price, lifecycle status, observed bars, and signal timeframe.
+- Removed the dashboard hard-coded Windows Python path and aligned dashboard history lookup with the Python backend by letting scripts resolve `JIAOYI_DATA_DIR` and config roots unless explicit dashboard overrides are set.
+- Added focused regressions for Feishu signal-only signatures, legacy wrapper output, GUI lifecycle row values, and dashboard runtime path rules.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests/test_feishu_notify.py tests/test_signal_lifecycle.py` -> `21 passed`.
+- `node --experimental-strip-types --test src/lib/runtime-paths.test.ts` in `dashboard` -> `3 passed`.
+- `npm.cmd run lint` in `dashboard` -> passed.
+- `npm.cmd run build` in `dashboard` -> passed.
+### Notes
+- Modified files: `src/okx_signal_system/notify/feishu.py` adds signal-only `send_signal_observation`, keeps `send_signal_alert` signal-only, and makes the legacy card wrapper call by keyword without emitting account fields; `src/okx_signal_system/notify/__init__.py` exports the new interface; `main.py`, `gui.py`, and `src/okx_signal_system/exchange/realtime.py` route formal Feishu signal pushes through the signal-only interface; `gui.py` fixes lifecycle table headers and row values; `dashboard/src/lib/runtime-paths.ts`, `dashboard/src/lib/server-data.ts`, `dashboard/src/app/api/candles/[symbol]/route.ts`, `dashboard/scripts/read-candles.py`, and `dashboard/scripts/read-history-summary.py` align dashboard Python and history path resolution; `dashboard/README.md` documents dashboard runtime environment behavior; `docs/SYSTEM_ARCHITECTURE.md` documents that formal Feishu signals omit trading execution semantics; `tests/test_feishu_notify.py`, `tests/test_signal_lifecycle.py`, and `dashboard/src/lib/runtime-paths.test.ts` add focused coverage; `progress.md` records this round.
+- Rollback: revert the listed files to the previous git diff state and remove this appended progress entry; no database, training, or backtest core files were intentionally changed for this task.
+
+## 2026-06-16 - Task: v3.43 audit-driven signal-only stability optimization
+### What was done
+- Upgraded the release to v3.43 and made GUI, CLI, and the Windows launcher derive visible version text from the package version so future code changes do not leave stale version labels.
+- Fixed SIGNAL_ONLY backtesting so accepted signals with no exchange `qty` are no longer dropped; the backtest now generates research-only sizing plus `outcome`, `net_r`, and `final_net_r` for training, quality scoring, and reports.
+- Added strict backtest-result validation across grid search, research artifacts, daily learning, startup quality, rolling validation, reports, and CLI output so empty or malformed backtest tables cannot silently feed downstream modules.
+- Made `OKXRealtimeAPI({})` and dashboard history readers tolerate missing local historical datasets by resolving history lazily through the shared Python data discovery path instead of hardcoded Windows paths.
+- Tightened Feishu signal notification to expose a signal-only API and Beijing-time visible timestamps while keeping legacy wrapper calls as non-trading compatibility shims.
+- Added `tests/__init__.py` so release archives can import `tests._integration` from a clean extraction.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests\test_backtest_signal_only.py tests\test_backtest.py tests\test_desktop_runtime.py tests\test_release_safety.py -q` -> passed with historical-data integration tests skipped.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests\test_feishu_notify.py tests\test_panel_view.py -q` -> passed.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest -q` -> passed with historical-data integration tests skipped.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m compileall src tests main.py gui.py` -> passed.
+- `npm.cmd run check` in `dashboard` -> lint and production build passed.
+### Notes
+- Modified files: `src/okx_signal_system/backtest/runner.py` adds research sizing, standard R outputs, empty result schema, and validation; `src/okx_signal_system/backtest/cli.py`, `src/okx_signal_system/backtest/grid_search.py`, `src/okx_signal_system/backtest/research.py`, `src/okx_signal_system/ml/rolling_backtest.py`, `src/okx_signal_system/training/daily_learning.py`, `src/okx_signal_system/training/startup_quality.py`, and `src/okx_signal_system/reporting/report_builder.py` consume validated backtest results; `src/okx_signal_system/exchange/realtime.py` lazily resolves local history; `dashboard/scripts/read-candles.py`, `dashboard/scripts/read-history-summary.py`, `dashboard/src/app/api/candles/[symbol]/route.ts`, `dashboard/src/lib/runtime-paths.ts`, and `dashboard/src/lib/server-data.ts` remove hardcoded local history assumptions; `src/okx_signal_system/notify/feishu.py` and `src/okx_signal_system/notify/__init__.py` expose signal-only notification helpers; `main.py`, `gui.py`, `start.bat`, `pyproject.toml`, and `src/okx_signal_system/__init__.py` synchronize v3.43 version display; `docs/SYSTEM_ARCHITECTURE.md` documents the v3.43 signal-only backtest behavior; tests under `tests/` cover release version consistency, clean archive imports, realtime lazy history lookup, Feishu signal-only API, lifecycle table values, strict report/research validation, and the accepted-signal-without-qty regression; `progress.md` records this round.
+- Rollback: revert this commit after it is created, or before commit restore the listed files from the previous index state and remove this appended progress entry.

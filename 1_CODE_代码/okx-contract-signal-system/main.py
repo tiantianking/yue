@@ -43,12 +43,14 @@ def safe_input(prompt=""):
         return ""
 
 # 添加 src/ 到 Python 路径
-APP_VERSION = "v3.42"
 _project_root = Path(__file__).parent
 _runtime_root = Path(sys.executable).parent if getattr(sys, "frozen", False) else _project_root
 _src_path = _project_root / "src"
 if str(_src_path) not in sys.path:
     sys.path.insert(0, str(_src_path))
+from okx_signal_system import __version__ as _PACKAGE_VERSION
+
+APP_VERSION = f"v{_PACKAGE_VERSION}"
 
 # ============================================================
 # 依赖检查
@@ -320,7 +322,7 @@ async def start_realtime_monitor() -> object | None:
 async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -> None:
     """信号检测循环"""
     from okx_signal_system.exchange.realtime import LiveSignalMonitor
-    from okx_signal_system.notify.feishu import send_signal_alert, send_text
+    from okx_signal_system.notify.feishu import send_signal_observation, send_text
     from okx_signal_system.config import project_paths
     from okx_signal_system.data.closed_backfill import ClosedCandleBackfillService
 
@@ -330,21 +332,17 @@ async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -
         try:
             if not feishu_enabled:
                 return False
-            sent = send_signal_alert(
+            sent = send_signal_observation(
                 inst_id=signal.inst_id,
                 side=signal.side,
                 entry_ref=signal.entry_ref or 0,
                 stop_loss=signal.stop_loss or 0,
                 take_profit=signal.take_profit or 0,
-                qty=getattr(decision, 'qty', None) or 0,
-                leverage=getattr(decision, 'leverage_used', None) or getattr(decision, 'leverage_cap', 0),
                 reason=", ".join(signal.reason_codes) if signal.reason_codes else "",
                 signal_score=getattr(decision, 'signal_score', None),
                 risk_reward_ratio=getattr(decision, 'risk_reward_ratio', None),
                 stop_reason=getattr(decision, 'stop_reason', None) or "",
                 tp_reason=getattr(decision, 'tp_reason', None) or "",
-                max_loss_pct=getattr(decision, 'max_loss_pct', None),
-                margin_loss_pct=getattr(decision, 'margin_loss_pct', None),
                 kline_time=pd.Timestamp(signal.ts).isoformat(),
             )
             if sent:

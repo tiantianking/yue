@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
 import { NextRequest, NextResponse } from "next/server";
-import { dashboardExecTimeoutMs, historyDir, pythonPath } from "@/lib/runtime-paths";
+import { dashboardExecTimeoutMs, historyScriptArgs, pythonPath } from "@/lib/runtime-paths";
 
 const execFileAsync = promisify(execFile);
 const CANDLE_CACHE_TTL_MS = 10_000;
@@ -53,8 +53,7 @@ export async function GET(
         String(limit),
         "--timeframe",
         timeframe,
-        "--history-dir",
-        historyDir(timeframe),
+        ...historyScriptArgs(timeframe),
       ],
       {
         maxBuffer: 1024 * 1024 * 8,

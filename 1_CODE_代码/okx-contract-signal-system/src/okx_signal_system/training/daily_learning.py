@@ -13,7 +13,7 @@ from typing import Iterable
 import pandas as pd
 
 from okx_signal_system.backtest.research import run_shared_train_grid, select_shared_params
-from okx_signal_system.backtest.runner import run_backtest, split_train_valid, summarize_trades
+from okx_signal_system.backtest.runner import run_backtest, split_train_valid, summarize_trades, validate_backtest_result
 from okx_signal_system.config import load_config, project_paths
 from okx_signal_system.data.loader import SymbolData, closed_bars, load_all_symbols
 from okx_signal_system.ml.shadow_trading import ShadowTradingLedger
@@ -301,10 +301,11 @@ def _combine_trade_summaries(
     usable = [frame for frame in frames if frame is not None and not frame.empty]
     initial_equity = initial_equity_per_symbol * max(1, symbol_count)
     if not usable:
-        return summarize_trades(pd.DataFrame(), initial_equity=initial_equity)
+        raise ValueError("no valid backtest rows for daily learning summary")
     combined = pd.concat(usable, ignore_index=True)
     if "exit_time" in combined.columns:
         combined = combined.sort_values("exit_time").reset_index(drop=True)
+    validate_backtest_result(combined, context="daily_learning_summary")
     return summarize_trades(combined, initial_equity=initial_equity)
 
 
@@ -353,22 +354,39 @@ def _evaluate_params(
             rows.append({"symbol": symbol_data.inst_id, "status": "skipped_bad_train_valid_order", "rows": len(frame)})
             continue
 
-        train = run_backtest(
-            train_frame,
-            inst_id=symbol_data.inst_id,
-            params=params,
-            signal_timeframe=signal_timeframe,
-            trend_timeframe=trend_timeframe,
-            min_vote_approval_rate=min_vote_approval_rate,
-        )
-        valid = run_backtest(
-            valid_frame,
-            inst_id=symbol_data.inst_id,
-            params=params,
-            signal_timeframe=signal_timeframe,
-            trend_timeframe=trend_timeframe,
-            min_vote_approval_rate=min_vote_approval_rate,
-        )
+        try:
+            train = validate_backtest_result(
+                run_backtest(
+                    train_frame,
+                    inst_id=symbol_data.inst_id,
+                    params=params,
+                    signal_timeframe=signal_timeframe,
+                    trend_timeframe=trend_timeframe,
+                    min_vote_approval_rate=min_vote_approval_rate,
+                ),
+                context=f"{symbol_data.inst_id} train",
+            )
+            valid = validate_backtest_result(
+                run_backtest(
+                    valid_frame,
+                    inst_id=symbol_data.inst_id,
+                    params=params,
+                    signal_timeframe=signal_timeframe,
+                    trend_timeframe=trend_timeframe,
+                    min_vote_approval_rate=min_vote_approval_rate,
+                ),
+                context=f"{symbol_data.inst_id} validation",
+            )
+        except ValueError as exc:
+            rows.append(
+                {
+                    "symbol": symbol_data.inst_id,
+                    "status": "skipped_invalid_backtest",
+                    "rows": len(frame),
+                    "reason": str(exc),
+                }
+            )
+            continue
         train_trades.append(train)
         valid_trades.append(valid)
         valid_summary = summarize_trades(valid)
@@ -387,9 +405,19 @@ def _evaluate_params(
             }
         )
 
+    try:
+        train_summary = _combine_trade_summaries(train_trades, symbol_count=len(symbols))
+        valid_summary = _combine_trade_summaries(valid_trades, symbol_count=len(symbols))
+    except ValueError as exc:
+        train_summary = summarize_trades(pd.DataFrame())
+        valid_summary = summarize_trades(pd.DataFrame())
+        train_summary["status"] = "failed_no_valid_backtest"
+        valid_summary["status"] = "failed_no_valid_backtest"
+        rows.append({"status": "skipped_invalid_backtest", "reason": str(exc)})
+
     return {
-        "train_summary": _combine_trade_summaries(train_trades, symbol_count=len(symbols)),
-        "valid_summary": _combine_trade_summaries(valid_trades, symbol_count=len(symbols)),
+        "train_summary": train_summary,
+        "valid_summary": valid_summary,
         "symbol_results": rows,
         "symbols_evaluated": sum(1 for row in rows if row.get("status") == "evaluated"),
         "train_valid_order_ok": order_ok,

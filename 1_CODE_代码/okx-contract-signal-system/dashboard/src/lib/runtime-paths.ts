@@ -1,47 +1,49 @@
-import { readFileSync } from "node:fs";
 import path from "node:path";
-import { parse as parseYaml } from "yaml";
 
 export function pythonPath() {
-  return (
-    process.env.OKX_DASHBOARD_PYTHON ??
-    "D:\\JIAOYI-CX\\LOCAL_DEPS\\venv\\Scripts\\python.exe"
-  );
+  return process.env.OKX_DASHBOARD_PYTHON ?? process.env.PYTHON ?? "python";
 }
 
-export function historyDir(timeframe = "15m") {
+function datasetName(timeframe: string) {
+  return `okx_${timeframe}_extended`;
+}
+
+function datasetUnderDataRoot(dataRoot: string, dataset: string) {
+  if (path.basename(dataRoot) === dataset) {
+    return dataRoot;
+  }
+  if (path.basename(dataRoot) === "lightweight_history") {
+    return path.join(dataRoot, dataset);
+  }
+  return path.join(dataRoot, "lightweight_history", dataset);
+}
+
+function explicitHistoryDir(timeframe = "15m") {
   if (process.env.OKX_HISTORY_DIR) {
     return process.env.OKX_HISTORY_DIR;
   }
-
-  const base =
-    process.env.OKX_HISTORY_BASE ?? process.env.JIAOYI_DATA_DIR ?? configDataRoot();
-  if (!base) {
-    throw new Error(
-      "Set OKX_HISTORY_DIR, OKX_HISTORY_BASE, JIAOYI_DATA_DIR, or data.root_dir",
-    );
+  if (process.env.OKX_HISTORY_BASE) {
+    return datasetUnderDataRoot(process.env.OKX_HISTORY_BASE, datasetName(timeframe));
   }
-
-  const historyBase =
-    path.basename(base) === "lightweight_history"
-      ? base
-      : path.join(base, "lightweight_history");
-  return path.join(historyBase, `okx_${timeframe}_extended`);
+  return null;
 }
 
-function configDataRoot() {
-  try {
-    const projectRoot = path.resolve(
-      process.env.OKX_SIGNAL_ROOT ?? path.join(process.cwd(), ".."),
+export function historyDir(timeframe = "15m") {
+  const explicitDir = explicitHistoryDir(timeframe);
+  if (!explicitDir) {
+    throw new Error(
+      "No explicit dashboard history directory; let Python resolve JIAOYI_DATA_DIR or config/base.yaml via historyScriptArgs().",
     );
-    const raw = readFileSync(path.join(projectRoot, "config", "base.yaml"), "utf8");
-    const config = parseYaml(raw) as { data?: { root_dir?: unknown } } | null;
-    return typeof config?.data?.root_dir === "string"
-      ? config.data.root_dir
-      : undefined;
-  } catch {
-    return undefined;
   }
+  return explicitDir;
+}
+
+export function historyScriptArgs(timeframe = "15m") {
+  const explicitDir = explicitHistoryDir(timeframe);
+  if (explicitDir) {
+    return ["--history-dir", explicitDir];
+  }
+  return ["--dataset", datasetName(timeframe)];
 }
 
 export function dashboardExecTimeoutMs() {

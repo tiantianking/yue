@@ -5,10 +5,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from okx_signal_system.backtest.runner import summarize_trades
+from okx_signal_system.backtest.runner import summarize_trades, validate_backtest_result
 
 
 def build_markdown_report(trades: pd.DataFrame, *, title: str = "OKX Backtest Report") -> str:
+    trades = validate_backtest_result(trades, context="markdown_report")
     summary = summarize_trades(trades)
     lines = [
         f"# {title}",
@@ -34,5 +35,6 @@ def write_report(trades: pd.DataFrame, output_path: str | Path) -> Path:
 def write_summary_json(trades: pd.DataFrame, output_path: str | Path) -> Path:
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    trades = validate_backtest_result(trades, context="summary_json")
     path.write_text(json.dumps(summarize_trades(trades), indent=2), encoding="utf-8")
     return path

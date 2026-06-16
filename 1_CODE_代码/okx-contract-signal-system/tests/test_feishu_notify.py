@@ -28,11 +28,7 @@ def test_signal_alert_includes_target_rr_without_account_fields(monkeypatch) -> 
         entry_ref=100.0,
         stop_loss=95.0,
         take_profit=117.5,
-        qty=1.0,
-        leverage=3.0,
         risk_reward_ratio=3.5,
-        max_loss_pct=0.01,
-        margin_loss_pct=0.27,
     )
 
     assert ok
@@ -44,6 +40,42 @@ def test_signal_alert_includes_target_rr_without_account_fields(monkeypatch) -> 
     assert "UTC" not in text
     assert "目标盈亏比: 3.50R" in text
     assert "账户止损风险" not in text
+    assert "仓位" not in text
+    assert "杠杆" not in text
+    assert "保证金" not in text
+
+
+def test_signal_alert_signature_is_signal_only() -> None:
+    params = __import__("inspect").signature(feishu.send_signal_alert).parameters
+    assert "qty" not in params
+    assert "leverage" not in params
+    assert "max_loss_pct" not in params
+    assert "margin_loss_pct" not in params
+
+
+def test_legacy_signal_card_wrapper_does_not_emit_account_fields(monkeypatch) -> None:
+    sent: list[str] = []
+
+    def fake_send_text(text: str, *args, **kwargs) -> bool:
+        sent.append(text)
+        return True
+
+    monkeypatch.setattr(feishu, "send_text", fake_send_text)
+
+    ok = feishu.feishu_send_signal_card(
+        inst_id="BTC-USDT-SWAP",
+        direction="long",
+        qty=1.0,
+        leverage=3.0,
+        entry_price=100.0,
+        stop_loss=95.0,
+        take_profit=117.5,
+        reason="BREAKOUT",
+    )
+
+    assert ok
+    text = sent[0]
+    assert "信号类型: 突破信号" in text
     assert "仓位" not in text
     assert "杠杆" not in text
     assert "保证金" not in text
@@ -64,8 +96,6 @@ def test_signal_alert_includes_tier_and_cross_symbol_rank(monkeypatch) -> None:
         entry_ref=100.0,
         stop_loss=95.0,
         take_profit=117.5,
-        qty=1.0,
-        leverage=3.0,
         tier="A",
         rank=1,
         total_candidates=6,
@@ -91,8 +121,6 @@ def test_signal_alert_includes_lifecycle_status(monkeypatch) -> None:
         entry_ref=100.0,
         stop_loss=95.0,
         take_profit=117.5,
-        qty=1.0,
-        leverage=3.0,
         lifecycle_status="TRIGGERED",
         invalidation_price=95.0,
         kline_time="2026-06-16T00:00:00+00:00",
