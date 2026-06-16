@@ -119,3 +119,16 @@
 ### Notes
 - Modified files: `tests/_integration.py` adds the shared historical data skip helper; `tests/test_backtest.py`, `tests/test_data_layer.py`, `tests/test_features.py`, `tests/test_reporting_signal.py`, and `tests/test_strict_research.py` mark local-history tests as integration and call the skip helper; `pyproject.toml` registers the `integration` marker; `.gitignore`, `.gitattributes`, and `MANIFEST.in` exclude local runtime artifacts from source tracking guidance and formal release outputs; `docs/RELEASE_SAFETY.md` documents the runtime-artifact exclusion rule; `tests/test_release_safety.py` verifies the release exclusion rules and formal realtime API surface; `progress.md` records this round.
 - Rollback: revert the files listed above to the previous git diff state and remove this appended progress entry; for release packaging only, remove `.gitattributes` and `MANIFEST.in` and restore the previous `.gitignore` patterns.
+
+## 2026-06-16 - Task: v3.42 user-visible time sync and release display alignment
+### What was done
+- Synchronized the release-facing version display to v3.42 across the launcher, GUI, package metadata, and architecture boundary note.
+- Aligned GUI signal rows, Streamlit signal views, scheduler summaries, and Feishu signal/status cards to show北京时间 for user-visible timestamps while keeping internal UTC handling unchanged.
+- Added regression coverage for the Beijing-time presentation on the desktop UI and notification paths.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m compileall gui.py src\okx_signal_system\notify\feishu.py src\okx_signal_system\scheduler.py src\okx_signal_system\signal_service\app.py tests\test_desktop_runtime.py tests\test_feishu_notify.py tests\test_panel_view.py` -> passed.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests/test_desktop_runtime.py tests/test_feishu_notify.py tests/test_panel_view.py -q` -> passed.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest -q` -> passed with `18 skipped` historical-data integration tests.
+### Notes
+- Modified files: `gui.py` now shows Beijing time in the signal table and top-right clock; `src/okx_signal_system/notify/feishu.py` standardizes visible notification times; `src/okx_signal_system/scheduler.py` shows Beijing time in summaries; `src/okx_signal_system/signal_service/app.py` renders the current signal time in Beijing time; `docs/SYSTEM_ARCHITECTURE.md` documents the display rule; `tests/test_desktop_runtime.py`, `tests/test_feishu_notify.py`, and `tests/test_panel_view.py` lock in the behavior; `progress.md` records this round.
+- Rollback: revert the listed files to the previous git diff state and remove this appended progress entry.

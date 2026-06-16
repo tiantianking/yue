@@ -13,7 +13,7 @@ import socket
 import subprocess
 import webbrowser
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sys
 import os
@@ -27,10 +27,11 @@ if str(_src_path) not in sys.path:
 
 log = logging.getLogger(__name__)
 
-APP_VERSION = "v3.41"
+APP_VERSION = "v3.42"
 DASHBOARD_HOST = "127.0.0.1"
 DASHBOARD_PORT = 3001
 DASHBOARD_URL = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}"
+BEIJING_TZ = timezone(timedelta(hours=8), "Asia/Shanghai")
 
 
 COLORS = {
@@ -46,6 +47,21 @@ COLORS = {
     "danger": "#ef4444",
     "input": "#0b1220",
 }
+
+
+def _format_beijing_time(value, fmt: str = "%Y-%m-%d %H:%M") -> str:
+    if isinstance(value, datetime):
+        ts = value
+    elif hasattr(value, "to_pydatetime"):
+        ts = value.to_pydatetime()
+    else:
+        text = str(value)
+        if text.endswith("Z"):
+            text = f"{text[:-1]}+00:00"
+        ts = datetime.fromisoformat(text)
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(BEIJING_TZ).strftime(fmt)
 
 
 def get_resource_path(relative_path):
@@ -710,14 +726,14 @@ class OKXSignalGUI:
         self.signal_tree = ttk.Treeview(signal_frame, columns=columns, show='headings', height=10)
         
         # 设置列标题
-        self.signal_tree.heading('time', text='时间')
+        self.signal_tree.heading('time', text='信号生成时间')
         self.signal_tree.heading('symbol', text='币种')
         self.signal_tree.heading('type', text='信号类型')
         self.signal_tree.heading('price', text='价格')
         self.signal_tree.heading('confidence', text='置信度')
         
         # 设置列宽
-        self.signal_tree.column('time', width=150)
+        self.signal_tree.column('time', width=240)
         self.signal_tree.column('symbol', width=150)
         self.signal_tree.column('type', width=100)
         self.signal_tree.column('price', width=100)
@@ -1188,9 +1204,13 @@ class OKXSignalGUI:
             for candidate in ready_candidates:
                 signal = candidate.signal
                 decision = candidate.decision
-                detect_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')
-                kline_time = signal.ts.strftime('%Y-%m-%d %H:%M') if hasattr(signal.ts, 'strftime') else str(signal.ts)
-                ts_str = detect_time if kline_time == detect_time else f"{detect_time} (Kline {kline_time})"
+                detect_time = _format_beijing_time(datetime.now(timezone.utc))
+                kline_time = _format_beijing_time(signal.ts)
+                ts_str = (
+                    f"{detect_time} 北京时间"
+                    if kline_time == detect_time
+                    else f"{detect_time} 北京时间 (K线 {kline_time} 北京时间)"
+                )
                 rr_text = f"{decision.risk_reward_ratio:.1f}:1" if decision.risk_reward_ratio else ""
                 self.message_queue.put(('signal', {
                     'time': ts_str,
@@ -1230,7 +1250,7 @@ class OKXSignalGUI:
                         tp_reason=decision.tp_reason,
                         max_loss_pct=decision.max_position_loss_pct,
                         margin_loss_pct=decision.margin_loss_pct,
-                        kline_time=signal.ts.strftime('%Y-%m-%d %H:%M') if hasattr(signal.ts, 'strftime') else str(signal.ts),
+                        kline_time=signal.ts.isoformat() if hasattr(signal.ts, 'isoformat') else str(signal.ts),
                         signal_timeframe=self.api.timeframe.key,
                         trend_timeframe=self.api.trend_timeframe.key,
                         tier=candidate.tier,
@@ -1409,7 +1429,7 @@ class OKXSignalGUI:
     
     def update_time(self):
         """更新时间显示"""
-        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        current_time = f"{datetime.now(BEIJING_TZ).strftime('%Y-%m-%d %H:%M:%S')} 北京时间"
         self.time_label.config(text=current_time)
         
         # 1秒后再次调用

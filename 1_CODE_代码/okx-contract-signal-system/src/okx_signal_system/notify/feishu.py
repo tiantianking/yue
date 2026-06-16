@@ -8,6 +8,8 @@ from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
 
+import pandas as pd
+
 log = logging.getLogger(__name__)
 
 FEISHU_WEBHOOK_URL = os.environ.get("FEISHU_WEBHOOK_URL", "")
@@ -16,6 +18,17 @@ FEISHU_WEBHOOK = FEISHU_WEBHOOK_URL
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _format_beijing_time(value: Any) -> str:
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    return ts.tz_convert("Asia/Shanghai").strftime("%Y-%m-%d %H:%M:%S 北京时间")
+
+
+def _now_beijing_text() -> str:
+    return _format_beijing_time(_now_utc())
 
 
 def _entry_type_from_reason(reason: str) -> str:
@@ -119,7 +132,7 @@ def send_signal_alert(
     title = f"OKX {tier}级信号观察" if tier else "OKX 信号观察"
     lines = [
         title,
-        f"时间: {_now_utc():%Y-%m-%d %H:%M:%S} UTC",
+        f"信号生成时间: {_now_beijing_text()}",
         f"币种: {inst_id}",
         f"方向: {'做多' if direction == 'LONG' else '做空'}",
         f"入场: {entry_ref:.8f}",
@@ -137,7 +150,7 @@ def send_signal_alert(
     if invalidation_price is not None:
         lines.append(f"invalidation_price: {invalidation_price:.8f}")
     if kline_time:
-        lines.append(f"K线时间: {kline_time}")
+        lines.append(f"K线时间: {_format_beijing_time(kline_time)}")
     if signal_timeframe:
         lines.append(f"信号周期: {signal_timeframe}")
     if trend_timeframe:
@@ -188,9 +201,7 @@ def _candidate_health_value(candidate: Any, name: str, default: Any = None) -> A
 def _format_candidate_time(value: Any) -> str:
     if value is None:
         return "-"
-    if hasattr(value, "isoformat"):
-        return str(value.isoformat())
-    return str(value)
+    return _format_beijing_time(value)
 
 
 def send_b_tier_summary(
@@ -210,7 +221,7 @@ def send_b_tier_summary(
     candle_text = _format_candidate_time(candle_time)
     lines = [
         "OKX B-tier candidate summary",
-        f"time: {_now_utc():%Y-%m-%d %H:%M:%S} UTC",
+        f"time: {_now_beijing_text()}",
         f"candle_time: {candle_text}",
         f"B-tier candidates: {len(candidates)}",
         "note: these are not immediate A-tier alerts; review only.",
@@ -269,7 +280,7 @@ def send_close_notification(
 ) -> bool:
     lines = [
         "OKX signal lifecycle update",
-        f"time: {_now_utc():%Y-%m-%d %H:%M:%S} UTC",
+        f"time: {_now_beijing_text()}",
         f"symbol: {inst_id}",
         f"side: {side}",
         f"reason: {exit_reason}",
@@ -297,7 +308,7 @@ def send_status_report(
 ) -> bool:
     lines = [
         "OKX system status",
-        f"time: {_now_utc():%Y-%m-%d %H:%M:%S} UTC",
+        f"time: {_now_beijing_text()}",
         f"cycle: {cycle_count}",
         "mode: SIGNAL_ONLY",
         f"status: {status}",
@@ -321,7 +332,7 @@ def send_candidate_health_report(
     params = selected_params or {}
     lines = [
         "OKX 候选体检",
-        f"时间: {_now_utc():%Y-%m-%d %H:%M:%S} UTC",
+        f"时间: {_now_beijing_text()}",
         "说明: 这不是正式信号，只是告诉你这一轮哪些币种更接近观察阈值。",
         f"结论: {'允许推送' if push_allowed else '暂不推送'}",
         f"已检查: {total} 个币种",

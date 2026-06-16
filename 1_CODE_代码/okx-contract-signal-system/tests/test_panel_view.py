@@ -23,6 +23,7 @@ def test_signal_view_model_turns_json_into_human_result() -> None:
     assert view["headline"] == "暂无正式信号"
     assert "价格还没有突破入场线" in view["reasons"]
     assert view["signal_mode"] == "SIGNAL_ONLY"
+    assert view["signal_time"] == "2026-06-10 13:00:00 北京时间"
 
 
 def test_readable_trades_renames_columns():

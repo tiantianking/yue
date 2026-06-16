@@ -39,6 +39,9 @@ def test_signal_alert_includes_target_rr_without_account_fields(monkeypatch) -> 
     assert sent
     text = sent[0]
     assert "OKX 信号观察" in text
+    assert "信号生成时间:" in text
+    assert "北京时间" in text
+    assert "UTC" not in text
     assert "目标盈亏比: 3.50R" in text
     assert "账户止损风险" not in text
     assert "仓位" not in text
@@ -92,11 +95,13 @@ def test_signal_alert_includes_lifecycle_status(monkeypatch) -> None:
         leverage=3.0,
         lifecycle_status="TRIGGERED",
         invalidation_price=95.0,
+        kline_time="2026-06-16T00:00:00+00:00",
     )
 
     assert ok
     assert "signal_status: TRIGGERED" in sent[0]
     assert "invalidation_price: 95.00000000" in sent[0]
+    assert "K线时间: 2026-06-16 08:00:00 北京时间" in sent[0]
 
 
 def test_candidate_health_report_is_not_a_trade_signal(monkeypatch) -> None:
@@ -193,9 +198,29 @@ def test_b_tier_summary_text_is_understandable(monkeypatch) -> None:
     assert ok
     text = sent[0]
     assert "OKX B-tier candidate summary" in text
+    assert "time: " in text
+    assert "北京时间" in text
+    assert "UTC" not in text
+    assert "candle_time: 2026-06-16 08:00:00 北京时间" in text
     assert "B-tier candidates: 1" in text
     assert "not immediate A-tier alerts" in text
     assert "#3 ETH-USDT-SWAP long score=7.1 rr=3.50R reason=correlation_group_demoted" in text
+
+
+def test_status_and_health_reports_use_beijing_time(monkeypatch) -> None:
+    sent: list[str] = []
+
+    def fake_send_text(text: str, *args, **kwargs) -> bool:
+        sent.append(text)
+        return True
+
+    monkeypatch.setattr(feishu, "send_text", fake_send_text)
+
+    assert feishu.send_status_report(cycle_count=3, status="healthy", last_signal_count=1)
+    assert feishu.send_candidate_health_report(items=[], push_allowed=True)
+
+    assert all("北京时间" in text for text in sent)
+    assert all("UTC" not in text for text in sent)
 
 
 def test_b_tier_summary_is_not_sent_without_candidates(monkeypatch) -> None:

@@ -5,7 +5,7 @@ OKX 合约信号系统 - 24小时自动调度器
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from threading import Event
 
 import pandas as pd
@@ -26,6 +26,8 @@ from okx_signal_system.timeframe import timeframe_spec
 
 log = logging.getLogger(__name__)
 
+BEIJING_TZ = timezone(timedelta(hours=8), "Asia/Shanghai")
+
 SCAN_INTERVAL_SECONDS = 15 * 60  # 15分钟
 STATUS_INTERVAL_SECONDS = 30 * 60  # 30分钟状态推送
 GLOBAL_INITIAL_EQUITY = 10000.0  # 兼容历史风险配置；正式输出不展示账户资金
@@ -36,6 +38,10 @@ DEFAULT_TREND_TIMEFRAME = "1h"
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _now_beijing() -> datetime:
+    return datetime.now(BEIJING_TZ)
 
 
 def _data_defaults() -> tuple[str, str, str]:
@@ -169,7 +175,7 @@ def format_signal_summary(signals: list[dict]) -> str:
     """格式化信号摘要用于推送"""
     if not signals:
         return "无信号"
-    lines = [f"📊 扫描时间: {_now_utc().strftime('%Y-%m-%d %H:%M:%S')} UTC"]
+    lines = [f"📊 扫描时间: {_now_beijing().strftime('%Y-%m-%d %H:%M:%S')} 北京时间"]
     lines.append(f"有效信号数: {len(signals)}")
     for s in signals:
         d = s["decision"]
@@ -190,7 +196,7 @@ def format_status_message(ledger: Ledger, cycle_count: int) -> str:
     """格式化状态消息"""
     return (
         f"🔔 系统状态报告\n"
-        f"时间: {_now_utc().strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
+        f"时间: {_now_beijing().strftime('%Y-%m-%d %H:%M:%S')} 北京时间\n"
         f"扫描周期: #{cycle_count}\n"
         f"模式: SIGNAL_ONLY\n"
         f"状态: {ledger.status}\n"

@@ -43,6 +43,15 @@ def money(value: Any) -> str:
         return "-"
 
 
+def _format_beijing_time(value: Any) -> str:
+    if value in (None, "", "-"):
+        return "-"
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    return ts.tz_convert("Asia/Shanghai").strftime("%Y-%m-%d %H:%M:%S 北京时间")
+
+
 def signal_view_model(payload: dict[str, Any]) -> dict[str, Any]:
     signal = payload.get("signal", {})
     risk = payload.get("risk", {})
@@ -70,7 +79,7 @@ def signal_view_model(payload: dict[str, Any]) -> dict[str, Any]:
         "tone": tone,
         "side": SIDE_LABELS.get(side, side),
         "inst_id": signal.get("inst_id", "-"),
-        "signal_time": signal.get("ts", "-"),
+        "signal_time": _format_beijing_time(signal.get("ts", "-")),
         "entry_ref": money(signal.get("entry_ref")),
         "stop_loss": money(signal.get("stop_loss")),
         "take_profit": money(signal.get("take_profit")),
@@ -124,11 +133,12 @@ def render_signal(payload: dict[str, Any]) -> None:
         st.warning(view["headline"])
     st.caption(view["action"])
 
-    cols = st.columns(4)
+    cols = st.columns(5)
     cols[0].metric("合约", view["inst_id"])
     cols[1].metric("方向", view["side"])
     cols[2].metric("系统模式", view["signal_mode"])
     cols[3].metric("评分", view["score"])
+    cols[4].metric("信号生成时间", view["signal_time"])
 
     price_cols = st.columns(4)
     price_cols[0].metric("参考入场", view["entry_ref"])
