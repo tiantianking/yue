@@ -12,7 +12,7 @@ from okx_signal_system.config import project_paths
 SIDE_LABELS = {
     "long": "做多",
     "short": "做空",
-    "flat": "不交易",
+    "flat": "无正式信号",
 }
 
 REASON_LABELS = {
@@ -56,10 +56,10 @@ def signal_view_model(payload: dict[str, Any]) -> dict[str, Any]:
 
     if accepted:
         headline = f"有信号：{SIDE_LABELS.get(side, side)}"
-        action = "只做人工确认，不会自动下单。"
+        action = "只做人工确认，不会自动执行。"
         tone = "success"
     else:
-        headline = "现在不交易"
+        headline = "暂无正式信号"
         tf = payload.get("signal_timeframe") or signal.get("signal_timeframe") or "15m"
         action = f"等待下一根已闭合 {tf} K 线。"
         tone = "warning"
@@ -81,7 +81,7 @@ def signal_view_model(payload: dict[str, Any]) -> dict[str, Any]:
         "margin_mode": "逐仓" if risk.get("margin_mode") == "isolated" else risk.get("margin_mode", "-"),
         "position_mode": "单向" if risk.get("position_mode") == "net_mode" else risk.get("position_mode", "-"),
         "reasons": sorted(set(readable_reasons)) or ["无"],
-        "live_order": "关闭" if not payload.get("live_order_enabled") else "开启",
+        "signal_mode": "SIGNAL_ONLY" if not payload.get("live_order_enabled") else "执行字段异常",
     }
 
 
@@ -103,17 +103,17 @@ def readable_trades(trades: pd.DataFrame) -> pd.DataFrame:
         "side": "方向",
         "entry_price": "开仓价",
         "exit_price": "平仓价",
-        "qty": "数量",
+        "qty": "样本数量",
         "gross_pnl": "毛盈亏",
         "costs": "费用",
         "net_pnl": "净盈亏",
         "exit_reason": "平仓原因",
-        "leverage_cap": "杠杆上限",
+        "leverage_cap": "风险上限",
     }
     table["side"] = table["side"].map(side_map).fillna(table["side"])
     keep = [col for col in rename if col in table.columns]
     table = table[keep].rename(columns=rename)
-    for col in ["开仓价", "平仓价", "数量", "毛盈亏", "费用", "净盈亏"]:
+    for col in ["开仓价", "平仓价", "样本数量", "毛盈亏", "费用", "净盈亏"]:
         if col in table.columns:
             table[col] = table[col].map(money)
     return table
@@ -132,19 +132,19 @@ def render_signal(payload: dict[str, Any]) -> None:
     cols = st.columns(4)
     cols[0].metric("合约", view["inst_id"])
     cols[1].metric("方向", view["side"])
-    cols[2].metric("实盘下单", view["live_order"])
-    cols[3].metric("杠杆上限", f"{view['leverage_cap']}x")
+    cols[2].metric("系统模式", view["signal_mode"])
+    cols[3].metric("风险参考", view["leverage_cap"])
 
     price_cols = st.columns(4)
     price_cols[0].metric("参考入场", view["entry_ref"])
     price_cols[1].metric("止损", view["stop_loss"])
     price_cols[2].metric("止盈", view["take_profit"])
-    price_cols[3].metric("最长持仓", view["max_hold_bars"])
+    price_cols[3].metric("最长观察K线", view["max_hold_bars"])
 
     risk_cols = st.columns(3)
-    risk_cols[0].metric("建议数量", view["qty"])
+    risk_cols[0].metric("样本数量", view["qty"])
     risk_cols[1].metric("本笔风险额", view["risk_amount"])
-    risk_cols[2].metric("保证金 / 仓位", f"{view['margin_mode']} / {view['position_mode']}")
+    risk_cols[2].metric("风险模式", f"{view['margin_mode']} / {view['position_mode']}")
 
     st.write("原因：")
     for reason in view["reasons"]:
@@ -154,10 +154,10 @@ def render_signal(payload: dict[str, Any]) -> None:
 def main() -> None:
     import streamlit as st
 
-    st.set_page_config(page_title="OKX 半自动信号面板", layout="wide")
+    st.set_page_config(page_title="OKX 信号观察面板", layout="wide")
     paths = project_paths()
-    st.title("OKX 半自动信号面板")
-    st.caption("本地研究与人工确认；默认不会自动实盘下单。")
+    st.title("OKX 信号观察面板")
+    st.caption("本地研究与人工确认；默认不会自动执行。")
 
     summary_path = paths.output_dir / "sample_summary.json"
     trades_path = paths.output_dir / "sample_trades.csv"
@@ -165,7 +165,7 @@ def main() -> None:
 
     summary = load_json(summary_path) or {}
     cols = st.columns(5)
-    cols[0].metric("交易次数", summary.get("total_trades", 0))
+    cols[0].metric("历史样本数", summary.get("total_trades", 0))
     cols[1].metric("胜率", pct(summary.get("win_rate")))
     cols[2].metric("总收益", pct(summary.get("total_return")))
     cols[3].metric("盈亏比", money(summary.get("payoff_ratio")))
@@ -178,12 +178,12 @@ def main() -> None:
     else:
         st.info("还没有生成最新信号。")
 
-    st.subheader("最近交易")
+    st.subheader("最近历史样本")
     if trades_path.exists():
         trades = pd.read_csv(trades_path)
         st.dataframe(readable_trades(trades), use_container_width=True, hide_index=True)
     else:
-        st.info("还没有交易明细。")
+        st.info("还没有历史样本明细。")
 
     with st.expander("技术详情"):
         if payload:

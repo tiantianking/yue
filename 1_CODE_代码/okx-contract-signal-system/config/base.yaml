@@ -2,9 +2,10 @@ project:
   name: okx-contract-signal-system
   timezone: UTC
   exchange: OKX
-  mode: research
+  mode: SIGNAL_ONLY
 
 data:
+  read_only: true
   root_dir: D:/JIAOYI-CX/历史数据_保留
   historical_dataset: okx_15m_extended
   timeframe: 15m

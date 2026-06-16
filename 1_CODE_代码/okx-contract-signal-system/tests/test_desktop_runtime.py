@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 import inspect
 import asyncio
+from pathlib import Path
 
 from okx_signal_system.exchange.position_monitor import (
     AutoStopMonitor,
@@ -212,47 +213,37 @@ def test_manual_confirmation_auto_stop_trigger_does_not_close_live_order(monkeyp
     assert results[0].exit_reason == "stop_loss"
 
 
-def test_realtime_place_order_preserves_reduce_only(monkeypatch) -> None:
+def test_realtime_runtime_api_is_signal_only() -> None:
     from okx_signal_system.exchange import realtime
 
-    captured = []
-
-    def fake_place_order(params):
-        captured.append(params)
-        return {"ordId": "ord-1", "fillSz": "1", "avgPx": "100"}
-
-    monkeypatch.setattr(realtime, "place_order", fake_place_order)
     api = realtime.OKXRealtimeAPI({})
-    api._connected = True
 
-    asyncio.run(
-        api.place_order(
-            realtime.OrderRequest(
-                inst_id="BTC-USDT-SWAP",
-                side="close_long",
-                size=1.0,
-                reduce_only=True,
-            )
-        )
+    assert not hasattr(api, "place_order")
+    assert not hasattr(api, "cancel_order")
+    assert not hasattr(api, "get_positions")
+    assert not hasattr(api, "get_account_balance")
+    assert hasattr(api, "get_market_data")
+    assert hasattr(api, "get_candles")
+
+
+def test_realtime_runtime_does_not_import_execution_functions() -> None:
+    source = (Path(__file__).parents[1] / "src" / "okx_signal_system" / "exchange" / "realtime.py").read_text(
+        encoding="utf-8"
     )
 
-    assert captured
-    assert captured[0].reduce_only is True
+    assert "close_position" not in source
+    assert "get_account_positions" not in source
+    assert "get_account_balance" not in source
+    assert "from okx_signal_system.exchange.okx import place_order" not in source
 
 
 def test_live_signal_monitor_auto_close_disabled_by_default(monkeypatch) -> None:
     from okx_signal_system.exchange import realtime
 
-    calls = []
-
     class FakeApi:
         def __init__(self):
-            self.config = {"execution": {"live_order_enabled": False}}
+            self.config = {"execution": {"auto_close_enabled": True, "live_order_enabled": True}}
             self.timeframe = type("Timeframe", (), {"hours": 0.25})()
-
-        async def place_order(self, order):  # pragma: no cover - should not be called
-            calls.append(order)
-            return None
 
     monitor = realtime.LiveSignalMonitor(FakeApi())
     position = realtime.Position(
@@ -286,7 +277,7 @@ def test_live_signal_monitor_auto_close_disabled_by_default(monkeypatch) -> None
     )
     asyncio.run(monitor._check_hold_timeout(position, market))
 
-    assert calls == []
+    assert monitor._auto_close_enabled is False
 
 
 def test_ensemble_vote_returns_bounded_score() -> None:

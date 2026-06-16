@@ -262,7 +262,7 @@ class SignalScheduler:
         if self._cycle % 2 == 0:
             feishu.feishu_send_status_card(
                 equity=self._ledger.equity,
-                open_positions=self._ledger.open_positions,
+                tracked_items=self._ledger.open_positions,
                 status=self._ledger.status,
                 loss_streak=self._ledger.loss_streak,
                 max_drawdown=self._ledger.max_drawdown,

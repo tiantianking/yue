@@ -8,3 +8,5 @@ outputs/candidate_params.json
 outputs/latest_signal.json
 outputs/latest_scan_status.json
 outputs/startup_quality_gate.json
+outputs/pushed_signals.sqlite3
+outputs/signal_lifecycle.json

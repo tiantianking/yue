@@ -57,10 +57,10 @@ def breakout_gap_pct(row: pd.Series | None) -> float | None:
     return None
 
 
-def candidate_rank_score(*, final_score: float, decision: RiskDecision, shadow_adjustment: float = 0.0) -> float:
+def candidate_rank_score(*, final_score: float, decision: RiskDecision) -> float:
     rr = float(decision.risk_reward_ratio or 0.0)
     leverage = float(decision.leverage_used or 0.0)
-    return float(final_score) + min(rr, 8.0) * 0.15 + float(shadow_adjustment or 0.0) - max(0.0, leverage - 5.0) * 0.05
+    return float(final_score) + min(rr, 8.0) * 0.15 - max(0.0, leverage - 5.0) * 0.05
 
 
 @dataclass(frozen=True)
@@ -123,6 +123,7 @@ class SignalScanService:
         cycle_health: list[dict[str, Any]] = []
         ready_candidates: list[SignalCandidate] = []
         candidate_history: dict[str, pd.DataFrame] = {}
+        completed_checked_bars: dict[str, str] = {}
 
         for symbol in symbols:
             inst_id = str(symbol)
@@ -198,140 +199,152 @@ class SignalScanService:
             if pd.isna(latest_row.get("atr")) or pd.isna(latest_row.get("breakout_high")):
                 cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="invalid_features", row=latest_row))
                 continue
-            if checked_bar_ts is not None and context.checked_bars is not None:
-                context.checked_bars[inst_id] = checked_bar_ts
 
-            regime, _adaptive_params = self._regime_mgr.update_regime(features)
-            signal = build_signal(
-                latest_row,
-                inst_id=inst_id,
-                params=context.strategy_params,
-                frame=features,
-                idx=len(features) - 1,
-            )
-            if not signal.accepted:
+            try:
+                regime, _adaptive_params = self._regime_mgr.update_regime(features)
+                signal = build_signal(
+                    latest_row,
+                    inst_id=inst_id,
+                    params=context.strategy_params,
+                    frame=features,
+                    idx=len(features) - 1,
+                )
+                if not signal.accepted:
+                    cycle_health.append(
+                        self._candidate_health_item(
+                            inst_id=inst_id,
+                            reason=signal.reject_reason or "signal_rejected",
+                            row=latest_row,
+                            signal=signal,
+                            regime=regime,
+                        )
+                    )
+                    if checked_bar_ts is not None:
+                        completed_checked_bars[inst_id] = checked_bar_ts
+                    continue
+
+                ensemble_result = ensemble_vote(
+                    latest_row,
+                    context.strategy_params,
+                    features,
+                    len(features) - 1,
+                    base_score=signal.signal_score or 5.0,
+                    base_signal=signal,
+                )
+                effective_score = ensemble_result.final_score
+                vote_ok = vote_gate_passed(
+                    ensemble_result.final_side,
+                    signal.side,
+                    ensemble_result.approval_rate,
+                    context.min_vote_approval_rate,
+                )
+                if ensemble_result.final_side == "flat":
+                    effective_score = max(1.0, effective_score - 3.0)
+                elif ensemble_result.final_side != signal.side:
+                    effective_score = max(1.0, effective_score - 1.5)
+                penalty = self._regime_mgr.get_score_penalty()
+                if penalty < 0:
+                    effective_score = max(1.0, effective_score + penalty)
+                shadow_adjustment = self._shadow_adjustment(
+                    inst_id,
+                    signal.side,
+                    min_closed=context.shadow_score_min_closed,
+                )
+                if shadow_adjustment:
+                    effective_score = max(1.0, min(10.0, effective_score + shadow_adjustment))
+                quality_model = self._quality_model_scorer().score(signal, features).as_dict()
+
+                signal = replace(signal, signal_score=effective_score)
+                risk_cfg = replace(
+                    context.risk_config,
+                    max_leverage=max(1.0, min(10.0, context.risk_config.max_leverage * self._regime_mgr.get_leverage_factor())),
+                )
+                decision = validate_signal(signal, apply_halt_policy(context.ledger, context.risk_config), risk_cfg)
+                would_push = bool(
+                    decision.accepted
+                    and effective_score >= context.risk_config.min_signal_score
+                    and context.quality_gate_allows_push
+                    and vote_ok
+                )
+                health_reason = self._health_reason(
+                    ensemble_side=ensemble_result.final_side,
+                    signal_side=signal.side,
+                    approval_rate=ensemble_result.approval_rate,
+                    min_vote_rate=context.min_vote_approval_rate,
+                    would_push=would_push,
+                    quality_gate_allows_push=context.quality_gate_allows_push,
+                    decision=decision,
+                    effective_score=effective_score,
+                    min_signal_score=context.risk_config.min_signal_score,
+                )
+                health_item = self._candidate_health_item(
+                    inst_id=inst_id,
+                    reason=health_reason,
+                    row=latest_row,
+                    signal=signal,
+                    regime=regime,
+                    final_score=effective_score,
+                    risk_reason=decision.reason,
+                    shadow_adjustment=shadow_adjustment,
+                    quality_model=quality_model,
+                    would_push=would_push,
+                )
+                cycle_health.append(health_item)
+
+                if would_push:
+                    notify_key = self._notify_key(signal)
+                    payload = {
+                        "signal": asdict(signal),
+                        "risk": asdict(decision),
+                        "live_order_enabled": False,
+                        "mode": context.mode,
+                        "dataset": context.dataset,
+                        "signal_timeframe": context.signal_timeframe,
+                        "trend_timeframe": context.trend_timeframe,
+                        "selected_params": asdict(context.strategy_params),
+                        "quality_model": quality_model,
+                    }
+                    if self._lifecycle_store is not None:
+                        lifecycle_record = self._lifecycle_store.record_signal(
+                            signal,
+                            signal_id=notify_key,
+                            invalidation_price=signal.stop_loss,
+                            signal_timeframe=context.signal_timeframe,
+                            trend_timeframe=context.trend_timeframe,
+                        )
+                        if lifecycle_record is not None:
+                            lifecycle = lifecycle_payload(lifecycle_record)
+                            payload["signal"]["invalidation_price"] = lifecycle_record.invalidation_price
+                            payload["lifecycle"] = lifecycle
+                            health_item["invalidation_price"] = lifecycle_record.invalidation_price
+                            health_item["lifecycle_status"] = lifecycle_record.status
+                            health_item["lifecycle"] = lifecycle
+                    ready_candidates.append(
+                        SignalCandidate(
+                            signal=signal,
+                            decision=decision,
+                            notify_key=notify_key,
+                            payload=payload,
+                            health_item=health_item,
+                            rank_score=candidate_rank_score(
+                                final_score=effective_score,
+                                decision=decision,
+                            ),
+                            raw_score=effective_score,
+                        )
+                    )
+            except Exception as exc:
                 cycle_health.append(
                     self._candidate_health_item(
                         inst_id=inst_id,
-                        reason=signal.reject_reason or "signal_rejected",
+                        reason="scan_error",
                         row=latest_row,
-                        signal=signal,
-                        regime=regime,
+                        risk_reason=str(exc),
                     )
                 )
                 continue
-
-            ensemble_result = ensemble_vote(
-                latest_row,
-                context.strategy_params,
-                features,
-                len(features) - 1,
-                base_score=signal.signal_score or 5.0,
-                base_signal=signal,
-            )
-            effective_score = ensemble_result.final_score
-            vote_ok = vote_gate_passed(
-                ensemble_result.final_side,
-                signal.side,
-                ensemble_result.approval_rate,
-                context.min_vote_approval_rate,
-            )
-            if ensemble_result.final_side == "flat":
-                effective_score = max(1.0, effective_score - 3.0)
-            elif ensemble_result.final_side != signal.side:
-                effective_score = max(1.0, effective_score - 1.5)
-            penalty = self._regime_mgr.get_score_penalty()
-            if penalty < 0:
-                effective_score = max(1.0, effective_score + penalty)
-            shadow_adjustment = self._shadow_adjustment(
-                inst_id,
-                signal.side,
-                min_closed=context.shadow_score_min_closed,
-            )
-            if shadow_adjustment:
-                effective_score = max(1.0, min(10.0, effective_score + shadow_adjustment))
-            quality_model = self._quality_model_scorer().score(signal, features).as_dict()
-
-            signal = replace(signal, signal_score=effective_score)
-            risk_cfg = replace(
-                context.risk_config,
-                max_leverage=max(1.0, min(10.0, context.risk_config.max_leverage * self._regime_mgr.get_leverage_factor())),
-            )
-            decision = validate_signal(signal, apply_halt_policy(context.ledger, context.risk_config), risk_cfg)
-            would_push = bool(
-                decision.accepted
-                and effective_score >= context.risk_config.min_signal_score
-                and context.quality_gate_allows_push
-                and vote_ok
-            )
-            health_reason = self._health_reason(
-                ensemble_side=ensemble_result.final_side,
-                signal_side=signal.side,
-                approval_rate=ensemble_result.approval_rate,
-                min_vote_rate=context.min_vote_approval_rate,
-                would_push=would_push,
-                quality_gate_allows_push=context.quality_gate_allows_push,
-                decision=decision,
-                effective_score=effective_score,
-                min_signal_score=context.risk_config.min_signal_score,
-            )
-            health_item = self._candidate_health_item(
-                inst_id=inst_id,
-                reason=health_reason,
-                row=latest_row,
-                signal=signal,
-                regime=regime,
-                final_score=effective_score,
-                risk_reason=decision.reason,
-                shadow_adjustment=shadow_adjustment,
-                quality_model=quality_model,
-                would_push=would_push,
-            )
-            cycle_health.append(health_item)
-
-            if would_push:
-                notify_key = self._notify_key(signal)
-                payload = {
-                    "signal": asdict(signal),
-                    "risk": asdict(decision),
-                    "live_order_enabled": False,
-                    "mode": context.mode,
-                    "dataset": context.dataset,
-                    "signal_timeframe": context.signal_timeframe,
-                    "trend_timeframe": context.trend_timeframe,
-                    "selected_params": asdict(context.strategy_params),
-                    "quality_model": quality_model,
-                }
-                if self._lifecycle_store is not None:
-                    lifecycle_record = self._lifecycle_store.record_signal(
-                        signal,
-                        signal_id=notify_key,
-                        invalidation_price=signal.stop_loss,
-                        signal_timeframe=context.signal_timeframe,
-                        trend_timeframe=context.trend_timeframe,
-                    )
-                    if lifecycle_record is not None:
-                        lifecycle = lifecycle_payload(lifecycle_record)
-                        payload["signal"]["invalidation_price"] = lifecycle_record.invalidation_price
-                        payload["lifecycle"] = lifecycle
-                        health_item["invalidation_price"] = lifecycle_record.invalidation_price
-                        health_item["lifecycle_status"] = lifecycle_record.status
-                        health_item["lifecycle"] = lifecycle
-                ready_candidates.append(
-                    SignalCandidate(
-                        signal=signal,
-                        decision=decision,
-                        notify_key=notify_key,
-                        payload=payload,
-                        health_item=health_item,
-                        rank_score=candidate_rank_score(
-                            final_score=effective_score,
-                            decision=decision,
-                            shadow_adjustment=shadow_adjustment,
-                        ),
-                        raw_score=effective_score,
-                    )
-                )
+            if checked_bar_ts is not None:
+                completed_checked_bars[inst_id] = checked_bar_ts
 
         selection = assign_tiers(ready_candidates, max_tier_a=2, price_history=candidate_history)
         for candidate in selection.ranked:
@@ -339,6 +352,9 @@ class SignalScanService:
             candidate.health_item["rank"] = candidate.rank
             candidate.health_item["rank_score"] = candidate.rank_score
             candidate.health_item["correlation_group"] = candidate.correlation_group
+
+        if context.checked_bars is not None:
+            context.checked_bars.update(completed_checked_bars)
 
         return SignalScanResult(
             cycle_health=cycle_health,

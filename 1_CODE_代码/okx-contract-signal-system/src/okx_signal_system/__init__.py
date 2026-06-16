@@ -1,5 +1,5 @@
-"""OKX contract backtest and semi-automatic signal system."""
+"""OKX signal observation, backtest, and manual review platform."""
 
 __all__ = ["__version__"]
 
-__version__ = "3.40.0"
+__version__ = "3.41.0"

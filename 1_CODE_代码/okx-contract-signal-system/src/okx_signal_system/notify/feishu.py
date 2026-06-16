@@ -116,7 +116,7 @@ def send_signal_alert(
     stop_pct = abs(entry_ref - stop_loss) / entry_ref * 100 if entry_ref else 0.0
     tp_pct = abs(take_profit - entry_ref) / entry_ref * 100 if entry_ref else 0.0
     rr = risk_reward_ratio if risk_reward_ratio is not None else (tp_pct / stop_pct if stop_pct else 0.0)
-    title = f"OKX {tier}级正式交易信号" if tier else "OKX 正式交易信号"
+    title = f"OKX {tier}级信号观察" if tier else "OKX 信号观察"
     lines = [
         title,
         f"时间: {_now_utc():%Y-%m-%d %H:%M:%S} UTC",
@@ -125,8 +125,6 @@ def send_signal_alert(
         f"入场: {entry_ref:.8f}",
         f"止损: {stop_loss:.8f} ({stop_pct:.2f}%)",
         f"止盈: {take_profit:.8f} ({tp_pct:.2f}%)",
-        f"仓位: {qty:.8f}",
-        f"杠杆: {leverage:.2f}x",
         f"目标盈亏比: {rr:.2f}R",
         f"信号类型: {_entry_type_from_reason(reason)}",
     ]
@@ -140,8 +138,6 @@ def send_signal_alert(
         lines.append(f"invalidation_price: {invalidation_price:.8f}")
     if max_loss_pct is not None:
         lines.append(f"账户止损风险: {max_loss_pct:.2%}")
-    if margin_loss_pct is not None:
-        lines.append(f"保证金止损风险: {margin_loss_pct:.2%} (上限 27.00%)")
     if kline_time:
         lines.append(f"K线时间: {kline_time}")
     if signal_timeframe:
@@ -154,7 +150,7 @@ def send_signal_alert(
         lines.append(f"止盈原因: {tp_reason}")
     if reason:
         lines.append(f"触发原因: {reason}")
-    lines.append("提示: 这是正式信号，先确认再执行。")
+    lines.append("提示: 仅用于信号研究和人工复核，不包含自动下单指令。")
     return send_text("\n".join(lines))
 
 
@@ -274,14 +270,14 @@ def send_close_notification(
     signal_score: float | None = None,
 ) -> bool:
     lines = [
-        "OKX position closed",
+        "OKX signal lifecycle update",
         f"time: {_now_utc():%Y-%m-%d %H:%M:%S} UTC",
         f"symbol: {inst_id}",
         f"side: {side}",
         f"reason: {exit_reason}",
         f"entry: {entry_price:.8f}",
         f"exit: {exit_price:.8f}",
-        f"size: {size:.8f}",
+        f"sample_size: {size:.8f}",
         f"gross_pnl: {gross_pnl:+.8f}",
         f"entry_fee: -{entry_fee:.8f}",
         f"exit_fee: -{exit_fee:.8f}",
@@ -299,7 +295,7 @@ def send_status_report(
     *,
     cycle_count: int,
     equity: float,
-    open_positions: int,
+    tracked_items: int,
     status: str,
     loss_streak: int = 0,
     max_drawdown: float = 0.0,
@@ -311,7 +307,7 @@ def send_status_report(
         f"cycle: {cycle_count}",
         f"status: {status}",
         f"equity: {equity:.2f}",
-        f"open_positions: {open_positions}",
+        f"tracked_items: {tracked_items}",
         f"loss_streak: {loss_streak}",
         f"max_drawdown: {max_drawdown:.2%}",
     ]
@@ -334,7 +330,7 @@ def send_candidate_health_report(
     lines = [
         "OKX 候选体检",
         f"时间: {_now_utc():%Y-%m-%d %H:%M:%S} UTC",
-        "说明: 这不是正式信号，只是告诉你这一轮哪些币种更接近能下单。",
+        "说明: 这不是正式信号，只是告诉你这一轮哪些币种更接近观察阈值。",
         f"结论: {'允许推送' if push_allowed else '暂不推送'}",
         f"已检查: {total} 个币种",
         f"可推送: {len(ready)} 个",
@@ -353,7 +349,7 @@ def send_candidate_health_report(
             )
         if params.get("shadow_closed") is not None:
             lines.append(
-                "影子交易: "
+                "影子样本: "
                 f"未平仓 {int(params.get('shadow_open', 0))}, "
                 f"已平仓 {int(params.get('shadow_closed', 0))}, "
                 f"止盈 {int(params.get('shadow_take_profit', 0))}, "
@@ -394,7 +390,7 @@ def send_candidate_health_report(
             f"{'做多' if side == 'long' else ('做空' if side == 'short' else side)}，"
             f"{_health_reason_label(item.get('reason'))}{score_text}{shadow_text}{gap_text}"
         )
-    lines.append("提示: 这是体检，不是下单提醒。")
+    lines.append("提示: 这是体检；系统只做信号研究与通知。")
     return send_text("\n".join(lines))
 
 
@@ -418,17 +414,20 @@ def feishu_send_signal_card(
 
 def feishu_send_status_card(
     equity: float,
-    open_positions: int,
-    status: str,
+    tracked_items: int | None = None,
+    status: str = "",
     loss_streak: int = 0,
     max_drawdown: float = 0.0,
     cycle_count: int = 0,
     last_signal_count: int | None = None,
+    **kwargs,
 ) -> bool:
+    if tracked_items is None:
+        tracked_items = int(kwargs.get("open_positions", 0))
     return send_status_report(
         cycle_count=cycle_count,
         equity=equity,
-        open_positions=open_positions,
+        tracked_items=tracked_items,
         status=status,
         loss_streak=loss_streak,
         max_drawdown=max_drawdown,

@@ -1,10 +1,10 @@
-# OKX 合约信号系统 - 自进化交易大脑
+# OKX 合约信号系统 - 自进化信号研究平台
 
 ## 系统架构总览
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                        Trading Brain (交易大脑)                          │
+│                    Signal Research Brain (信号研究大脑)                  │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    │
 │  │ 在线学习    │  │ 强化学习    │  │ 币种轮换    │  │ 数据同步    │    │
 │  │ Online      │  │ RL (Q-Learn)│  │ Symbol       │  │ Data Sync   │    │
@@ -14,14 +14,14 @@
 │         └────────────────┴────────────────┴────────────────┘            │
 │                                   │                                      │
 │                    ┌──────────────▼──────────────┐                       │
-│                    │   策略参数 (StrategyParams)  │                       │
+│                    │   信号参数 (StrategyParams)  │                       │
 │                    │   自主优化，自适应市场变化   │                       │
 │                    └──────────────┬──────────────┘                       │
 └───────────────────────────────────┼─────────────────────────────────────┘
                                     │
                     ┌───────────────▼───────────────┐
-                    │      OKX 实时API               │
-                    │  行情获取 / 订单执行 / 持仓   │
+                    │      OKX 行情接口              │
+                    │  行情获取 / K线同步 / 合约资料 │
                     └───────────────┬───────────────┘
                                     │
                     ┌───────────────▼───────────────┐
@@ -30,16 +30,37 @@
                     └───────────────────────────────┘
 ```
 
+## v3.41 SIGNAL_ONLY 运行边界
+
+本系统是纯信号研究与飞书推送平台。正式发布链路只包含：
+
+```text
+OKX 行情数据 -> 信号研究 -> 信号质量复核 -> 飞书推送
+```
+
+允许的产品行为：
+- 读取 OKX 公开行情、K线与合约资料。
+- 基于本地历史数据和配置币种生成研究信号。
+- 记录信号状态，用于复盘、统计与报告。
+- 发送飞书信号卡片、状态报告和告警。
+
+发布边界：
+- 不访问账户，不使用 OKX 私钥。
+- 不提交、撤销或自动关闭订单。
+- 不轮询真实持仓，不读取账户余额。
+- 不提供可切换为自动化交易的配置示例。
+- 止损、止盈、持有时长和风险值只作为研究标注，仅供人工复核。
+
 ## 自进化能力详解
 
 ### 1. 在线学习 (Online Learning)
 
-**原理**: 每次交易结束后记录结果，根据表现调整参数
+**原理**: 每次信号闭环后记录结果，根据表现调整参数
 
 ```python
 # 核心机制
-- 记录每笔交易: entry/exit价格, PnL, 胜率, 盈亏比
-- 当累积 >= 20笔交易后评估表现
+- 记录每条闭环信号: entry/exit价格, PnL, 胜率, 盈亏比
+- 当累积 >= 20条闭环信号后评估表现
 - 如果 PF < 1.0 或 WR < 35%，触发参数调整
 - 调整幅度 = 5% (ADAPTATION_LEARNING_RATE)
 ```
@@ -51,13 +72,13 @@ Score = 0.6 × PF + 0.2 × WR + 0.2 × Return
 
 ### 2. 强化学习 (Q-Learning)
 
-**原理**: 将市场环境离散化，学习不同环境下的最优参数
+**原理**: 将市场环境离散化，学习不同环境下的最优信号参数
 
 ```python
 # 状态空间
 Market_Regime = {
     high_vol_trend,   # 高波动趋势
-    low_vol_trend,    # 低波动趋势  
+    low_vol_trend,    # 低波动趋势
     high_vol_range,   # 高波动震荡
     low_vol_range     # 低波动震荡
 }
@@ -77,13 +98,13 @@ Q(s,a) = Q(s,a) + α × [r + γ × max(Q(s',a')) - Q(s,a)]
 
 ### 3. 智能币种轮换
 
-**原理**: 根据各币种表现动态调整关注列表
+**原理**: 根据各币种信号表现动态调整关注列表
 
 ```python
 # 评估指标
 - Profit Factor (PF) >= 1.2
 - Win Rate (WR) >= 35%
-- 最少交易次数 >= 10
+- 最少闭环信号数 >= 10
 
 # 轮换规则
 - 最多同时关注 5 个币种
@@ -190,20 +211,12 @@ if not df.loc[idx, "is_reliable"]:
 
 ## 运行周期
 
-## v3.40 Runtime Safety
-
-- Live order submission remains disabled by default through `execution.live_order_enabled: false`.
-- Automatic position close remains disabled by default through `execution.auto_close_enabled: false` and `OKX_AUTO_CLOSE_ENABLED` must be explicitly enabled before monitor-triggered closes are attempted.
-- The OKX order adapter rejects `stop_loss` or `take_profit` values on a plain order so TP/SL protection cannot be silently dropped.
-- Reduce-only close intent is propagated from the realtime API to the OKX order adapter.
-- Signal selection now separates same-direction correlation groups, marks insufficient correlation samples as Tier C observations, and keeps all ranked candidates visible.
-
 ```
 15分钟扫描周期:
 │
 ├── T+0:00  获取实时行情
-├── T+0:01  生成交易信号
-├── T+0:02  风控检查
+├── T+0:01  生成研究信号
+├── T+0:02  信号质量检查
 ├── T+0:03  推送飞书通知
 ├── T+0:04  同步最新K线数据
 │
@@ -228,13 +241,13 @@ src/okx_signal_system/
 │   ├── online_learning.py    # 在线学习引擎
 │   ├── reinforcement_learning.py  # Q-Learning强化学习
 │   ├── symbol_rotation.py    # 币种轮换
-│   └── trading_brain.py      # 交易大脑主控
+│   └── trading_brain.py      # 信号研究主控
 ├── data/
 │   ├── loader.py             # 数据加载
-│   └── gap_handler.py        # 数据回补 ← 新增
+│   └── gap_handler.py        # 数据回补
 ├── exchange/
 │   ├── okx.py                # OKX API基础接口
-│   └── realtime.py           # 实时交易接口
+│   └── realtime.py           # 行情实时接口
 └── notification/
     └── feishu.py              # 飞书推送
 ```
@@ -254,12 +267,12 @@ src/okx_signal_system/
               │
               ▼
 ┌─────────────────────────────┐
-│  1. 策略执行 → 产生信号      │
+│  1. 策略评估 → 产生信号      │
 └─────────────┬───────────────┘
               │
               ▼
 ┌─────────────────────────────┐
-│  2. 实盘交易 → 记录结果      │
+│  2. 信号闭环 → 记录结果      │
 └─────────────┬───────────────┘
               │
      ┌────────┴────────┐
@@ -296,7 +309,7 @@ src/okx_signal_system/
 |------|------|------|
 | Profit Factor (PF) | >= 1.2 | 主要盈利指标 |
 | Win Rate (WR) | >= 35% | 辅助指标 |
-| 最少交易次数 | >= 10 | 统计显著性 |
+| 最少闭环信号数 | >= 10 | 统计显著性 |
 | 最大同时币种 | 5 | 风险分散 |
 | 评估周期 | 30分钟 | 快速响应 |
 | 轮换周期 | 1小时 | 稳定观察 |

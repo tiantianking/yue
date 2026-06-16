@@ -19,7 +19,7 @@ def build_markdown_report(trades: pd.DataFrame, *, title: str = "OKX Backtest Re
         f"- total_trades: {summary['total_trades']}",
         f"- status: {summary['status']}",
         "",
-        "默认不自动实盘下单；本报告只用于本地研究和人工确认。",
+        "SIGNAL_ONLY: 本报告只用于本地研究、信号观察和人工复核，不包含操作建议。",
     ]
     return "\n".join(lines)
 

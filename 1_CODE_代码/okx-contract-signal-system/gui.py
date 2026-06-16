@@ -1,5 +1,5 @@
 """
-OKX 信号系统 - Tkinter GUI 主界面
+OKX 信号观察平台 - Tkinter GUI 主界面
 """
 
 import tkinter as tk
@@ -27,7 +27,7 @@ if str(_src_path) not in sys.path:
 
 log = logging.getLogger(__name__)
 
-APP_VERSION = "v3.40"
+APP_VERSION = "v3.41"
 DASHBOARD_HOST = "127.0.0.1"
 DASHBOARD_PORT = 3001
 DASHBOARD_URL = f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}"
@@ -111,11 +111,11 @@ class GUILogHandler:
 
 
 class OKXSignalGUI:
-    """OKX 信号系统 GUI 主类"""
+    """OKX 信号观察平台 GUI 主类"""
     
     def __init__(self, root):
         self.root = root
-        self.root.title(f"OKX 信号系统 {APP_VERSION}")
+        self.root.title(f"OKX 信号观察平台 {APP_VERSION}")
         self.root.geometry("1120x760")
         self.root.minsize(980, 680)
         self.root.configure(bg=COLORS["bg"])
@@ -546,7 +546,7 @@ class OKXSignalGUI:
         # 2. 监控币种列表
         self.create_symbol_frame()
         
-        # 3. 持仓监控面板
+        # 3. 信号观察记录面板
         self.create_position_frame()
 
         # 4. 实时信号表格
@@ -572,10 +572,10 @@ class OKXSignalGUI:
 
         title_box = ttk.Frame(header, style="Header.TFrame")
         title_box.pack(side='left', fill='x', expand=True)
-        ttk.Label(title_box, text="OKX 合约信号系统", style="HeaderTitle.TLabel").pack(anchor='w')
+        ttk.Label(title_box, text="OKX 信号观察平台", style="HeaderTitle.TLabel").pack(anchor='w')
         ttk.Label(
             title_box,
-            text=f"{summary['signal_timeframe']} 信号 / {summary['trend_timeframe']} 趋势过滤 / 手动确认下单",
+            text=f"{summary['signal_timeframe']} 信号 / {summary['trend_timeframe']} 趋势过滤 / 人工复核观察",
             style="HeaderSub.TLabel",
         ).pack(anchor='w', pady=(3, 0))
 
@@ -645,21 +645,21 @@ class OKXSignalGUI:
         self.load_symbols()
     
     def create_position_frame(self):
-        """创建持仓监控面板"""
-        pos_frame = ttk.LabelFrame(self.main_frame, text="持仓监控（自动止盈止损）", padding=(8, 6))
+        """创建信号观察记录面板"""
+        pos_frame = ttk.LabelFrame(self.main_frame, text="信号观察记录（历史样本 / 风险参考）", padding=(8, 6))
         pos_frame.pack(fill='x', pady=(0, 8))
 
-        # 上方：持仓表格
+        # 上方：观察记录表格
         columns = ('inst_id', 'side', 'entry', 'current', 'sl', 'tp', 'pnl', 'score')
         self.pos_tree = ttk.Treeview(pos_frame, columns=columns, show='headings', height=4)
 
         self.pos_tree.heading('inst_id', text='合约')
         self.pos_tree.heading('side', text='方向')
-        self.pos_tree.heading('entry', text='开仓价')
+        self.pos_tree.heading('entry', text='观察价')
         self.pos_tree.heading('current', text='现价')
-        self.pos_tree.heading('sl', text='止损价')
-        self.pos_tree.heading('tp', text='止盈价')
-        self.pos_tree.heading('pnl', text='浮盈亏')
+        self.pos_tree.heading('sl', text='风险价')
+        self.pos_tree.heading('tp', text='目标价')
+        self.pos_tree.heading('pnl', text='样本变化')
         self.pos_tree.heading('score', text='信号评分')
 
         self.pos_tree.column('inst_id', width=120)
@@ -676,112 +676,29 @@ class OKXSignalGUI:
         self.pos_tree.pack(side='left', fill='both', expand=True, padx=5, pady=3)
         pos_scrollbar.pack(side='right', fill='y', pady=3)
 
-        # 下方：手动注册持仓
-        reg_frame = ttk.Frame(pos_frame)
-        reg_frame.pack(fill='x', padx=5, pady=3)
-
-        ttk.Label(reg_frame, text="合约:").pack(side='left', padx=2)
-        self.reg_inst_id = ttk.Entry(reg_frame, width=14)
-        self.reg_inst_id.pack(side='left', padx=2)
-        self.reg_inst_id.insert(0, "BTC-USDT-SWAP")
-
-        ttk.Label(reg_frame, text="方向:").pack(side='left', padx=2)
-        self.reg_side_var = tk.StringVar(value="long")
-        side_combo = ttk.Combobox(reg_frame, textvariable=self.reg_side_var, values=["long", "short"], width=5, state='readonly')
-        side_combo.pack(side='left', padx=2)
-
-        ttk.Label(reg_frame, text="开仓价:").pack(side='left', padx=2)
-        self.reg_entry_price = ttk.Entry(reg_frame, width=10)
-        self.reg_entry_price.pack(side='left', padx=2)
-
-        ttk.Label(reg_frame, text="数量:").pack(side='left', padx=2)
-        self.reg_size = ttk.Entry(reg_frame, width=8)
-        self.reg_size.pack(side='left', padx=2)
-
-        ttk.Label(reg_frame, text="止损:").pack(side='left', padx=2)
-        self.reg_sl = ttk.Entry(reg_frame, width=10)
-        self.reg_sl.pack(side='left', padx=2)
-
-        ttk.Label(reg_frame, text="止盈:").pack(side='left', padx=2)
-        self.reg_tp = ttk.Entry(reg_frame, width=10)
-        self.reg_tp.pack(side='left', padx=2)
-
-        ttk.Label(reg_frame, text="杠杆:").pack(side='left', padx=2)
-        self.reg_leverage = ttk.Entry(reg_frame, width=4)
-        self.reg_leverage.pack(side='left', padx=2)
-        self.reg_leverage.insert(0, "10")
-
-        ttk.Label(reg_frame, text="评分:").pack(side='left', padx=2)
-        self.reg_score = ttk.Entry(reg_frame, width=4)
-        self.reg_score.pack(side='left', padx=2)
-        self.reg_score.insert(0, "7")
-
-        ttk.Button(reg_frame, text="注册持仓", command=self._register_position).pack(side='left', padx=5)
-        ttk.Button(reg_frame, text="移除选中", command=self._remove_selected_position).pack(side='left', padx=2)
-
-    def _register_position(self):
-        """注册手动开仓的持仓"""
-        try:
-            from okx_signal_system.exchange.position_monitor import register_manual_position
-            record = register_manual_position(
-                inst_id=self.reg_inst_id.get().strip(),
-                side=self.reg_side_var.get(),
-                entry_price=float(self.reg_entry_price.get()),
-                size=float(self.reg_size.get()),
-                stop_loss=float(self.reg_sl.get()),
-                take_profit=float(self.reg_tp.get()),
-                leverage=float(self.reg_leverage.get()),
-                signal_score=float(self.reg_score.get()),
-            )
-            self.log(f"✅ 持仓已注册: {record.key} | SL={record.stop_loss:.2f} TP={record.take_profit:.2f}", "INFO")
-            self._refresh_position_table()
-        except Exception as e:
-            self.log(f"❌ 注册持仓失败: {e}", "ERROR")
-
-    def _remove_selected_position(self):
-        """移除选中的持仓记录"""
-        sel = self.pos_tree.selection()
-        if not sel:
-            return
-        try:
-            from okx_signal_system.exchange.position_monitor import PositionRecordStore
-            store = PositionRecordStore()
-            for item in sel:
-                values = self.pos_tree.item(item, 'values')
-                inst_id = values[0]
-                side = values[1]
-                key = f"{inst_id}_{side}"
-                store.delete(key)
-                self.log(f"已移除持仓记录: {key}", "INFO")
-            self._refresh_position_table()
-        except Exception as e:
-            self.log(f"移除失败: {e}", "ERROR")
-
     def _refresh_position_table(self):
-        """刷新持仓表格"""
+        """刷新观察记录表格"""
         try:
-            from okx_signal_system.exchange.position_monitor import PositionRecordStore
-            store = PositionRecordStore()
-            records = store.load_all()
+            records = self._signal_lifecycle_store().records[-30:]
 
             # 清空表格
             for item in self.pos_tree.get_children():
                 self.pos_tree.delete(item)
 
             # 填充数据
-            for key, rec in records.items():
+            for rec in records:
                 self.pos_tree.insert('', 'end', values=(
                     rec.inst_id,
                     '多' if rec.side == 'long' else '空',
                     f"{rec.entry_price:.2f}",
-                    '-',  # 现价稍后更新
-                    f"{rec.stop_loss:.2f}",
-                    f"{rec.take_profit:.2f}",
-                    '-',
-                    f"{rec.signal_score:.1f}/10" if rec.signal_score else "N/A",
+                    f"{rec.last_close:.2f}" if rec.last_close is not None else '-',
+                    f"{rec.invalidation_price:.2f}",
+                    rec.status,
+                    str(rec.bars_seen),
+                    rec.signal_timeframe or "-",
                 ))
         except Exception as e:
-            self.log(f"刷新持仓表失败: {e}", "WARNING")
+            self.log(f"刷新观察记录失败: {e}", "WARNING")
 
     def create_signal_frame(self):
         """创建实时信号表格"""
@@ -916,17 +833,7 @@ class OKXSignalGUI:
         self.start_btn.config(state='disabled')
         self.stop_btn.config(state='normal')
 
-        # 启动自动止盈止损监控器
-        try:
-            from okx_signal_system.exchange.position_monitor import AutoStopMonitor
-            self.auto_stop_monitor = AutoStopMonitor(check_interval=5.0)
-            self.auto_stop_monitor.set_on_close_callback(self._on_position_closed)
-            self.auto_stop_monitor.start()
-            self.log("🛡️ 自动止盈止损监控已启动（每5秒检查）", "INFO")
-        except Exception as e:
-            self.log(f"⚠️ 自动止盈止损启动失败: {e}", "WARNING")
-
-        # 刷新持仓表
+        # 刷新观察记录表
         self._refresh_position_table()
 
         # 在新线程中启动监控
@@ -941,10 +848,6 @@ class OKXSignalGUI:
 
         self.log("正在停止监控...", "INFO")
         self.update_status("正在停止...")
-
-        # 停止自动止盈止损监控器
-        if hasattr(self, 'auto_stop_monitor') and self.auto_stop_monitor:
-            self.auto_stop_monitor.stop()
 
         # 设置标志位，让后台线程退出
         self.monitoring = False
@@ -1213,7 +1116,6 @@ class OKXSignalGUI:
             from okx_signal_system.signal_quality import SignalCandidate
             from okx_signal_system.signal_service import SignalScanContext, SignalScanService
             from okx_signal_system.strategy.vote_gate import min_vote_approval_rate
-            from okx_signal_system.exchange.position_monitor import PositionRecordStore
 
             # 加载策略参数
             config = load_config("base.yaml")
@@ -1245,11 +1147,6 @@ class OKXSignalGUI:
             cycle_health: list[dict] = []
             ready_candidates: list[SignalCandidate] = []
             candidate_history: dict[str, pd.DataFrame] = {}
-            try:
-                position_symbols = frozenset(record.inst_id for record in PositionRecordStore().load_all().values())
-            except Exception:
-                position_symbols = frozenset()
-
             async def _load_signal_candles(inst_id: str, limit: int) -> pd.DataFrame:
                 return await self.api.get_candles(inst_id, bar=self.api.timeframe.key, limit=limit)
 
@@ -1274,7 +1171,6 @@ class OKXSignalGUI:
                     min_vote_approval_rate=min_vote_rate,
                     mode="desktop_manual_confirmation_only",
                     min_history_bars=80,
-                    position_symbols=position_symbols,
                     checked_bars=checked_bars,
                     send_health_report=send_health_report,
                     shadow_score_min_closed=int(learning_cfg.get("shadow_score_min_closed_signals", 6)),
@@ -1295,19 +1191,18 @@ class OKXSignalGUI:
                 detect_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')
                 kline_time = signal.ts.strftime('%Y-%m-%d %H:%M') if hasattr(signal.ts, 'strftime') else str(signal.ts)
                 ts_str = detect_time if kline_time == detect_time else f"{detect_time} (Kline {kline_time})"
-                leverage_text = f"{decision.leverage_used:.1f}x" if decision.accepted and decision.leverage_used else "N/A"
                 rr_text = f"{decision.risk_reward_ratio:.1f}:1" if decision.risk_reward_ratio else ""
                 self.message_queue.put(('signal', {
                     'time': ts_str,
                     'symbol': signal.inst_id,
-                    'type': f"{signal.side.upper()} breakout {leverage_text} {rr_text}",
+                    'type': f"{signal.side.upper()} breakout {rr_text}".strip(),
                     'price': f"{signal.entry_ref:.2f}" if signal.entry_ref else "N/A",
                     'confidence': f"{float(candidate.raw_score):.1f}/10",
                 }))
                 status = "risk passed" if decision.accepted else f"risk rejected({decision.reason})"
                 self.message_queue.put(('log', (
                     f"Signal: {signal.inst_id} {signal.side.upper()} @ {signal.entry_ref:.2f} "
-                    f"| leverage {leverage_text} | RR {rr_text} | {status}",
+                    f"| risk reference evaluated | RR {rr_text} | {status}",
                     "INFO",
                 )))
 
@@ -1408,7 +1303,7 @@ class OKXSignalGUI:
                     self.update_connection_status(data)
 
                 elif msg_type == 'position_closed':
-                    # 持仓被自动平仓
+                    # 历史样本风险事件
                     self._handle_position_closed(data)
 
             except queue.Empty:
@@ -1417,7 +1312,7 @@ class OKXSignalGUI:
                 # 消息格式错误，记录并继续处理
                 print(f"[ERROR] 消息格式错误: {e}, data={data}")
 
-        # 每5秒刷新一次持仓表
+        # 每5秒刷新一次观察记录表
         if self.monitoring and hasattr(self, '_last_pos_refresh'):
             import time as _time
             if _time.time() - self._last_pos_refresh > 5:
@@ -1462,7 +1357,7 @@ class OKXSignalGUI:
             self.signal_tree.delete(children[0])
 
     def _on_position_closed(self, close_result):
-        """持仓被自动平仓的回调（从监控线程调用）"""
+        """历史样本风险事件回调（从监控线程调用）"""
         # 通过消息队列传递到GUI线程
         self.message_queue.put(('position_closed', {
             'inst_id': close_result.inst_id,
@@ -1477,20 +1372,20 @@ class OKXSignalGUI:
         }))
 
     def _handle_position_closed(self, data):
-        """在GUI线程中处理平仓事件"""
-        reason_text = "止损" if data['exit_reason'] == 'stop_loss' else "止盈"
+        """在GUI线程中处理历史样本风险事件"""
+        reason_text = "风险线" if data['exit_reason'] == 'stop_loss' else "目标线"
         side_text = "多" if data['side'] == 'long' else "空"
         pnl_emoji = "📈" if data['net_pnl'] >= 0 else "📉"
 
         self.log(
-            f"{pnl_emoji} 自动{reason_text}平仓: {data['inst_id']} {side_text}头 "
-            f"| 开仓{data['entry_price']:.2f} → 平仓{data['exit_price']:.2f} "
-            f"| 净盈亏 {data['net_pnl']:+.4f} USDT ({data['net_pnl_pct']:+.2%}) "
-            f"| 总费用 {data['total_costs']:.4f}",
+            f"{pnl_emoji} 历史样本{reason_text}触发: {data['inst_id']} {side_text}向 "
+            f"| 观察价{data['entry_price']:.2f} → 退出参考{data['exit_price']:.2f} "
+            f"| 样本净变化 {data['net_pnl']:+.4f} USDT ({data['net_pnl_pct']:+.2%}) "
+            f"| 成本参考 {data['total_costs']:.4f}",
             "WARNING" if data['exit_reason'] == 'stop_loss' else "INFO"
         )
 
-        # 刷新持仓表
+        # 刷新观察记录表
         self._refresh_position_table()
     
     def update_connection_status(self, status):

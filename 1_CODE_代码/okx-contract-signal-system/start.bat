@@ -1,11 +1,11 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-title OKX Signal System v3.40
+title OKX Signal Platform v3.41
 
 cd /d "%~dp0"
 
 echo ========================================
-echo  OKX Signal System v3.40
+echo  OKX Signal Platform v3.41
 echo ========================================
 echo.
 
@@ -48,6 +48,9 @@ exit /b 1
 echo.
 
 if not defined OKX_IS_SIMULATED set "OKX_IS_SIMULATED=true"
+if not defined SIGNAL_ONLY set "SIGNAL_ONLY=true"
+if not defined DATA_READ_ONLY set "DATA_READ_ONLY=true"
+if not defined FEISHU_ENABLED set "FEISHU_ENABLED=true"
 
 echo [INFO] Checking dependencies...
 %PYTHON_EXE% -c "import numpy, pandas, yaml, requests, pyarrow, websocket" > nul 2>&1

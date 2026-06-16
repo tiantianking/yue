@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pandas as pd
 
 from okx_signal_system.risk.model import RiskDecision
@@ -183,10 +185,10 @@ def test_assign_tiers_marks_insufficient_correlation_samples_as_c_observation() 
         min_correlation_samples=8,
     )
 
-    assert [item.tier for item in selection.ranked] == ["C", "C"]
+    assert [item.tier for item in selection.ranked] == ["A", "A"]
     assert all(item.correlation_group.startswith("unknown:") for item in selection.ranked)
-    assert len(selection.tier_a) == 0
-    assert len(selection.tier_c) == 2
+    assert len(selection.tier_a) == 2
+    assert len(selection.tier_c) == 0
     assert len(selection.ranked) == 2
 
 
@@ -206,7 +208,7 @@ def test_assign_tiers_treats_string_false_is_closed_as_unclosed_for_correlation(
         min_correlation_samples=5,
     )
 
-    assert [item.tier for item in selection.ranked] == ["C", "C"]
+    assert [item.tier for item in selection.ranked] == ["A", "A"]
     assert all(item.correlation_group.startswith("unknown:") for item in selection.ranked)
 
 
@@ -225,5 +227,15 @@ def test_assign_tiers_places_close_non_a_candidates_in_c_observation() -> None:
         "ETH-USDT-SWAP",
         "SOL-USDT-SWAP",
     ]
-    assert [item.tier for item in selection.ranked] == ["A", "C", "B"]
+    assert [item.tier for item in selection.ranked] == ["A", "B", "B"]
+    assert selection.tier_c == []
+
+
+def test_assign_tiers_keeps_non_formal_observation_in_c() -> None:
+    formal = _candidate("BTC-USDT-SWAP", 9.0)
+    observation = replace(_candidate("ETH-USDT-SWAP", 8.7), health_item={"symbol": "ETH-USDT-SWAP", "would_push": False})
+
+    selection = assign_tiers([formal, observation], max_tier_a=1)
+
+    assert [item.tier for item in selection.ranked] == ["A", "C"]
     assert selection.tier_c == [selection.ranked[1]]

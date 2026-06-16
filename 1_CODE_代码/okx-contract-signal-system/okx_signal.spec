@@ -38,7 +38,6 @@ hiddenimports = [
     'okx.exceptions',
     'okx.consts',
     'okx.account',
-    'okx.trade',
     'okx.market_data',
     'okx.public_data',
     'okx.finance',
@@ -58,7 +57,6 @@ hiddenimports = [
     'streamlit.elements',
     'streamlit.runtime',
     'streamlit.web',
-    'okx_signal_system.exchange.position_monitor',
     'okx_signal_system.strategy.ensemble',
     'okx_signal_system.ml.pattern_recognition',
     'okx_signal_system.ml.rolling_backtest',
@@ -67,6 +65,7 @@ hiddenimports = [
 datas = [
     ('config', 'config'),
     ('assets', 'assets'),
+    ('.env.example', '.'),
 ]
 
 history_root = os.environ.get("JIAOYI_DATA_DIR")

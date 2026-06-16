@@ -1,14 +1,20 @@
 # OKX Contract Signal System
 
-轻量化 OKX USDT 永续合约回测与半自动信号系统。
+Lightweight OKX USDT perpetual research and signal observation system.
 
-当前边界：
-- 只做本地研究、回测、半自动信号。
-- 不自动实盘下单。
-- 交易所口径只使用 OKX。
-- 默认逐仓、单向持仓、费用和滑点保守估算。
+Current boundary:
+- Signal-only local research, backtesting, observation, and Feishu notification.
+- Release defaults to `SIGNAL_ONLY`; no automatic execution entry is provided.
+- OKX is used only as the market-data and instrument reference.
+- Risk parameters are research estimates, not execution instructions.
 
-运行：
+Release safety:
+- The product workflow is market data -> signal research -> Feishu push.
+- Release packages must include `.env.example` only, never `.env`.
+- Release packages must not contain OKX private credentials.
+- Configuration must keep order submission and automatic close paths disabled.
+
+Run checks:
 
 ```powershell
 D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest

@@ -1,4 +1,4 @@
-from okx_signal_system.notify import feishu
+﻿from okx_signal_system.notify import feishu
 from okx_signal_system.notify.signal_dedupe import (
     BTierSummaryNotificationStore,
     SignalNotificationStore,
@@ -38,10 +38,12 @@ def test_signal_alert_includes_target_rr_and_risk_fields(monkeypatch) -> None:
     assert ok
     assert sent
     text = sent[0]
-    assert "OKX 正式交易信号" in text
+    assert "OKX 信号观察" in text
     assert "目标盈亏比: 3.50R" in text
     assert "账户止损风险: 1.00%" in text
-    assert "保证金止损风险: 27.00% (上限 27.00%)" in text
+    assert "仓位" not in text
+    assert "杠杆" not in text
+    assert "保证金" not in text
 
 
 def test_signal_alert_includes_tier_and_cross_symbol_rank(monkeypatch) -> None:
@@ -67,7 +69,7 @@ def test_signal_alert_includes_tier_and_cross_symbol_rank(monkeypatch) -> None:
     )
 
     assert ok
-    assert "OKX A级正式交易信号" in sent[0]
+    assert "OKX A级信号观察" in sent[0]
     assert "21币横向排名: 1/6" in sent[0]
 
 
@@ -136,6 +138,7 @@ def test_candidate_health_report_is_not_a_trade_signal(monkeypatch) -> None:
     assert "主要卡点: volume_too_low=1" in text
     assert "目标盈亏比 3.50R" in text
     assert "BTC-USDT-SWAP" in text
+    assert "下单" not in text
 
 
 def test_candidate_health_report_sends_even_without_candidates(monkeypatch) -> None:

@@ -205,10 +205,6 @@ class TradingBrain:
             except Exception as e:
                 log.error(f"Error processing {inst_id}: {e}")
 
-        # 状态报告仅记录日志，不推送飞书（减少噪音）
-        balance = await self.api.get_account_balance()
-        log.info(f"Cycle #{self._cycle_count} | equity={balance.total_equity} | positions={len(await self.api.get_positions())}")
-
         log.info(f"Cycle #{self._cycle_count} completed. Signals: {len(signals_generated)}")
 
     def _generate_signal(self, inst_id: str, market):

@@ -38,20 +38,15 @@ def assign_tiers(
     used_groups: set[str] = set()
     tier_a_count = 0
     tiered: list[SignalCandidate] = []
-    tier_a_scores: list[float] = []
     for candidate in ranked:
         key = f"{candidate.side}:{candidate.inst_id}"
         group = group_by_symbol.get(key, f"solo:{key}")
-        tier = "B"
-        if group.startswith("unknown:"):
-            tier = "C"
-        elif tier_a_count < max_tier_a and group not in used_groups:
+        is_formal_trigger = bool(candidate.health_item.get("would_push"))
+        tier = "B" if is_formal_trigger else "C"
+        if is_formal_trigger and tier_a_count < max_tier_a and group not in used_groups:
             tier = "A"
             tier_a_count += 1
             used_groups.add(group)
-            tier_a_scores.append(float(candidate.rank_score))
-        elif tier_a_scores and group not in used_groups and float(candidate.rank_score) >= min(tier_a_scores) - 0.5:
-            tier = "C"
         tiered.append(replace(candidate, tier=tier, correlation_group=group))
     return TieredSelection(
         ranked=tiered,

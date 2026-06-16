@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from okx_signal_system.risk.model import Ledger, RiskConfig
-from okx_signal_system.signal_service.scan import SignalScanContext, SignalScanService
+from okx_signal_system.signal_service.scan import SignalScanContext, SignalScanService, candidate_rank_score
 from okx_signal_system.strategy.ensemble import EnsembleResult
 from okx_signal_system.strategy.trend_breakout import StrategyParams, TradeSignal
 
@@ -55,6 +55,12 @@ class FakeShadowLedger:
     def score_adjustment(self, _inst_id, _side, *, min_closed=6):
         self.min_closed_values.append(min_closed)
         return 0.0
+
+
+class FixedShadowLedger(FakeShadowLedger):
+    def score_adjustment(self, _inst_id, _side, *, min_closed=6):
+        self.min_closed_values.append(min_closed)
+        return 0.8
 
 
 def _frame() -> pd.DataFrame:
@@ -146,6 +152,77 @@ def test_signal_scan_service_returns_ranked_ready_candidate(monkeypatch) -> None
     assert result.ready_candidates[0].payload["mode"] == "test_manual_confirmation_only"
     assert shadow_ledger.min_closed_values == [9]
     assert lifecycle.recorded
+
+
+def test_signal_scan_service_applies_shadow_adjustment_once(monkeypatch) -> None:
+    async def loader(_inst_id: str, _limit: int) -> pd.DataFrame:
+        return _frame()
+
+    def fake_build_feature_frame(frame, **_kwargs):
+        out = frame.copy()
+        out["atr"] = 2.0
+        out["atr_pct"] = 0.02
+        out["breakout_high"] = 99.0
+        out["breakout_low"] = 95.0
+        out["trend_bias"] = "long"
+        out["ema_fast"] = 101.0
+        out["ema_slow"] = 99.0
+        out["vol_ratio"] = 1.2
+        out["signal_timeframe"] = "15m"
+        out["trend_timeframe"] = "1h"
+        return out
+
+    def fake_build_signal(row, *, inst_id, params, frame, idx):
+        return TradeSignal(
+            ts=row["ts"],
+            inst_id=inst_id,
+            side="long",
+            entry_ref=100.0,
+            stop_loss=92.0,
+            take_profit=148.0,
+            max_hold_bars=params.max_hold_bars,
+            reason_codes=("TEST",),
+            signal_score=7.0,
+            risk_reward_ratio=6.0,
+        )
+
+    monkeypatch.setattr("okx_signal_system.signal_service.scan.build_feature_frame", fake_build_feature_frame)
+    monkeypatch.setattr("okx_signal_system.signal_service.scan.build_signal", fake_build_signal)
+    monkeypatch.setattr(
+        "okx_signal_system.signal_service.scan.ensemble_vote",
+        lambda *args, **kwargs: EnsembleResult("long", 8.0, [], 1.0, "test"),
+    )
+
+    service = SignalScanService(
+        candle_loader=loader,
+        regime_manager=FakeRegimeManager(),
+        quality_model_shadow=FakeQualityShadow(),
+        lifecycle_store=FakeLifecycleStore(),
+        shadow_ledger=FixedShadowLedger(),
+        notify_key_builder=lambda signal: f"{signal.inst_id}:{signal.side}",
+    )
+    context = SignalScanContext(
+        dataset="test",
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+        strategy_params=StrategyParams(),
+        risk_config=RiskConfig(),
+        ledger=Ledger("portfolio", init_capital=10000, equity=10000),
+        quality_gate_allows_push=True,
+        min_vote_approval_rate=0.4,
+        mode="test_manual_confirmation_only",
+        min_history_bars=5,
+        expected_latest_closed=pd.Timestamp("2026-01-01T02:45:00Z"),
+        now=pd.Timestamp("2026-01-01T03:05:00Z"),
+        shadow_score_min_closed=9,
+    )
+
+    result = asyncio.run(service.scan_cycle(["BTC-USDT-SWAP"], context))
+    candidate = result.ready_candidates[0]
+
+    assert candidate.health_item["shadow_adjustment"] == 0.8
+    assert candidate.raw_score == candidate.signal.signal_score
+    assert candidate.rank_score == candidate_rank_score(final_score=candidate.raw_score, decision=candidate.decision)
 
 
 def test_signal_scan_service_respects_checked_bar_gate() -> None:
@@ -288,4 +365,54 @@ def test_signal_scan_service_retries_invalid_features_bar(monkeypatch) -> None:
     result = asyncio.run(service.scan_cycle(["BTC-USDT-SWAP"], context))
 
     assert result.cycle_health[0]["reason"] == "invalid_features"
+    assert checked == {}
+
+
+def test_signal_scan_service_retries_after_strategy_scan_error(monkeypatch) -> None:
+    checked = {}
+
+    async def loader(_inst_id: str, _limit: int) -> pd.DataFrame:
+        return _frame()
+
+    def fake_build_feature_frame(frame, **_kwargs):
+        out = frame.copy()
+        out["atr"] = 2.0
+        out["breakout_high"] = 99.0
+        out["breakout_low"] = 95.0
+        out["trend_bias"] = "long"
+        return out
+
+    def fail_build_signal(*_args, **_kwargs):
+        raise RuntimeError("strategy failed")
+
+    monkeypatch.setattr("okx_signal_system.signal_service.scan.build_feature_frame", fake_build_feature_frame)
+    monkeypatch.setattr("okx_signal_system.signal_service.scan.build_signal", fail_build_signal)
+    service = SignalScanService(
+        candle_loader=loader,
+        regime_manager=FakeRegimeManager(),
+        quality_model_shadow=FakeQualityShadow(),
+        lifecycle_store=FakeLifecycleStore(),
+        shadow_ledger=FakeShadowLedger(),
+    )
+    context = SignalScanContext(
+        dataset="test",
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+        strategy_params=StrategyParams(),
+        risk_config=RiskConfig(),
+        ledger=Ledger("portfolio", init_capital=10000, equity=10000),
+        quality_gate_allows_push=True,
+        min_vote_approval_rate=0.4,
+        mode="test_signal_only",
+        min_history_bars=5,
+        checked_bars=checked,
+        expected_latest_closed=pd.Timestamp("2026-01-01T02:45:00Z"),
+        now=pd.Timestamp("2026-01-01T03:05:00Z"),
+    )
+
+    result = asyncio.run(service.scan_cycle(["BTC-USDT-SWAP"], context))
+
+    assert result.cycle_health[0]["reason"] == "scan_error"
+    assert result.cycle_health[0]["risk_reason"] == "strategy failed"
+    assert result.ready_candidates == []
     assert checked == {}

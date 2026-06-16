@@ -1,6 +1,6 @@
 """
-OKX合约信号系统 - 桌面程序入口
-实时接收OKX K线 → 信号检测 → 飞书通知
+OKX信号观察平台 - 桌面程序入口
+实时接收OKX K线 → 信号观察 → 人工复核通知
 
 启动模式：
 1. 双击exe / python main.py → GUI 模式（默认）
@@ -43,7 +43,7 @@ def safe_input(prompt=""):
         return ""
 
 # 添加 src/ 到 Python 路径
-APP_VERSION = "v3.40"
+APP_VERSION = "v3.41"
 _project_root = Path(__file__).parent
 _runtime_root = Path(sys.executable).parent if getattr(sys, "frozen", False) else _project_root
 _src_path = _project_root / "src"
@@ -266,16 +266,12 @@ def cleanup_pid_file() -> None:
 # ============================================================
 def check_environment() -> bool:
     """检查环境变量和配置"""
-    is_simulated = os.environ.get("OKX_IS_SIMULATED", "true").lower() != "false"
+    if os.environ.get("SIGNAL_ONLY", "true").lower() not in {"1", "true", "yes", "on"}:
+        logger.error("SIGNAL_ONLY must stay enabled; execution mode is not supported.")
+        return False
 
-    if is_simulated:
-        logger.info("运行在模拟模式")
-    else:
-        required_env = ["OKX_API_KEY", "OKX_SECRET_KEY", "OKX_PASSPHRASE"]
-        missing = [v for v in required_env if not os.environ.get(v)]
-        if missing:
-            logger.error(f"缺少环境变量: {', '.join(missing)}")
-            return False
+    env_label = "模拟数据环境" if os.environ.get("OKX_IS_SIMULATED", "true").lower() != "false" else "行情数据环境"
+    logger.info("运行在 SIGNAL_ONLY 信号观察模式（%s）", env_label)
 
     return True
 
@@ -392,7 +388,8 @@ async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -
     if feishu_enabled:
         try:
             from okx_signal_system.notify.feishu import send_text
-            send_text(f"🟢 OKX信号系统已启动\n监控 {len(symbols)} 个币种\n模式: {'模拟' if os.environ.get('OKX_IS_SIMULATED', 'true').lower() != 'false' else '实盘'}")
+            env_label = "模拟数据环境" if os.environ.get('OKX_IS_SIMULATED', 'true').lower() != 'false' else "外部数据环境"
+            send_text(f"🟢 OKX信号观察平台已启动\n观察 {len(symbols)} 个币种\n用途: 信号观察 / 人工复核\n数据环境: {env_label}")
         except Exception as e:
             logger.error(f"启动通知推送失败: {e}")
 
@@ -463,8 +460,8 @@ async def main_async() -> None:
 def main_cli() -> None:
     """命令行模式主函数"""
     print("\n+=========================================================+")
-    print(f"|       OKX Signal System {APP_VERSION:<31}|")
-    print("|       Real-time K-line | Signal Detection | Feishu       |")
+    print(f"|       OKX Signal Platform {APP_VERSION:<29}|")
+    print("|       K-line Watch | Signal Observation | Manual Review |")
     print("+=========================================================+\n")
 
     def signal_handler(sig, frame):

@@ -25,11 +25,6 @@ from okx_signal_system.exchange.candles import okx_candles_to_frame
 from okx_signal_system.exchange.okx import (
     get_ticker,
     get_candles,
-    get_account_balance,
-    get_account_positions,
-    place_order,
-    close_position,
-    OrderParams,
     test_connection,
 )
 from okx_signal_system.paths import find_lightweight_history
@@ -622,10 +617,7 @@ class OKXRealtimeAPI:
     功能：
     1. WebSocket实时K线推送
     2. 获取实时行情
-    3. 查询持仓
-    4. 查询账户
-    5. 下单/撤单
-    6. 数据持久化
+    3. 数据持久化
     """
 
     def __init__(self, config: dict | None = None):
@@ -835,91 +827,6 @@ class OKXRealtimeAPI:
 
         return local
 
-    async def get_positions(self, inst_id: str | None = None) -> list[Position]:
-        """获取持仓"""
-        try:
-            positions = get_account_positions(inst_id)
-            return [
-                Position(
-                    inst_id=p["inst_id"],
-                    side=p["side"],
-                    size=p["size"],
-                    entry_price=p["entry_price"],
-                    unrealized_pnl=p["unrealized_pnl"],
-                    margin=p["margin"],
-                    leverage=p["leverage"],
-                    liquidation_price=None,
-                )
-                for p in positions
-            ]
-        except Exception as e:
-            log.debug(f"Failed to get positions (normal for simulated mode): {e}")
-            return []
-
-    async def get_account_balance(self) -> AccountBalance:
-        """获取账户余额"""
-        try:
-            balance = get_account_balance("USDT")
-            return AccountBalance(
-                total_equity=balance.get("eq_usd", 0),
-                available=balance.get("avail_eq", 0),
-                margin_used=0,
-                total_pnl=0,
-                margin_ratio=0,
-            )
-        except Exception as e:
-            log.error(f"Failed to get account balance: {e}")
-            return AccountBalance(0, 0, 0, 0, 0)
-
-    async def place_order(self, order: OrderRequest) -> OrderResponse | None:
-        """下单"""
-        if not self._connected:
-            log.error("Not connected to OKX")
-            return None
-
-        try:
-            # 转换side
-            if order.side == "open_long":
-                side = "buy"
-            elif order.side == "open_short":
-                side = "sell"
-            elif order.side == "close_long":
-                side = "sell"
-            else:  # close_short
-                side = "buy"
-
-            params = OrderParams(
-                inst_id=order.inst_id,
-                side=side,
-                size=order.size,
-                price=order.price,
-                stop_loss=order.stop_loss,
-                take_profit=order.take_profit,
-                reduce_only=order.reduce_only,
-            )
-
-            result = place_order(params)
-
-            return OrderResponse(
-                order_id=result.get("ordId", ""),
-                inst_id=order.inst_id,
-                side=side,
-                size=order.size,
-                price=order.price or 0,
-                filled_size=float(result.get("fillSz", order.size)),
-                avg_price=float(result.get("avgPx", order.price or 0)),
-                status="filled",
-                timestamp=datetime.now(timezone.utc),
-            )
-        except Exception as e:
-            log.error(f"Order failed: {e}")
-            return None
-
-    async def cancel_order(self, order_id: str) -> bool:
-        """撤单"""
-        log.info(f"Cancel order: {order_id}")
-        return True
-
     def persist_data(self) -> dict[str, bool]:
         """持久化所有数据到磁盘"""
         return self._data_store.save_all()
@@ -969,11 +876,7 @@ class LiveSignalMonitor:
             "stop_loss_pct": 0.02,
             "take_profit_pct": 0.04,
         }
-        execution_cfg = self.api.config.get("execution", {}) if isinstance(self.api.config, dict) else {}
-        self._auto_close_enabled = bool(
-            execution_cfg.get("auto_close_enabled", False)
-            or _env_bool("OKX_AUTO_CLOSE_ENABLED", False)
-        )
+        self._auto_close_enabled = False
         self._running = False
         self._monitor_task: asyncio.Task | None = None
 
@@ -1331,27 +1234,8 @@ class LiveSignalMonitor:
         while self._running:
             cycle_health: list[dict[str, Any]] = []
             try:
-                # 获取持仓（模拟盘可能401，优雅降级）
-                positions = []
-                try:
-                    positions = await self.api.get_positions()
-                except Exception as e:
-                    log.debug(f"获取持仓失败（模拟盘正常）: {e}")
-                pos_inst_ids = {p.inst_id for p in positions}
+                pos_inst_ids: set[str] = set()
 
-                # ── 持仓管理: TP/SL + max_hold_bars ──
-                for pos in positions:
-                    market = await self.api.get_market_data(pos.inst_id)
-                    if market:
-                        await self._check_exit_conditions(pos, market)
-                        await self._check_hold_timeout(pos, market)
-
-                # ── 清理已平仓的追踪记录 ──
-                for inst_id in list(self._position_entries):
-                    if inst_id not in pos_inst_ids:
-                        del self._position_entries[inst_id]
-
-                # ── 信号生成 ──
                 scan_result = await self._scan_service.scan_cycle(
                     self.api._watched_symbols,
                     SignalScanContext(
@@ -1403,69 +1287,43 @@ class LiveSignalMonitor:
         log.info("Live signal monitor stopped")
 
     async def _check_exit_conditions(self, position: Position, market: MarketData):
-        """检查是否需要止损止盈"""
+        """Report exit triggers without submitting orders in SIGNAL_ONLY runtime."""
         if position.side == "long":
-            # 止损
             stop_price = position.entry_price * (1 - self.risk_config.get("stop_loss_pct", 0.02))
             if market.last_price <= stop_price:
-                log.warning(f"Stop loss triggered: {position.inst_id}")
-                if not self._auto_close_enabled:
-                    log.warning("Auto close disabled; manual confirmation required for %s", position.inst_id)
-                    return
-                await self.api.place_order(OrderRequest(
-                    inst_id=position.inst_id,
-                    side="close_long",
-                    size=position.size,
-                    reduce_only=True,
-                ))
-
-            # 止盈
+                log.warning(
+                    "Stop loss triggered for %s; SIGNAL_ONLY requires manual confirmation",
+                    position.inst_id,
+                )
+                return
             tp_price = position.entry_price * (1 + self.risk_config.get("take_profit_pct", 0.04))
             if market.last_price >= tp_price:
-                log.info(f"Take profit reached: {position.inst_id}")
-                if not self._auto_close_enabled:
-                    log.info("Auto close disabled; manual confirmation required for %s", position.inst_id)
-                    return
-                await self.api.place_order(OrderRequest(
-                    inst_id=position.inst_id,
-                    side="close_long",
-                    size=position.size,
-                    reduce_only=True,
-                ))
-        else:  # short
+                log.info(
+                    "Take profit reached for %s; SIGNAL_ONLY requires manual confirmation",
+                    position.inst_id,
+                )
+                return
+        else:
             stop_price = position.entry_price * (1 + self.risk_config.get("stop_loss_pct", 0.02))
             if market.last_price >= stop_price:
-                log.warning(f"Stop loss triggered: {position.inst_id}")
-                if not self._auto_close_enabled:
-                    log.warning("Auto close disabled; manual confirmation required for %s", position.inst_id)
-                    return
-                await self.api.place_order(OrderRequest(
-                    inst_id=position.inst_id,
-                    side="close_short",
-                    size=position.size,
-                    reduce_only=True,
-                ))
-
+                log.warning(
+                    "Stop loss triggered for %s; SIGNAL_ONLY requires manual confirmation",
+                    position.inst_id,
+                )
+                return
             tp_price = position.entry_price * (1 - self.risk_config.get("take_profit_pct", 0.04))
             if market.last_price <= tp_price:
-                log.info(f"Take profit reached: {position.inst_id}")
-                if not self._auto_close_enabled:
-                    log.info("Auto close disabled; manual confirmation required for %s", position.inst_id)
-                    return
-                await self.api.place_order(OrderRequest(
-                    inst_id=position.inst_id,
-                    side="close_short",
-                    size=position.size,
-                    reduce_only=True,
-                ))
+                log.info(
+                    "Take profit reached for %s; SIGNAL_ONLY requires manual confirmation",
+                    position.inst_id,
+                )
+                return
 
     async def _check_hold_timeout(self, position: Position, market: MarketData) -> None:
-        """检查持仓超时 (max_hold_bars)：首次出现时记录入场时间，超时则强制平仓"""
+        """Track timeout state without submitting close orders in SIGNAL_ONLY runtime."""
         inst_id = position.inst_id
 
-        # 首次出现 → 记录入场时间
         if inst_id not in self._position_entries:
-            # 用当前时间近似入场（精确到小时）
             self._position_entries[inst_id] = (
                 pd.Timestamp.now(tz="UTC"),
                 self._regime_mgr.current_params,
@@ -1476,29 +1334,16 @@ class LiveSignalMonitor:
         max_bars = entry_params.max_hold_bars
         now = pd.Timestamp.now(tz="UTC")
 
-        # 计算持仓K线数（按小时）
         hours_held = (now - entry_time).total_seconds() / 3600
         bars_held = int(hours_held / self.api.timeframe.hours)
 
         if bars_held >= max_bars:
             log.warning(
-                f"⏰ {inst_id} 持仓超时 ({bars_held} bars >= {max_bars}), 强制平仓"
+                "Hold timeout for %s (%s bars >= %s); SIGNAL_ONLY requires manual confirmation",
+                inst_id,
+                bars_held,
+                max_bars,
             )
-            if not self._auto_close_enabled:
-                log.warning("Auto close disabled; manual confirmation required for expired %s", inst_id)
-                return
-            try:
-                side = "close_long" if position.side == "long" else "close_short"
-                await self.api.place_order(OrderRequest(
-                    inst_id=inst_id,
-                    side=side,
-                    size=position.size,
-                    reduce_only=True,
-                ))
-                # 平仓后清除追踪
-                self._position_entries.pop(inst_id, None)
-            except Exception as e:
-                log.error(f"Failed to close expired position {inst_id}: {e}")
 
     async def monitor_forever(self):
         """等待监控循环结束（兼容 main.py CLI 模式）"""

@@ -48,7 +48,7 @@ def latest_signal_payload(
             "signal": asdict(signal),
             "risk": asdict(decision),
             "live_order_enabled": False,
-            "mode": "manual_confirmation_only",
+            "mode": "signal_only",
             "dataset": dataset,
             "signal_timeframe": signal_timeframe,
             "trend_timeframe": trend_timeframe,

@@ -20,9 +20,9 @@ def test_signal_view_model_turns_json_into_human_result() -> None:
         "live_order_enabled": False,
     }
     view = signal_view_model(payload)
-    assert view["headline"] == "现在不交易"
+    assert view["headline"] == "暂无正式信号"
     assert "价格还没有突破入场线" in view["reasons"]
-    assert view["live_order"] == "关闭"
+    assert view["signal_mode"] == "SIGNAL_ONLY"
 
 
 def test_readable_trades_renames_columns():
@@ -47,3 +47,6 @@ def test_readable_trades_renames_columns():
     table = readable_trades(trades)
     assert "合约" in table.columns
     assert "净盈亏" in table.columns
+    assert "数量" not in table.columns
+    assert "杠杆上限" not in table.columns
+    assert "样本数量" in table.columns
