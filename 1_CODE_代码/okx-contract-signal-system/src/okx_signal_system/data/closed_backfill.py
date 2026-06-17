@@ -10,7 +10,7 @@ from pathlib import Path
 import pandas as pd
 
 from okx_signal_system.config import project_paths
-from okx_signal_system.data.gap_handler import DataGapHandler, summarize_sync_error
+from okx_signal_system.data.gap_handler import DataGap, DataGapHandler, summarize_sync_error
 from okx_signal_system.exchange.candles import okx_candles_to_frame
 from okx_signal_system.exchange.okx import get_candles
 from okx_signal_system.paths import find_runtime_cache_root
@@ -36,6 +36,8 @@ class ClosedBackfillSymbolStatus:
     continuous_tail_bars: int = 0
     minimum_continuous_tail: int = 0
     required_history_bars: int = 0
+    repair_attempted: bool = False
+    internal_gaps_repaired: int = 0
 
 
 @dataclass
@@ -161,6 +163,46 @@ def _gap_summary(frame: pd.DataFrame, *, timeframe: str) -> tuple[int, int]:
     return len(gap_sizes), max(gap_sizes, default=0)
 
 
+def _internal_gaps(frame: pd.DataFrame, *, inst_id: str, timeframe: str) -> list[DataGap]:
+    if frame.empty or len(frame) < 2:
+        return []
+    interval_seconds = timeframe_spec(timeframe).minutes * 60
+    ts = pd.to_datetime(frame["ts"], utc=True).drop_duplicates().sort_values().reset_index(drop=True)
+    gaps: list[DataGap] = []
+    for previous, current in zip(ts.iloc[:-1], ts.iloc[1:], strict=False):
+        diff_seconds = (current - previous).total_seconds()
+        if diff_seconds <= interval_seconds:
+            continue
+        missing_bars = max(1, int(round(diff_seconds / interval_seconds)) - 1)
+        gaps.append(
+            DataGap(
+                inst_id=inst_id,
+                start_time=previous.to_pydatetime(),
+                end_time=current.to_pydatetime(),
+                missing_bars=missing_bars,
+                severity="severe" if missing_bars > 72 else "moderate" if missing_bars > 24 else "minor",
+            )
+        )
+    return gaps
+
+
+def _repair_internal_gaps(
+    handler: DataGapHandler,
+    inst_id: str,
+    frame: pd.DataFrame,
+    *,
+    timeframe: str,
+) -> int:
+    repaired = 0
+    for gap in _internal_gaps(frame, inst_id=inst_id, timeframe=timeframe):
+        new_data = handler.backfill_gap(gap)
+        if new_data is None or new_data.empty:
+            continue
+        if handler.merge_and_save(inst_id, new_data, mode="merge"):
+            repaired += 1
+    return repaired
+
+
 def _continuous_tail_bars(
     frame: pd.DataFrame,
     *,
@@ -259,6 +301,14 @@ def sync_latest_closed_symbol(
                 raise PermissionError(f"refusing to write closed backfill data dir: {handler.data_dir}")
             existing = _read_existing(path)
 
+        closed_existing = _closed_existing(existing, expected_latest_closed=expected)
+        repair_attempted = _gap_summary(closed_existing, timeframe=spec.key)[0] > 0
+        internal_gaps_repaired = 0
+        if repair_attempted:
+            internal_gaps_repaired = _repair_internal_gaps(handler, inst_id, closed_existing, timeframe=spec.key)
+            if internal_gaps_repaired:
+                existing = _read_existing(path)
+
         rows_after = len(existing)
         closed_existing = _closed_existing(existing, expected_latest_closed=expected)
         status = _status_from_closed_frame(
@@ -283,6 +333,8 @@ def sync_latest_closed_symbol(
             continuous_tail_bars=int(status["continuous_tail_bars"]),
             minimum_continuous_tail=int(status["minimum_continuous_tail"]),
             required_history_bars=int(status["required_history_bars"]),
+            repair_attempted=repair_attempted,
+            internal_gaps_repaired=internal_gaps_repaired,
         )
     except Exception as exc:
         closed_existing = _closed_existing(existing, expected_latest_closed=expected)
@@ -309,6 +361,8 @@ def sync_latest_closed_symbol(
             continuous_tail_bars=int(status["continuous_tail_bars"]),
             minimum_continuous_tail=int(status["minimum_continuous_tail"]),
             required_history_bars=int(status["required_history_bars"]),
+            repair_attempted=False,
+            internal_gaps_repaired=0,
         )
 
 

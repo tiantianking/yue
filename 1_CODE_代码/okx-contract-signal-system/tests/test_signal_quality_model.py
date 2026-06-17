@@ -27,6 +27,24 @@ def _training_frame() -> pd.DataFrame:
     )
 
 
+def _multi_symbol_training_frame() -> pd.DataFrame:
+    rows = []
+    outcomes = ["TP", "TIMEOUT", "SL", "TP", "SL"]
+    for idx, ts in enumerate(pd.date_range("2026-01-01T00:00:00Z", periods=5, freq="15min")):
+        for symbol_offset, symbol in enumerate(["BTC-USDT-SWAP", "ETH-USDT-SWAP"]):
+            rows.append(
+                {
+                    "ts": ts,
+                    "symbol": symbol,
+                    "trend_spread": 0.8 - idx * 0.1 - symbol_offset * 0.01,
+                    "volume_percentile": 0.9 - idx * 0.1,
+                    "outcome": outcomes[idx],
+                    "final_net_r": 1.0 - idx * 0.4 - symbol_offset * 0.05,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 def test_baseline_quality_model_outputs_probabilities_and_ranking_score() -> None:
     model = fit_quality_model(_training_frame(), feature_columns=["trend_spread", "volume_percentile"])
 
@@ -85,16 +103,36 @@ def test_walk_forward_validation_uses_ordered_purged_splits() -> None:
     assert set(["p_tp", "p_sl", "p_timeout", "expected_net_r", "actual_outcome", "actual_net_r"]).issubset(result.columns)
 
 
+def test_walk_forward_validation_keeps_same_timestamp_symbols_in_same_split() -> None:
+    result = walk_forward_validate(
+        _multi_symbol_training_frame(),
+        feature_columns=["trend_spread", "volume_percentile"],
+        train_size=2,
+        test_size=1,
+        purge_size=1,
+    )
+
+    assert not result.empty
+    first_fold = result[result["fold"] == 0]
+    assert set(first_fold["symbol"]) == {"BTC-USDT-SWAP", "ETH-USDT-SWAP"}
+    assert pd.to_datetime(first_fold["ts"], utc=True).nunique() == 1
+    assert first_fold["valid_start_position"].nunique() == 1
+    assert first_fold["valid_start_position"].iloc[0] - first_fold["train_end_position"].iloc[0] - 1 == 2
+    assert pd.Timestamp(first_fold["train_end_ts"].iloc[0]) < pd.Timestamp(first_fold["valid_start_ts"].iloc[0])
+
+
 def test_infer_feature_columns_excludes_future_label_fields() -> None:
     columns = infer_feature_columns(
         pd.DataFrame(
             {
                 "ts": ["2026-01-01T00:00:00Z"],
                 "trend_spread": [0.4],
+                "future_return": [0.9],
                 "exit_price": [110.0],
                 "holding_bars": [2],
                 "mae": [-0.4],
                 "mfe": [1.2],
+                "accidental_numeric_feature": [99.0],
                 "outcome": ["TP"],
                 "final_net_r": [1.5],
             }
@@ -102,3 +140,20 @@ def test_infer_feature_columns_excludes_future_label_fields() -> None:
     )
 
     assert columns == ["trend_spread"]
+
+
+def test_quality_model_fit_locks_feature_columns_to_schema() -> None:
+    frame = _training_frame().assign(
+        future_return=[9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0],
+        mfe=[3.0, 2.5, 2.2, 1.4, 1.0, 0.6, 0.2, 0.1],
+        accidental_numeric_feature=[100.0] * 8,
+    )
+
+    inferred_model = fit_quality_model(frame)
+    explicit_model = fit_quality_model(
+        frame,
+        feature_columns=["trend_spread", "future_return", "mfe", "accidental_numeric_feature"],
+    )
+
+    assert inferred_model.feature_columns == ("trend_spread", "volume_percentile")
+    assert explicit_model.feature_columns == ("trend_spread",)

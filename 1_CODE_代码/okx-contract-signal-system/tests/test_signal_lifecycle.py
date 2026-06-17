@@ -5,7 +5,9 @@ import sqlite3
 
 import pandas as pd
 
+from okx_signal_system.signal_quality.labeler import label_signal
 from okx_signal_system.signal_quality.lifecycle import LifecycleOutboxWorker, SignalLifecycleStore, lifecycle_payload
+from okx_signal_system.signal_quality.outcome import SIGNAL_OUTCOME_POLICY, SignalOutcomeSimulator
 from okx_signal_system.strategy.trend_breakout import TradeSignal
 
 
@@ -104,6 +106,42 @@ def test_lifecycle_target_uses_high_when_close_stays_below_target(tmp_path) -> N
     assert record.target_reached_at == "2026-01-01T00:30:00+00:00"
 
 
+def test_lifecycle_result_matches_labeler_when_tp_hits_before_confirmation(tmp_path) -> None:
+    store = SignalLifecycleStore(tmp_path / "lifecycle.json")
+    signal = _signal(entry_ref=100.0, stop_loss=95.0, take_profit=110.0, max_hold_bars=3)
+    store.record_signal(signal, signal_id="sig-preconfirm-tp")
+    frame = _frame(
+        [
+            {
+                "ts": pd.Timestamp("2026-01-01T00:15:00Z"),
+                "open": 100.0,
+                "high": 111.0,
+                "low": 99.0,
+                "close": 99.5,
+                "is_closed": True,
+            },
+        ]
+    )
+
+    expected = SignalOutcomeSimulator().simulate_signal(
+        signal,
+        frame,
+        policy=SIGNAL_OUTCOME_POLICY,
+        require_complete_timeout=True,
+    )
+    label = label_signal(signal, frame)
+    assert expected is not None
+    assert label is not None
+    assert expected.outcome == "TP"
+    assert label.outcome == expected.outcome
+
+    assert store.update_symbol("BTC-USDT-SWAP", frame) == 1
+    record = store.get("sig-preconfirm-tp")
+    assert record.status == "TARGET_REACHED"
+    assert record.confirmed_at is None
+    assert record.target_reached_at == pd.Timestamp(expected.exit_time).isoformat()
+
+
 def test_lifecycle_stop_reached_after_confirmation(tmp_path) -> None:
     store = SignalLifecycleStore(tmp_path / "lifecycle.json")
     signal = _signal(stop_loss=95.0, take_profit=115.0)
@@ -145,7 +183,7 @@ def test_lifecycle_ignores_unclosed_reversal(tmp_path) -> None:
 
 def test_lifecycle_expires_after_hold_limit(tmp_path) -> None:
     store = SignalLifecycleStore(tmp_path / "lifecycle.json")
-    signal = _signal(max_hold_bars=2)
+    signal = _signal(max_hold_bars=2, take_profit=None)
     store.record_signal(signal, signal_id="sig-3")
 
     frame = _frame(
@@ -194,6 +232,25 @@ def test_lifecycle_timeout_result_after_confirmation(tmp_path) -> None:
     summary = store.summary()
     assert summary["timeout_result"] == 1
     assert summary["terminal"] == 1
+
+
+def test_lifecycle_does_not_timeout_result_on_incomplete_tail(tmp_path) -> None:
+    store = SignalLifecycleStore(tmp_path / "lifecycle.json")
+    signal = _signal(max_hold_bars=3, take_profit=120.0)
+    store.record_signal(signal, signal_id="sig-incomplete-timeout")
+    frame = _frame(
+        [
+            {"ts": pd.Timestamp("2026-01-01T00:15:00Z"), "close": 101.0, "is_closed": True},
+            {"ts": pd.Timestamp("2026-01-01T00:30:00Z"), "close": 102.0, "is_closed": True},
+        ]
+    )
+
+    assert label_signal(signal, frame) is None
+    assert store.update_symbol("BTC-USDT-SWAP", frame) == 1
+    record = store.get("sig-incomplete-timeout")
+    assert record.status == "CONFIRMED"
+    assert record.timeout_result_at is None
+    assert store.summary()["timeout_result"] == 0
 
 
 def test_lifecycle_persists_records(tmp_path) -> None:
@@ -263,8 +320,22 @@ def test_lifecycle_sqlite_schema_records_events_and_outbox(tmp_path) -> None:
         "BTC-USDT-SWAP",
         _frame(
             [
-                {"ts": pd.Timestamp("2026-01-01T00:15:00Z"), "close": 101.0, "is_closed": True},
-                {"ts": pd.Timestamp("2026-01-01T00:30:00Z"), "close": 115.0, "is_closed": True},
+                {
+                    "ts": pd.Timestamp("2026-01-01T00:15:00Z"),
+                    "open": 100.0,
+                    "high": 101.0,
+                    "low": 99.0,
+                    "close": 101.0,
+                    "is_closed": True,
+                },
+                {
+                    "ts": pd.Timestamp("2026-01-01T00:30:00Z"),
+                    "open": 101.0,
+                    "high": 116.0,
+                    "low": 100.5,
+                    "close": 112.0,
+                    "is_closed": True,
+                },
             ]
         ),
     )

@@ -370,7 +370,7 @@ src/okx_signal_system/
 - Shared parameter selection rejects infinite PF and enforces a parameter-neighborhood stability gate before a parameter set can pass the training gate. Walk-forward validation derives default windows from the warm-up requirement and trains/freezes parameters per fold before validation.
 - Research artifacts include `cost_stress.csv` with baseline, 1.5x, and 2x cost replay metrics: net R, PF, drawdown, trade counts, side split, symbol contribution, regime split, and funding sensitivity.
 - Runtime configuration is the dependency-injection source for backtest, quality-label execution, GUI scan, realtime scan, risk sizing, and cost estimation defaults. Direct `RiskConfig()` / `CostConfig()` construction remains acceptable in tests and explicit experimental utilities only.
-- Lifecycle terminal checks reuse OHLC outcome rules and lifecycle outbox delivery can be consumed by `LifecycleOutboxWorker` through `NotificationDispatcher.send_lifecycle_event()`.
+- Lifecycle terminal checks reuse OHLC outcome rules and lifecycle outbox delivery can be consumed by `LifecycleOutboxWorker` through `NotificationDispatcher.send_lifecycle_event()`. Lifecycle research outcomes scan from the first closed candle after signal time instead of waiting for `CONFIRMED`; `TIMEOUT_RESULT` is emitted only after the complete `max_hold_bars` observation window is available.
 - GUI, realtime monitor, and scheduler scan cycles now run the lifecycle outbox worker after each scan/publish pass. Failed outbox rows retry from `FAILED` state and move to `DEAD_LETTER` after the worker retry limit instead of retrying indefinitely.
 - Lifecycle SQLite keeps historical `lifecycle_records`, `lifecycle_events`, and `notification_outbox` rows even when `SignalLifecycleStore(max_records=...)` limits the in-memory view. Outbox polling only returns rows whose `available_at` is due, and workers atomically claim rows with a short lease before delivery. Scheduler B-tier summary de-duplication includes strategy version, parameter hash, and candidate identity hash.
 
@@ -387,10 +387,23 @@ src/okx_signal_system/
 - Validation and blind evaluations run on frames that include the required indicator warmup history, then filter trade entries back to the validation or blind evaluation window. This keeps indicator state mature without allowing training-period trades into validation metrics.
 - Research data manifests now include per-symbol file SHA-256, canonical OHLCV/is_closed content SHA-256, rows, and timestamp bounds. The manifest hash changes when candle values change, even if file path, row count, and timestamp range stay unchanged.
 - Blind access is registered in SQLite under `outputs/research_registry/blind_registry.sqlite3` by default. The registry uses dataset content hash, research config hash, selected parameter hash, and git commit to build a one-time `registry_id`; a sealed blind run cannot be opened again with the same identity.
-- The strict research CLI and core function use the same default research version, `v3.51-strict`, so artifacts created from different entrypoints carry the same release identity.
+- The strict research CLI and core function use the same default research version, currently `v3.52-strict`, so artifacts created from different entrypoints carry the same release identity.
 
 ## v3.51 Data Reliability Closure
 
 - Formal historical data audit fails when any row is not closed. Runtime cache audit can allow one final open candle only when explicitly requested, and that tail row is excluded from formal-quality checks.
 - Data quality audit now reports and fails on NaN/Inf numeric values, timestamp boundary drift, irregular intervals and internal gaps, invalid OHLC ranges, symbol/timeframe mismatches, and invalid quote volume.
 - Closed-candle backfill status includes `internal_gap_count`, `max_gap_bars`, `continuous_tail_bars`, `minimum_continuous_tail`, and `required_history_bars`. A symbol with any internal gap or insufficient continuous tail history is not `passed`, so the cycle cannot report `all_complete=true`.
+
+## v3.51 Quality Model Split and Feature Boundary
+
+- Signal quality walk-forward validation splits train, purge, and validation windows by timestamp groups. Rows that share the same candle timestamp, including different symbols, stay in the same fold segment and cannot be divided across train/purge/validation boundaries.
+- Quality model training uses the explicit signal-quality feature schema only. Future outcome fields such as `future_return`, `mae`, `mfe`, exits, ranks, probabilities, and accidental numeric columns are not inferred into `feature_columns`.
+
+## v3.52 Research and Runtime Hardening
+
+- Strict research defaults to formal mode: the CLI uses all loaded symbols and the full parameter grid unless `--smoke` is explicitly supplied. Smoke runs are marked `NON_FORMAL_SMOKE` and are not promotion eligible.
+- Research data manifests separate dataset identity from file location metadata. `manifest_hash` equals the canonical OHLCV dataset identity hash, so moving files does not create a new dataset identity, while candle value changes still change the hash.
+- Blind release now requires both `--blind-release-token` and `--blind-release-token-sha256`. The SQLite blind registry ID is scoped to campaign, dataset identity, blind time range, and strategy family; commit, config, and parameter hashes remain audit metadata but cannot reopen the same blind window.
+- Formal acceptance distinguishes pre-blind lock state from final blind evidence. `pre_blind_locked` confirms no premature blind access, while `blind_final_sealed_pass` is required for final promotion eligibility.
+- Closed-candle startup backfill attempts internal gap repair through OKX REST before reporting a symbol as blocked. If the gap cannot be repaired, the status remains non-passing and monitor startup is still stopped.

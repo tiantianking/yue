@@ -28,3 +28,8 @@ v3.51 production boundary:
 - Formal A/B signal ranking and C-tier observation ranking are separate contracts: A/B notifications use `rank/total_formal_candidates`; C observations use `watch_rank/total_observations` and never affect formal rank.
 - Experimental learning modules may write sidecar diagnostics or parameter suggestions only. Release-facing docs, config examples, and notifications must not describe online learning, reinforcement learning, symbol rotation, or automatic parameter tuning as production behavior.
 - Runtime parameter changes require the strict research acceptance path and explicit operator review; daily learning and online learning outputs cannot promote parameters automatically.
+
+v3.52 release boundary:
+- Strict research defaults to formal mode and full-grid execution unless `--smoke` is explicitly requested. Smoke runs remain non-formal and cannot become promotion eligible.
+- Research manifests keep dataset identity separate from file location metadata, and blind access requires both a release token and its expected SHA-256 hash.
+- Closed-candle startup backfill may repair internal gaps from OKX before the monitor starts. If the gap cannot be repaired, startup remains blocked instead of silently continuing on incomplete data.

@@ -2,6 +2,7 @@ import pytest
 import pandas as pd
 
 from tests._integration import require_lightweight_history
+from okx_signal_system.backtest import research as research_module
 from okx_signal_system.backtest.evaluation import evaluate_symbol
 from okx_signal_system.backtest.grid_search import parameter_grid, run_grid_search, select_best_params
 from okx_signal_system.backtest.research import (
@@ -171,6 +172,16 @@ def test_data_manifest_hash_changes_when_ohlcv_content_changes(tmp_path) -> None
     assert first["manifest_hash"] != second["manifest_hash"]
 
 
+def test_data_manifest_identity_hash_ignores_source_path(tmp_path) -> None:
+    frame = _research_frame(20)
+    first = build_data_manifest("unit", [SymbolData("BTC-USDT-SWAP", tmp_path / "a" / "btc.parquet", frame)])
+    second = build_data_manifest("unit", [SymbolData("BTC-USDT-SWAP", tmp_path / "b" / "btc.parquet", frame)])
+
+    assert first["dataset_identity_hash"] == second["dataset_identity_hash"]
+    assert first["manifest_hash"] == second["manifest_hash"]
+    assert first["location_metadata"]["BTC-USDT-SWAP"]["source_path"] != second["location_metadata"]["BTC-USDT-SWAP"]["source_path"]
+
+
 def test_blind_registry_allows_one_open_then_rejects_same_research_id(tmp_path) -> None:
     registry = BlindRegistry(tmp_path / "blind_registry.sqlite3")
     manifest = {
@@ -185,6 +196,55 @@ def test_blind_registry_allows_one_open_then_rejects_same_research_id(tmp_path) 
     registry.seal("research-1", {"blind_total_trades": 1})
     with pytest.raises(RuntimeError, match="BLIND_ALREADY_OPENED"):
         registry.open_once(manifest)
+
+
+def test_blind_registry_id_cannot_be_bypassed_by_commit_or_param_changes() -> None:
+    first = BlindRegistry.registry_id(
+        dataset_content_hash="dataset-identity",
+        research_config_hash="config-a",
+        parameter_hash="params-a",
+        code_commit="commit-a",
+        blind_start="2026-01-01T00:00:00Z",
+        blind_end="2026-02-01T00:00:00Z",
+    )
+    second = BlindRegistry.registry_id(
+        dataset_content_hash="dataset-identity",
+        research_config_hash="config-b",
+        parameter_hash="params-b",
+        code_commit="commit-b",
+        blind_start="2026-01-01T00:00:00Z",
+        blind_end="2026-02-01T00:00:00Z",
+    )
+    different_window = BlindRegistry.registry_id(
+        dataset_content_hash="dataset-identity",
+        research_config_hash="config-b",
+        parameter_hash="params-b",
+        code_commit="commit-b",
+        blind_start="2026-01-01T00:00:00Z",
+        blind_end="2026-03-01T00:00:00Z",
+    )
+
+    assert first == second
+    assert first != different_window
+
+
+def test_unlock_blind_requires_expected_token_hash(monkeypatch, tmp_path) -> None:
+    symbols = [
+        SymbolData("BTC-USDT-SWAP", tmp_path / "btc.parquet", _research_frame(80)),
+        SymbolData("ETH-USDT-SWAP", tmp_path / "eth.parquet", _research_frame(80)),
+    ]
+    monkeypatch.setattr(research_module, "load_all_symbols", lambda _dataset: symbols)
+    monkeypatch.setattr(research_module, "common_calendar_split", lambda *_args, **_kwargs: {})
+
+    artifacts = run_dataset_research_artifacts(
+        dataset="unit",
+        params_grid=[StrategyParams(fast_ema=2, slow_ema=3, breakout_window=4, max_hold_bars=5)],
+        unlock_blind=True,
+        blind_release_token="release-once",
+    )
+
+    assert artifacts["research_metadata"]["promotion_eligible"] is False
+    assert artifacts["research_metadata"]["fail_reasons"] == "BLIND_RELEASE_TOKEN_SHA256_REQUIRED"
 
 
 def test_shared_param_selection_rejects_infinite_profit_factor() -> None:
@@ -341,8 +401,89 @@ def test_acceptance_checklist_requires_real_blind_lock_and_walk_forward() -> Non
         blind_lock_status="unlocked",
     )
 
-    blind_check = checklist.set_index("check").loc["blind_set_locked"]
+    blind_check = checklist.set_index("check").loc["blind_final_sealed_pass"]
     assert bool(blind_check["passed"]) is False
+
+
+def test_acceptance_checklist_rejects_non_formal_smoke_grid() -> None:
+    train_grid = pd.DataFrame(
+        [
+            {
+                "fast_ema": 1,
+                "slow_ema": 2,
+                "breakout_window": 3,
+                "atr_stop_mult": 1.0,
+                "take_profit_mult": 2.0,
+                "max_hold_bars": 5,
+                "atr_window": 14,
+                "finite_profit_factor": True,
+                "stable_neighbor_count": 3,
+                "stable_neighbor_ratio": 0.5,
+                "passed_train_gate": True,
+            }
+        ]
+    )
+
+    checklist = build_acceptance_checklist(
+        train_grid_results=train_grid,
+        selected=StrategyParams(),
+        selected_params_available=True,
+        validation_results=pd.DataFrame([{"symbol": "BTC-USDT-SWAP"}]),
+        portfolio_results=pd.DataFrame([{"valid_total_trades": 100}]),
+        leverage_risk=pd.DataFrame([{"near_liq_flag": False}]),
+        cost_stress=pd.DataFrame(
+            [
+                {"scenario": "baseline", "recompute_source": "trade_fact_recompute"},
+                {"scenario": "stress_1_5x", "recompute_source": "trade_fact_recompute"},
+                {"scenario": "stress_2x", "recompute_source": "trade_fact_recompute"},
+            ]
+        ),
+        walk_forward_results={"window_count": 2, "valid_pf_pass_ratio": 0.5, "valid_pf_median": 1.1, "purge_bars": 2, "embargo_bars": 1},
+        shared_params=True,
+        split_status="strict",
+        blind_lock_status="sealed_pass",
+        research_mode="NON_FORMAL_SMOKE",
+        expected_parameter_combinations=216,
+        completed_parameter_combinations=1,
+    ).set_index("check")
+
+    assert bool(checklist.loc["formal_research_mode", "passed"]) is False
+    assert bool(checklist.loc["formal_parameter_grid_complete", "passed"]) is False
+
+
+def test_research_cli_defaults_to_formal_full_dataset() -> None:
+    from okx_signal_system.backtest import research_cli
+
+    args = research_cli.build_parser().parse_args([])
+
+    assert args.smoke is False
+    assert args.max_symbols is None
+    assert args.full_grid is False
+
+
+def test_research_cli_smoke_is_explicit_non_formal(monkeypatch) -> None:
+    from okx_signal_system.backtest import research_cli
+
+    captured: dict = {}
+
+    def fake_run_dataset_research_artifacts(**kwargs):
+        captured.update(kwargs)
+        return {
+            "sample_trades": pd.DataFrame([{"entry_time": "2026-01-01T00:00:00Z", "exit_time": "2026-01-01T01:00:00Z"}]),
+            "portfolio_results": pd.DataFrame(
+                [{"valid_total_trades": 1, "valid_total_return": 0.0, "valid_profit_factor": 0.0, "pass_fail": "failed"}]
+            ),
+        }
+
+    monkeypatch.setattr(research_cli, "run_dataset_research_artifacts", fake_run_dataset_research_artifacts)
+    monkeypatch.setattr(research_cli, "write_research_artifacts", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("sys.argv", ["research_cli", "--smoke"])
+
+    research_cli.main()
+
+    assert captured["research_mode"] == "NON_FORMAL_SMOKE"
+    assert captured["max_symbols"] == 3
+    assert len(captured["params_grid"]) == 3
 
 
 def test_shared_train_grid_uses_portfolio_profit_factor(monkeypatch, tmp_path) -> None:

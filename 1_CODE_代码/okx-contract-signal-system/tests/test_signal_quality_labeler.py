@@ -168,6 +168,33 @@ def test_label_signal_times_out_at_max_hold_bars() -> None:
     assert _field(label, "mfe") == pytest.approx(0.8)
 
 
+def test_label_signal_does_not_timeout_before_complete_max_hold() -> None:
+    signal = _signal(max_hold_bars=3)
+    frame = _frame(
+        [
+            {
+                "ts": pd.Timestamp("2026-01-01T00:15:00Z"),
+                "open": 100.0,
+                "high": 102.0,
+                "low": 99.0,
+                "close": 101.0,
+                "is_closed": True,
+            },
+            {
+                "ts": pd.Timestamp("2026-01-01T00:30:00Z"),
+                "open": 101.0,
+                "high": 103.0,
+                "low": 100.0,
+                "close": 102.0,
+                "is_closed": True,
+            },
+        ]
+    )
+
+    assert simulate_signal_execution(signal, frame) is None
+    assert label_signal(signal, frame) is None
+
+
 def test_label_signal_uses_stop_loss_when_tp_and_sl_hit_on_same_candle() -> None:
     signal = _signal()
     frame = _frame(

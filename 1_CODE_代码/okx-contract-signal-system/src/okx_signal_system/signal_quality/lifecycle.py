@@ -11,7 +11,7 @@ from typing import Any, Literal
 import pandas as pd
 
 from okx_signal_system.config import project_paths
-from okx_signal_system.signal_quality.outcome import SIGNAL_OUTCOME_POLICY, SignalOutcomeLevels, SignalOutcomeSimulator
+from okx_signal_system.signal_quality.outcome import SIGNAL_OUTCOME_POLICY, SignalOutcomeSimulator
 
 LifecycleStatus = Literal[
     "TRIGGERED",
@@ -56,6 +56,18 @@ class SignalLifecycleRecord:
     trend_timeframe: str | None = None
     created_at: str = ""
     updated_at: str = ""
+
+    @property
+    def ts(self) -> pd.Timestamp:
+        return pd.Timestamp(self.signal_time)
+
+    @property
+    def stop_loss(self) -> float:
+        return self.invalidation_price
+
+    @property
+    def accepted(self) -> bool:
+        return self.side in {"long", "short"}
 
 
 def _now_text() -> str:
@@ -657,8 +669,9 @@ class SignalLifecycleStore:
                     attempt_count = attempt_count + CASE WHEN status != 'SENT' THEN 1 ELSE 0 END,
                     updated_at = ?
                 WHERE outbox_id = ?
+                   OR (signal_id = ? AND event_type = 'TRIGGERED')
                 """,
-                (now, now, outbox_id),
+                (now, now, outbox_id, outbox_id),
             )
 
     def mark_notification_failed(self, outbox_id: str, error: str) -> None:
@@ -897,6 +910,26 @@ class SignalLifecycleStore:
                 record.last_close = close
                 changed = True
 
+            result_event = self._research_result_event(record, future.iloc[:bars_seen])
+            if result_event is not None:
+                if record.status == "TRIGGERED" and self._confirms(record, close):
+                    record.status = "CONFIRMED"
+                    record.confirmed_at = closed_time
+                    record.last_event_type = "CONFIRMED"
+                    record.last_event_at = closed_time
+                    changed = True
+                    if lifecycle_events is not None:
+                        lifecycle_events.append((record, "CONFIRMED", closed_time, record.status))
+                event_type, attr_name, event_at = result_event
+                record.status = event_type
+                setattr(record, attr_name, event_at)
+                record.last_event_type = event_type
+                record.last_event_at = event_at
+                record.updated_at = _now_text()
+                if lifecycle_events is not None:
+                    lifecycle_events.append((record, event_type, event_at, record.status))
+                return True
+
             if record.status == "TRIGGERED" and self._invalidates(record, close):
                 record.status = "INVALIDATED"
                 record.invalidated_at = closed_time
@@ -915,19 +948,6 @@ class SignalLifecycleStore:
                 changed = True
                 if lifecycle_events is not None:
                     lifecycle_events.append((record, "CONFIRMED", closed_time, record.status))
-
-            if record.status == "CONFIRMED":
-                result_event = self._confirmed_result_event(record, future.iloc[:bars_seen])
-                if result_event is not None:
-                    event_type, attr_name, event_at = result_event
-                    record.status = event_type
-                    setattr(record, attr_name, event_at)
-                    record.last_event_type = event_type
-                    record.last_event_at = event_at
-                    record.updated_at = _now_text()
-                    if lifecycle_events is not None:
-                        lifecycle_events.append((record, event_type, event_at, record.status))
-                    return True
 
             if record.status == "TRIGGERED" and record.max_hold_bars > 0 and bars_seen >= record.max_hold_bars:
                 record.status = "EXPIRED"
@@ -969,31 +989,16 @@ class SignalLifecycleStore:
             return close <= record.invalidation_price
         return close >= record.invalidation_price
 
-    def _confirmed_result_event(self, record: SignalLifecycleRecord, frame: pd.DataFrame) -> tuple[str, str, str] | None:
+    def _research_result_event(self, record: SignalLifecycleRecord, frame: pd.DataFrame) -> tuple[str, str, str] | None:
         if record.take_profit is None or record.max_hold_bars <= 0:
             return None
-        start_pos = self._confirmed_start_pos(record, frame)
-        if start_pos is None:
-            return None
-        remaining_hold_bars = max(record.max_hold_bars - start_pos, 1)
-        stop_dist = abs(record.entry_ref - record.invalidation_price)
-        if stop_dist <= 0:
-            return None
-        levels = SignalOutcomeLevels(
-            entry_price=float(record.entry_ref),
-            stop_loss=float(record.invalidation_price),
-            take_profit=float(record.take_profit),
-            stop_dist=float(stop_dist),
-            reward_to_risk=abs(record.take_profit - record.entry_ref) / stop_dist,
-        )
-        result = _OUTCOME_SIMULATOR.simulate_levels(
-            side=record.side,
-            levels=levels,
+        result = _OUTCOME_SIMULATOR.simulate_signal(
+            record,
             frame=frame,
-            start_idx=start_pos,
-            max_hold_bars=remaining_hold_bars,
             closed_only=True,
+            after_signal_time=False,
             policy=SIGNAL_OUTCOME_POLICY,
+            require_complete_timeout=True,
         )
         if result is None:
             return None
@@ -1002,27 +1007,9 @@ class SignalLifecycleStore:
             return "TARGET_REACHED", "target_reached_at", event_at
         if result.outcome == "SL":
             return "STOP_REACHED", "stop_reached_at", event_at
-        expected_end_pos = start_pos + SIGNAL_OUTCOME_POLICY.timeout_offset(remaining_hold_bars)
-        if result.outcome == "TIMEOUT" and len(frame) - 1 >= expected_end_pos:
+        if result.outcome == "TIMEOUT":
             return "TIMEOUT_RESULT", "timeout_result_at", event_at
         return None
-
-    @staticmethod
-    def _confirmed_start_pos(record: SignalLifecycleRecord, frame: pd.DataFrame) -> int | None:
-        if frame.empty:
-            return None
-        if not record.confirmed_at:
-            return 0
-        confirmed_at = pd.Timestamp(record.confirmed_at)
-        if confirmed_at.tzinfo is None:
-            confirmed_at = confirmed_at.tz_localize("UTC")
-        else:
-            confirmed_at = confirmed_at.tz_convert("UTC")
-        ts = pd.to_datetime(frame["ts"], utc=True, errors="coerce")
-        matches = ts[ts >= confirmed_at].index.tolist()
-        if not matches:
-            return None
-        return int(frame.index.get_loc(matches[0]))
 
 
 class LifecycleOutboxWorker:

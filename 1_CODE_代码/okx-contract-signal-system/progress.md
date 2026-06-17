@@ -478,3 +478,66 @@
 - Modified files: `src/okx_signal_system/backtest/research.py` now defaults research artifacts to `v3.51-strict`; `tests/test_release_safety.py` locks the CLI/core research version match; `docs/SYSTEM_ARCHITECTURE.md` records the v3.51 strict research hardening; `progress.md` records this final validation round.
 - The earlier concurrent-agent changes in data reliability, lifecycle, notification ranking, and release safety remain intact and were validated together in the final full test run.
 - Rollback: revert the v3.51 research default/version hunk in `src/okx_signal_system/backtest/research.py`, the new release-safety regression in `tests/test_release_safety.py`, and the added v3.51 architecture note, then remove this appended progress entry.
+
+## 2026-06-17 - Task: v3.51 quality model timestamp-group split and feature schema lock
+### What was done
+- Changed quality model walk-forward validation so train, purge, and validation windows advance by candle timestamp groups instead of raw rows, keeping same-timestamp multi-symbol samples in one segment.
+- Locked quality model feature selection to the explicit signal-quality feature schema so future outcome columns and accidental numeric columns cannot enter training features.
+- Added focused regressions for same-timestamp multi-symbol split integrity and feature-column leakage.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests\test_signal_quality_model.py -q` -> `7 passed`.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests\test_signal_quality_model.py tests\test_signal_quality_shadow.py tests\test_signal_quality_features.py -q` -> `12 passed`.
+### Notes
+- Modified files: `src/okx_signal_system/signal_quality/model.py` adds the explicit feature schema, filters requested/inferred features through it, and performs walk-forward splitting by timestamp groups; `tests/test_signal_quality_model.py` adds regressions for grouped splits and feature leakage; `docs/SYSTEM_ARCHITECTURE.md` documents the quality model split and feature boundary; `progress.md` records this round.
+- Rollback: revert only the quality-model hunks in `src/okx_signal_system/signal_quality/model.py`, the added tests in `tests/test_signal_quality_model.py`, and the appended architecture/log entries from this round.
+
+## 2026-06-17 - Task: v3.51 lifecycle outcome simulator alignment
+### What was done
+- Changed lifecycle research outcome evaluation to reuse `SignalOutcomeSimulator` from the first closed candle after signal time, so TP/SL/TIMEOUT no longer wait for the pattern to become `CONFIRMED`.
+- Kept `TIMEOUT_RESULT` aligned with labeler/execution by requiring a complete `max_hold_bars` observation window before emitting timeout results.
+- Added regressions for TP reached inside the first post-signal candle before confirmation, and for incomplete tail data not producing timeout labels.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m py_compile src\okx_signal_system\signal_quality\lifecycle.py src\okx_signal_system\signal_quality\outcome.py src\okx_signal_system\signal_quality\execution.py src\okx_signal_system\signal_quality\labeler.py tests\test_signal_lifecycle.py tests\test_signal_quality_labeler.py` -> passed.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests\test_signal_lifecycle.py tests\test_signal_quality_labeler.py -q` -> `28 passed`.
+- `git diff --check -- src\okx_signal_system\signal_quality\lifecycle.py src\okx_signal_system\signal_quality\outcome.py src\okx_signal_system\signal_quality\execution.py src\okx_signal_system\signal_quality\labeler.py tests\test_signal_lifecycle.py tests\test_signal_quality_labeler.py docs\SYSTEM_ARCHITECTURE.md` -> passed; Git reported LF-to-CRLF working-copy normalization warnings only.
+### Notes
+- Modified files: `src/okx_signal_system/signal_quality/lifecycle.py` evaluates terminal research outcomes through `SignalOutcomeSimulator` before confirmation and suppresses incomplete-window timeouts; `tests/test_signal_lifecycle.py` adds lifecycle/labeler parity and incomplete-tail regressions; `tests/test_signal_quality_labeler.py` locks incomplete-tail labeler behavior; `docs/SYSTEM_ARCHITECTURE.md` documents lifecycle outcome anchoring and complete-timeout behavior; `progress.md` records this round.
+- This round did not modify `outcome.py`, `execution.py`, or `labeler.py`; they were included in compile validation because the lifecycle result contract depends on them.
+- Concurrent working-tree changes in research, model, lifecycle outbox, and related docs/logs were present and were not reverted.
+- Rollback: revert only the lifecycle outcome hunks in `src/okx_signal_system/signal_quality/lifecycle.py`, the added/adjusted regressions in `tests/test_signal_lifecycle.py` and `tests/test_signal_quality_labeler.py`, the lifecycle sentence added to `docs/SYSTEM_ARCHITECTURE.md`, and this appended progress entry.
+
+## 2026-06-17 - Task: v3.52 comprehensive research, lifecycle, notification, quality, and data hardening
+### What was done
+- Hardened strict research defaults so formal runs use all loaded symbols and the full grid by default, while explicit smoke runs are marked non-formal and cannot be promotion eligible.
+- Split research dataset identity from source-path metadata, required a fixed blind-release token hash, and scoped blind registry identity to dataset identity plus blind timerange instead of commit or selected parameters.
+- Integrated lifecycle outcome alignment, A-tier/outbox duplicate prevention, timestamp-group quality-model validation, explicit quality feature schema, and closed-candle internal-gap repair before startup blocking.
+- Bumped shared package/version metadata and strict research artifact identity to `3.52.0` / `v3.52-strict`.
+### Testing
+- `py -3.12 -m pytest -q tests/test_strict_research.py tests/test_release_safety.py` -> passed with expected integration skips.
+- `py -3.12 -m pytest -q tests/test_signal_lifecycle.py tests/test_signal_quality_labeler.py tests/test_lifecycle_outbox_runtime.py tests/test_scheduler_notifications.py tests/test_desktop_runtime.py tests/test_feishu_notify.py tests/test_signal_quality_model.py tests/test_signal_quality_shadow.py tests/test_signal_quality_features.py` -> passed.
+- `py -3.12 -m pytest -q tests/test_data_layer.py` -> passed with expected integration skips.
+- Full validation pending in the same task before commit and release zip.
+### Notes
+- Modified files: `src/okx_signal_system/backtest/research.py` separates dataset identity/location hashes, requires blind token hashes, fixes blind registry scope, tracks research mode/grid coverage, and separates pre-blind from final blind checks; `src/okx_signal_system/backtest/research_cli.py` makes formal research the default and adds explicit smoke mode; `src/okx_signal_system/data/closed_backfill.py` attempts internal gap repair before blocking startup; `src/okx_signal_system/signal_quality/lifecycle.py` aligns lifecycle outcomes with the shared simulator and marks matching triggered outbox rows sent after A-tier push; `src/okx_signal_system/signal_quality/model.py` locks feature schema and timestamp-group splits; `pyproject.toml`, `src/okx_signal_system/__init__.py`, and `src/okx_contract_signal_system.egg-info/PKG-INFO` set version `3.52.0`; `tests/test_strict_research.py`, `tests/test_data_layer.py`, `tests/test_lifecycle_outbox_runtime.py`, `tests/test_signal_lifecycle.py`, `tests/test_signal_quality_model.py`, and `tests/test_release_safety.py` add regressions; `docs/SYSTEM_ARCHITECTURE.md` documents v3.52 behavior; `progress.md` records this round.
+- Rollback: revert only the v3.52 hunks in the listed source, test, version, and docs files, then remove this appended progress entry. Avoid whole-file restore because several files contain parallel-agent changes from this task.
+
+### Testing
+- `python -m compileall -q src main.py gui.py tests` -> passed.
+- `py -3.12 -m pytest -q` -> passed with expected integration skips.
+- `npm.cmd run check` in `dashboard` -> lint and production build passed.
+- `git diff --check` -> passed; Git reported LF-to-CRLF working-copy normalization warnings only.
+### Notes
+- Final validation covered the v3.52 research hardening, lifecycle/outbox consistency, quality-model split/schema lock, and data backfill repair changes.
+
+## 2026-06-17 - Task: v3.52 final validation closure
+### What was done
+- Re-verified the v3.52 research hardening, lifecycle/outbox consistency, quality-model split/schema lock, and data backfill repair changes after the final documentation sync.
+- Confirmed the release version and strict research version are synchronized to `3.52.0` and `v3.52-strict`.
+### Testing
+- `python -m compileall -q src main.py gui.py tests` -> passed.
+- `py -3.12 -m pytest -q` -> passed with expected integration skips.
+- `npm.cmd run check` in `dashboard` -> lint and production build passed.
+- `git diff --check` -> passed; Git reported LF-to-CRLF working-copy normalization warnings only.
+### Notes
+- Modified files in this closure: `docs/RELEASE_SAFETY.md` and `docs/SYSTEM_ARCHITECTURE.md` for v3.52 behavior notes; no code change in this substep.
+- Rollback: remove this appended progress entry only.

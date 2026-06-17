@@ -890,6 +890,7 @@ def _failed_research_artifacts(
     shared_params: bool,
     reason: str,
     split_status: str,
+    research_mode: str = "FORMAL",
 ) -> dict[str, pd.DataFrame | dict | StrategyParams]:
     single_results = pd.DataFrame(
         [_empty_symbol_research_row(symbol.inst_id, shared_params=shared_params, reason=reason) for symbol in symbols]
@@ -933,6 +934,9 @@ def _failed_research_artifacts(
         signal_timeframe=signal_key,
         split_status=split_status,
         blind_lock_status="locked",
+        research_mode=research_mode,
+        expected_parameter_combinations=len(parameter_grid(signal_key)),
+        completed_parameter_combinations=0,
     )
     return {
         "train_grid_results": pd.DataFrame(),
@@ -946,8 +950,10 @@ def _failed_research_artifacts(
         "acceptance_checklist": checklist,
         "sample_trades": pd.DataFrame(),
         "blind_trades": pd.DataFrame(),
+        "blind_access_manifest": {},
         "research_metadata": {
             "dataset": dataset,
+            "research_mode": research_mode,
             "split_status": split_status,
             "promotion_eligible": False,
             "fail_reasons": reason,
@@ -980,25 +986,36 @@ def _content_sha256(frame: pd.DataFrame) -> str:
 
 
 def build_data_manifest(dataset: str, symbols: list[SymbolData]) -> dict:
-    manifest = {
+    identity = {
         "dataset_version": dataset,
         "symbols": {},
     }
+    locations: dict[str, dict[str, str]] = {}
     for symbol in sorted(symbols, key=lambda item: item.inst_id):
         frame = symbol.frame
         ts = pd.to_datetime(frame["ts"], utc=True, errors="coerce").dropna() if "ts" in frame else pd.Series(dtype="datetime64[ns, UTC]")
-        manifest["symbols"][symbol.inst_id] = {
-            "source_path": str(symbol.source_path),
-            "file_sha256": _file_sha256(symbol.source_path),
+        file_sha256 = _file_sha256(symbol.source_path)
+        identity["symbols"][symbol.inst_id] = {
             "content_sha256": _content_sha256(frame),
             "rows": int(len(frame)),
             "first_ts": str(ts.min()) if not ts.empty else "",
             "last_ts": str(ts.max()) if not ts.empty else "",
         }
-    manifest_hash = hashlib.sha256(
-        json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        locations[symbol.inst_id] = {
+            "source_path": str(symbol.source_path),
+            "file_sha256": file_sha256,
+        }
+    dataset_identity_hash = hashlib.sha256(
+        json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-    manifest["manifest_hash"] = manifest_hash
+    manifest = {
+        **identity,
+        "dataset_identity_hash": dataset_identity_hash,
+        "manifest_hash": dataset_identity_hash,
+        "location_metadata": locations,
+    }
+    for inst_id, location in locations.items():
+        manifest["symbols"][inst_id].update(location)
     return manifest
 
 
@@ -1084,8 +1101,12 @@ class BlindRegistry:
         research_config_hash: str,
         parameter_hash: str,
         code_commit: str,
+        campaign_id: str = "strict_research",
+        blind_start: str = "",
+        blind_end: str = "",
+        strategy_family_id: str = "trend_breakout",
     ) -> str:
-        payload = "|".join([dataset_content_hash, research_config_hash, parameter_hash, code_commit])
+        payload = "|".join([campaign_id, dataset_content_hash, blind_start, blind_end, strategy_family_id])
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def open_once(self, manifest: dict) -> str:
@@ -1146,8 +1167,10 @@ def _blind_access_manifest(
     validation_config: ResearchValidationConfig,
     release_token: str,
     research_version: str,
+    blind_timerange: dict[str, str] | None = None,
 ) -> dict:
     data_manifest = build_data_manifest(dataset, symbols)
+    blind_timerange = blind_timerange or {"blind_start": "", "blind_end": ""}
     config_payload = {
         "signal_timeframe": signal_key,
         "trend_timeframe": trend_key,
@@ -1162,6 +1185,8 @@ def _blind_access_manifest(
         research_config_hash=config_hash,
         parameter_hash=params_hash,
         code_commit=git_commit,
+        blind_start=str(blind_timerange.get("blind_start", "")),
+        blind_end=str(blind_timerange.get("blind_end", "")),
     )
     manifest = {
         "blind_status": "unlocked",
@@ -1174,9 +1199,30 @@ def _blind_access_manifest(
         "params_hash": params_hash,
         "release_token_hash": token_hash,
         "git_commit": git_commit,
+        "blind_timerange": blind_timerange,
+        "registry_scope": "strict_research|dataset_identity|blind_timerange|trend_breakout",
         "first_access_time_utc": datetime.now(timezone.utc).isoformat(),
     }
     return manifest
+
+
+def _blind_timerange_from_splits(splits: dict[str, ResearchSplit]) -> dict[str, str]:
+    for split in splits.values():
+        boundaries = split.boundaries
+        return {
+            "blind_start": str(boundaries.get("blind_start") or ""),
+            "blind_end": str(boundaries.get("blind_end") or ""),
+        }
+    return {"blind_start": "", "blind_end": ""}
+
+
+def _completed_parameter_combinations(train_grid_results: pd.DataFrame) -> int:
+    if train_grid_results.empty:
+        return 0
+    cols = [col for col in PARAM_COLS if col in train_grid_results.columns]
+    if not cols:
+        return int(len(train_grid_results))
+    return int(train_grid_results[cols].drop_duplicates().shape[0])
 
 
 def run_dataset_research_artifacts(
@@ -1192,7 +1238,8 @@ def run_dataset_research_artifacts(
     blind_release_token: str | None = None,
     blind_release_token_sha256: str | None = None,
     blind_registry_path: str | Path | None = None,
-    research_version: str = "v3.51-strict",
+    research_version: str = "v3.52-strict",
+    research_mode: str = "FORMAL",
 ) -> dict[str, pd.DataFrame | dict | StrategyParams]:
     symbols = load_all_symbols(dataset)
     if max_symbols is not None:
@@ -1219,6 +1266,7 @@ def run_dataset_research_artifacts(
                 shared_params=shared_params,
                 reason=f"STRICT_SPLIT_UNAVAILABLE:{exc}",
                 split_status="strict_unavailable",
+                research_mode=research_mode,
             )
         splits = {}
         split_status = "legacy_non_formal"
@@ -1235,9 +1283,21 @@ def run_dataset_research_artifacts(
                 shared_params=shared_params,
                 reason="BLIND_RELEASE_TOKEN_REQUIRED",
                 split_status=split_status,
+                research_mode=research_mode,
+            )
+        if not blind_release_token_sha256:
+            return _failed_research_artifacts(
+                dataset=dataset,
+                symbols=symbols,
+                signal_key=signal_key,
+                trend_key=trend_key,
+                shared_params=shared_params,
+                reason="BLIND_RELEASE_TOKEN_SHA256_REQUIRED",
+                split_status=split_status,
+                research_mode=research_mode,
             )
         token_hash = hashlib.sha256(blind_release_token.encode("utf-8")).hexdigest()
-        if blind_release_token_sha256 and token_hash != blind_release_token_sha256:
+        if token_hash != blind_release_token_sha256:
             return _failed_research_artifacts(
                 dataset=dataset,
                 symbols=symbols,
@@ -1246,6 +1306,7 @@ def run_dataset_research_artifacts(
                 shared_params=shared_params,
                 reason="BLIND_RELEASE_TOKEN_INVALID",
                 split_status=split_status,
+                research_mode=research_mode,
             )
         blind_lock_status = "unlocked"
 
@@ -1276,6 +1337,7 @@ def run_dataset_research_artifacts(
             validation_config=validation_config,
             release_token=blind_release_token,
             research_version=research_version,
+            blind_timerange=_blind_timerange_from_splits(splits),
         )
         try:
             BlindRegistry(blind_registry_path).open_once(blind_manifest)
@@ -1288,6 +1350,7 @@ def run_dataset_research_artifacts(
                 shared_params=shared_params,
                 reason=str(exc),
                 split_status=split_status,
+                research_mode=research_mode,
             )
 
     rows: list[dict] = []
@@ -1465,6 +1528,8 @@ def run_dataset_research_artifacts(
     except ValueError:
         blind_portfolio = summarize_trades(pd.DataFrame(), initial_equity=10000.0 * max(1, len(symbols)))
         blind_portfolio["status"] = "locked" if not unlock_blind else "failed_no_blind_backtest"
+    if blind_manifest and blind_portfolio.get("status", "") != "failed_no_blind_backtest" and any(not frame.empty for frame in blind_trades_by_symbol):
+        blind_lock_status = "sealed_pass"
     walk_forward_results: dict = {}
     if shared_params and selected is not None and splits:
         walk_rows = []
@@ -1557,6 +1622,14 @@ def run_dataset_research_artifacts(
         signal_timeframe=signal_key,
         split_status=split_status,
         blind_lock_status=blind_lock_status,
+        research_mode=research_mode,
+        expected_parameter_combinations=len(parameter_grid(signal_key)),
+        completed_parameter_combinations=_completed_parameter_combinations(train_grid_results),
+    )
+    promotion_eligible = bool(
+        research_mode == "FORMAL"
+        and not checklist.empty
+        and checklist["passed"].astype(bool).all()
     )
     return {
         "train_grid_results": train_grid_results,
@@ -1573,9 +1646,12 @@ def run_dataset_research_artifacts(
         "blind_access_manifest": blind_manifest or {},
         "research_metadata": {
             "dataset": dataset,
+            "research_mode": research_mode,
             "split_status": split_status,
             "blind_lock_status": blind_lock_status,
-            "promotion_eligible": bool(not checklist.empty and checklist["passed"].astype(bool).all()),
+            "expected_parameter_combinations": len(parameter_grid(signal_key)),
+            "completed_parameter_combinations": _completed_parameter_combinations(train_grid_results),
+            "promotion_eligible": promotion_eligible,
         },
     }
 
@@ -1626,10 +1702,19 @@ def build_acceptance_checklist(
     signal_timeframe: str = DEFAULT_SIGNAL_TIMEFRAME,
     split_status: str = "strict",
     blind_lock_status: str = "locked",
+    research_mode: str = "FORMAL",
+    expected_parameter_combinations: int | None = None,
+    completed_parameter_combinations: int | None = None,
 ) -> pd.DataFrame:
     portfolio = portfolio_results.iloc[0].to_dict() if not portfolio_results.empty else {}
     near_liq_count = int(leverage_risk["near_liq_flag"].fillna(False).sum()) if "near_liq_flag" in leverage_risk else 0
-    expected_grid_size = len(parameter_grid(signal_timeframe))
+    expected_grid_size = expected_parameter_combinations or len(parameter_grid(signal_timeframe))
+    completed_grid_size = (
+        int(completed_parameter_combinations)
+        if completed_parameter_combinations is not None
+        else _completed_parameter_combinations(train_grid_results)
+    )
+    grid_coverage_ratio = float(completed_grid_size / expected_grid_size) if expected_grid_size else 0.0
     stress_scenarios = set(cost_stress["scenario"].astype(str)) if cost_stress is not None and not cost_stress.empty else set()
     stress_sources = set(cost_stress["recompute_source"].astype(str)) if cost_stress is not None and "recompute_source" in cost_stress else set()
     stable_gate = bool(
@@ -1649,11 +1734,12 @@ def build_acceptance_checklist(
     )
     checks = [
         ("exchange_okx_only", True, "OKX SWAP only"),
+        ("formal_research_mode", research_mode == "FORMAL", research_mode),
         ("strict_common_calendar_split", split_status == "strict", split_status),
         (
-            "parameter_grid_evaluated",
-            len(train_grid_results) > 0 or not shared_params,
-            f"current rows {len(train_grid_results)}, full {signal_timeframe} grid {expected_grid_size}",
+            "formal_parameter_grid_complete",
+            (not shared_params) or (research_mode == "FORMAL" and completed_grid_size >= expected_grid_size),
+            f"completed {completed_grid_size}/{expected_grid_size} ({grid_coverage_ratio:.2%})",
         ),
         ("shared_params_selected", shared_params and selected_params_available, json.dumps(asdict(selected), ensure_ascii=False)),
         ("validation_once_after_freeze", shared_params and not validation_results.empty, "validation uses frozen params"),
@@ -1676,7 +1762,8 @@ def build_acceptance_checklist(
                 ensure_ascii=False,
             ),
         ),
-        ("blind_set_locked", blind_lock_status == "locked", blind_lock_status),
+        ("pre_blind_locked", blind_lock_status in {"locked", "sealed_pass"}, blind_lock_status),
+        ("blind_final_sealed_pass", blind_lock_status == "sealed_pass", blind_lock_status),
         (
             "cost_stress_replay_three_scenarios",
             {"baseline", "stress_1_5x", "stress_2x"}.issubset(stress_scenarios)

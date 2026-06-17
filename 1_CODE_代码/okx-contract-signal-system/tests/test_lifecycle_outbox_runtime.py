@@ -3,9 +3,12 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
-from okx_signal_system.risk.model import Ledger
+import pandas as pd
+
+from okx_signal_system.risk.model import Ledger, RiskDecision
 from okx_signal_system.signal_quality import TieredSelection
 from okx_signal_system.signal_service import SignalScanResult
+from okx_signal_system.strategy.trend_breakout import TradeSignal
 
 
 def test_scheduler_run_cycle_consumes_lifecycle_outbox(monkeypatch) -> None:
@@ -99,3 +102,83 @@ def test_live_monitor_loop_consumes_lifecycle_outbox_after_scan(monkeypatch) -> 
     asyncio.run(monitor._monitor_loop())
 
     assert calls == ["run_once"]
+
+
+def test_a_tier_success_marks_triggered_outbox_sent(monkeypatch, tmp_path) -> None:
+    from okx_signal_system.notify import dispatcher
+    from okx_signal_system.signal_quality import LifecycleOutboxWorker, SignalLifecycleStore
+
+    notify_key = "BTC-USDT-SWAP:long:2026-01-01T00:00:00Z"
+    signal = TradeSignal(
+        ts=pd.Timestamp("2026-01-01T00:00:00Z"),
+        inst_id="BTC-USDT-SWAP",
+        side="long",
+        entry_ref=100.0,
+        stop_loss=98.0,
+        take_profit=107.0,
+        max_hold_bars=12,
+        reason_codes=("TEST",),
+        signal_score=8.0,
+        risk_reward_ratio=3.5,
+    )
+    decision = RiskDecision(
+        accepted=True,
+        reason=None,
+        leverage_cap=3.0,
+        qty=1.0,
+        risk_amount=100.0,
+        leverage_used=3.0,
+        signal_score=8.0,
+        risk_reward_ratio=3.5,
+    )
+    store = SignalLifecycleStore(tmp_path / "lifecycle.sqlite3")
+    record = store.record_signal(
+        signal,
+        signal_id=notify_key,
+        invalidation_price=signal.stop_loss,
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+    )
+    assert record is not None
+
+    sent_signals: list[dict] = []
+    lifecycle_events: list[dict] = []
+
+    def fake_send_signal_observation(**kwargs) -> bool:
+        sent_signals.append(kwargs)
+        return True
+
+    class LifecycleDispatcher:
+        def send_lifecycle_event(self, event) -> bool:
+            lifecycle_events.append(event)
+            return True
+
+    monkeypatch.setattr(dispatcher, "send_signal_observation", fake_send_signal_observation)
+
+    candidate = type(
+        "Candidate",
+        (),
+        {
+            "signal": signal,
+            "decision": decision,
+            "notify_key": notify_key,
+            "tier": "A",
+            "rank": 1,
+            "health_item": {"total_candidates": 1},
+            "payload": {"lifecycle": {"status": "TRIGGERED"}, "quality_model": {}},
+            "invalidation_price": signal.stop_loss,
+        },
+    )()
+
+    assert dispatcher.NotificationDispatcher(store).send_a_tier_signal(
+        candidate,
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+    )
+
+    summary = LifecycleOutboxWorker(store, LifecycleDispatcher()).run_once()
+
+    assert len(sent_signals) == 1
+    assert summary == {"sent": 0, "failed": 0}
+    assert lifecycle_events == []
+    assert store.pending_notifications() == []

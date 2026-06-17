@@ -12,6 +12,18 @@ import pandas as pd
 
 OUTCOMES: tuple[str, str, str] = ("TP", "SL", "TIMEOUT")
 
+QUALITY_FEATURE_SCHEMA: tuple[str, ...] = (
+    "trend_spread",
+    "trend_slope",
+    "trend_alignment_15m_1h",
+    "breakout_distance_atr",
+    "candle_close_location",
+    "volume_percentile",
+    "atr_percentile",
+    "stop_distance_percent",
+    "breakout_range_compression",
+)
+
 RESERVED_COLUMNS = {
     "ts",
     "time",
@@ -21,6 +33,7 @@ RESERVED_COLUMNS = {
     "side",
     "outcome",
     "final_net_r",
+    "future_return",
     "mae",
     "mfe",
     "holding_bars",
@@ -117,7 +130,7 @@ class BaselineQualityModel:
         min_bucket_support: int = 2,
     ) -> "BaselineQualityModel":
         data = _prepare_labeled_frame(labeled_features, outcome_column, target_column)
-        columns = list(feature_columns) if feature_columns is not None else infer_feature_columns(data)
+        columns = _resolve_feature_columns(data, feature_columns)
         prior = _stats_for(data, outcome_column, target_column)
         profiles = [
             profile
@@ -274,16 +287,23 @@ def walk_forward_validate(
 
     data = _prepare_labeled_frame(labeled_features, outcome_column, target_column)
     data = _sort_for_time_series(data, time_column)
-    if len(data) <= train_size + purge_size:
+    time_groups = _time_group_slices(data, time_column)
+    if len(time_groups) <= train_size + purge_size:
         return _empty_walk_forward_frame()
 
     rows: list[dict[str, Any]] = []
     fold = 0
-    train_end = train_size
-    while train_end + purge_size < len(data):
-        valid_start = train_end + purge_size
-        valid_end = min(valid_start + test_size, len(data))
-        train_start = 0 if expanding else max(0, train_end - train_size)
+    train_end_group = train_size
+    while train_end_group + purge_size < len(time_groups):
+        valid_start_group = train_end_group + purge_size
+        valid_end_group = min(valid_start_group + test_size, len(time_groups))
+        train_start_group = 0 if expanding else max(0, train_end_group - train_size)
+
+        train_start = time_groups[train_start_group][0]
+        train_end = time_groups[train_end_group - 1][1]
+        valid_start = time_groups[valid_start_group][0]
+        valid_end = time_groups[valid_end_group - 1][1]
+
         train = data.iloc[train_start:train_end].reset_index(drop=True)
         valid = data.iloc[valid_start:valid_end].reset_index(drop=True)
         if train.empty or valid.empty:
@@ -317,7 +337,7 @@ def walk_forward_validate(
             rows.append(out)
 
         fold += 1
-        train_end = valid_end
+        train_end_group = valid_end_group
 
     if not rows:
         return _empty_walk_forward_frame()
@@ -333,12 +353,30 @@ def infer_feature_columns(
     if reserved_columns:
         reserved.update(reserved_columns)
     columns: list[str] = []
-    for column in frame.columns:
-        if str(column) in reserved:
+    for column in QUALITY_FEATURE_SCHEMA:
+        if column not in frame.columns or column in reserved:
             continue
         values = pd.to_numeric(frame[column], errors="coerce").replace([np.inf, -np.inf], np.nan)
         if values.notna().any():
-            columns.append(str(column))
+            columns.append(column)
+    return columns
+
+
+def _resolve_feature_columns(
+    frame: pd.DataFrame,
+    feature_columns: Sequence[str] | None,
+) -> list[str]:
+    if feature_columns is None:
+        return infer_feature_columns(frame)
+
+    allowed = set(QUALITY_FEATURE_SCHEMA)
+    columns: list[str] = []
+    seen: set[str] = set()
+    for column in feature_columns:
+        name = str(column)
+        if name in allowed and name not in seen:
+            columns.append(name)
+            seen.add(name)
     return columns
 
 
@@ -464,6 +502,25 @@ def _sort_for_time_series(data: pd.DataFrame, time_column: str) -> pd.DataFrame:
     return sorted_data.reset_index(drop=True)
 
 
+def _time_group_slices(data: pd.DataFrame, time_column: str) -> list[tuple[int, int]]:
+    if data.empty:
+        return []
+    if time_column not in data.columns:
+        return [(position, position + 1) for position in range(len(data))]
+
+    groups: list[tuple[int, int]] = []
+    start = 0
+    previous = data.iloc[0][time_column]
+    for position in range(1, len(data)):
+        current = data.iloc[position][time_column]
+        if current != previous:
+            groups.append((start, position))
+            start = position
+            previous = current
+    groups.append((start, len(data)))
+    return groups
+
+
 def _position_time(data: pd.DataFrame, position: int, time_column: str) -> Any:
     if time_column in data.columns:
         return data.iloc[position][time_column]
@@ -524,6 +581,7 @@ def _float_or_default(value: Any, default: float) -> float:
 
 __all__ = [
     "BaselineQualityModel",
+    "QUALITY_FEATURE_SCHEMA",
     "QualityPrediction",
     "fit_quality_model",
     "infer_feature_columns",

@@ -398,6 +398,7 @@ def test_closed_backfill_service_blocks_all_complete_on_internal_gaps(tmp_path, 
         lambda *args, **kwargs: 60.0,
     )
     monkeypatch.setattr("okx_signal_system.data.closed_backfill.get_candles", lambda *args, **kwargs: [])
+    monkeypatch.setattr("okx_signal_system.data.gap_handler.get_candles", lambda *args, **kwargs: [])
 
     service = ClosedCandleBackfillService(
         ["BTC-USDT-SWAP"],
@@ -416,6 +417,63 @@ def test_closed_backfill_service_blocks_all_complete_on_internal_gaps(tmp_path, 
     assert row.internal_gap_count == 1
     assert row.max_gap_bars == gap_bars
     assert row.continuous_tail_bars >= 20
+
+
+def test_closed_backfill_service_repairs_internal_gap_before_blocking(tmp_path, monkeypatch) -> None:
+    expected = pd.Timestamp("2026-06-15T18:00:00Z")
+    full_range = pd.date_range(end=expected, periods=12, freq="15min", tz="UTC")
+    missing = full_range[5:7]
+    kept = full_range.delete([5, 6])
+    (_closed_backfill_frame(kept)).to_parquet(tmp_path / "BTC_USDT_USDT_15m.parquet", index=False)
+
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.latest_closed_candle_start",
+        lambda *args, **kwargs: expected.to_pydatetime(),
+    )
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.seconds_until_next_closed_run",
+        lambda *args, **kwargs: 60.0,
+    )
+
+    def fake_get_candles(*_args, before=None, after=None, **_kwargs):
+        if before is None or after is None:
+            return []
+        return [
+            [
+                str(int(ts.timestamp() * 1000)),
+                "100",
+                "101",
+                "99",
+                "100.5",
+                "10",
+                "1000",
+                "1000",
+                "1",
+            ]
+            for ts in missing
+        ]
+
+    monkeypatch.setattr("okx_signal_system.data.closed_backfill.get_candles", fake_get_candles)
+    monkeypatch.setattr("okx_signal_system.data.gap_handler.get_candles", fake_get_candles)
+
+    service = ClosedCandleBackfillService(
+        ["BTC-USDT-SWAP"],
+        timeframe="15m",
+        dataset="okx_15m_extended",
+        data_dir=tmp_path,
+        output_path=tmp_path / "status.json",
+        required_history_bars=12,
+        minimum_continuous_tail_bars=12,
+    )
+    status = service.run_once()
+    row = status.symbols[0]
+
+    assert status.all_complete
+    assert row.status == "passed"
+    assert row.repair_attempted is True
+    assert row.internal_gaps_repaired == 1
+    saved = pd.read_parquet(tmp_path / "BTC_USDT_USDT_15m.parquet")
+    assert len(saved) == len(full_range)
 
 
 def test_closed_backfill_service_blocks_all_complete_on_short_continuous_tail(tmp_path, monkeypatch) -> None:
