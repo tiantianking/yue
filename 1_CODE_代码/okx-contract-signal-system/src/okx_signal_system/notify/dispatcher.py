@@ -77,11 +77,6 @@ class NotificationDispatcher:
             invalidation_price=invalidation_price,
             quality_model=quality_model,
         )
-        if self._lifecycle_store is not None and notify_key:
-            if sent:
-                self._lifecycle_store.mark_notification_sent(notify_key)
-            else:
-                self._lifecycle_store.mark_notification_failed(notify_key, "send_signal_observation_returned_false")
         return sent
 
     def send_a_tier_signal(self, candidate: Any, *, signal_timeframe: str, trend_timeframe: str) -> bool:

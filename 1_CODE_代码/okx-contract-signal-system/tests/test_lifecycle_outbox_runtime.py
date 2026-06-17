@@ -175,6 +175,7 @@ def test_a_tier_success_marks_triggered_outbox_sent(monkeypatch, tmp_path) -> No
         signal_timeframe="15m",
         trend_timeframe="1h",
     )
+    store.mark_notification_sent(notify_key)
 
     summary = LifecycleOutboxWorker(store, LifecycleDispatcher()).run_once()
 
@@ -182,3 +183,110 @@ def test_a_tier_success_marks_triggered_outbox_sent(monkeypatch, tmp_path) -> No
     assert summary == {"sent": 0, "failed": 0}
     assert lifecycle_events == []
     assert store.pending_notifications() == []
+
+
+def test_a_tier_dispatcher_does_not_write_notification_status(monkeypatch, tmp_path) -> None:
+    from okx_signal_system.notify import dispatcher
+    from okx_signal_system.signal_quality import SignalLifecycleStore
+
+    notify_key = "BTC-USDT-SWAP:long:2026-01-01T00:00:00Z"
+    signal = TradeSignal(
+        ts=pd.Timestamp("2026-01-01T00:00:00Z"),
+        inst_id="BTC-USDT-SWAP",
+        side="long",
+        entry_ref=100.0,
+        stop_loss=98.0,
+        take_profit=107.0,
+        max_hold_bars=12,
+        reason_codes=("TEST",),
+        signal_score=8.0,
+        risk_reward_ratio=3.5,
+    )
+    decision = RiskDecision(
+        accepted=True,
+        reason=None,
+        leverage_cap=3.0,
+        qty=1.0,
+        risk_amount=100.0,
+        leverage_used=3.0,
+        signal_score=8.0,
+        risk_reward_ratio=3.5,
+    )
+    store = SignalLifecycleStore(tmp_path / "lifecycle.sqlite3")
+    record = store.record_signal(
+        signal,
+        signal_id=notify_key,
+        invalidation_price=signal.stop_loss,
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+    )
+    assert record is not None
+    store.enqueue_notification(
+        notify_key,
+        signal_id=notify_key,
+        event_type="A_TIER_SIGNAL",
+        payload={"lifecycle": {"signal_id": notify_key, "status": "TRIGGERED"}},
+    )
+
+    monkeypatch.setattr(dispatcher, "send_signal_observation", lambda **_kwargs: False)
+
+    assert not dispatcher.NotificationDispatcher(store).send_signal(
+        signal,
+        decision,
+        notify_key=notify_key,
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+    )
+
+    pending = [
+        item for item in store.pending_notifications()
+        if item["outbox_id"] == notify_key
+    ][0]
+    assert pending["status"] == "PENDING"
+    assert pending["attempt_count"] == 0
+
+
+def test_repeated_failed_mark_is_idempotent_for_attempt_count(tmp_path) -> None:
+    from okx_signal_system.signal_quality import SignalLifecycleStore
+
+    notify_key = "BTC-USDT-SWAP:long:2026-01-01T00:00:00Z"
+    signal = TradeSignal(
+        ts=pd.Timestamp("2026-01-01T00:00:00Z"),
+        inst_id="BTC-USDT-SWAP",
+        side="long",
+        entry_ref=100.0,
+        stop_loss=98.0,
+        take_profit=107.0,
+        max_hold_bars=12,
+        reason_codes=("TEST",),
+        signal_score=8.0,
+        risk_reward_ratio=3.5,
+    )
+    store = SignalLifecycleStore(tmp_path / "lifecycle.sqlite3")
+    record = store.record_signal(
+        signal,
+        signal_id=notify_key,
+        invalidation_price=signal.stop_loss,
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+    )
+    assert record is not None
+    store.enqueue_notification(
+        notify_key,
+        signal_id=notify_key,
+        event_type="A_TIER_SIGNAL",
+        payload={"lifecycle": {"signal_id": notify_key, "status": "TRIGGERED"}},
+    )
+
+    store.mark_notification_failed(notify_key, "first")
+    store.mark_notification_failed(notify_key, "second")
+
+    with store._connect() as conn:
+        failed = conn.execute(
+            "SELECT status, attempt_count, last_error FROM notification_outbox WHERE signal_id = ?",
+            (notify_key,),
+        ).fetchone()
+    assert failed is not None
+    assert failed["status"] == "FAILED"
+    assert failed["attempt_count"] == 1
+    assert failed["last_error"] == "first"

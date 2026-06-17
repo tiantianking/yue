@@ -12,7 +12,15 @@ from okx_signal_system.data.closed_backfill import (
     seconds_until_next_closed_run,
 )
 from okx_signal_system.data.gap_handler import DataGap, DataGapHandler, summarize_sync_error
-from okx_signal_system.data.loader import SymbolData, closed_bars, file_symbol_to_inst_id, file_timeframe, load_symbol_file
+from okx_signal_system.data.loader import (
+    MISSING_REQUIRED_IS_CLOSED_COLUMN,
+    SymbolData,
+    closed_bars,
+    file_symbol_to_inst_id,
+    file_timeframe,
+    load_symbol_file,
+    normalize_ohlcv,
+)
 from okx_signal_system.data.quality import audit_symbol
 from okx_signal_system.exchange.realtime import RealtimeDataStore
 from okx_signal_system.paths import find_lightweight_history
@@ -188,6 +196,31 @@ def test_closed_bars_parses_string_closed_flags() -> None:
     result = closed_bars(frame)
 
     assert list(result["is_closed"]) == ["True", "1", "yes"]
+
+
+def test_formal_loader_rejects_missing_is_closed_column() -> None:
+    frame = _valid_15m_frame().drop(columns=["is_closed"])
+
+    with pytest.raises(ValueError, match=MISSING_REQUIRED_IS_CLOSED_COLUMN):
+        normalize_ohlcv(frame, inst_id="BTC-USDT-SWAP", timeframe="15m")
+
+
+def test_runtime_cache_loader_requires_explicit_role_to_fill_missing_is_closed() -> None:
+    frame = _valid_15m_frame().drop(columns=["is_closed"])
+
+    result = normalize_ohlcv(frame, inst_id="BTC-USDT-SWAP", timeframe="15m", data_role="runtime_cache")
+
+    assert "is_closed" in result.columns
+    assert result["is_closed"].astype(bool).all()
+
+
+def test_quality_audit_fails_formal_history_missing_is_closed_column() -> None:
+    frame = _valid_15m_frame().drop(columns=["is_closed"])
+
+    result = audit_symbol(_symbol_data(frame), expected_freq="15m")
+
+    assert result.status == "failed"
+    assert result.error_code == MISSING_REQUIRED_IS_CLOSED_COLUMN
 
 
 def test_quality_audit_fails_formal_history_when_any_row_is_open() -> None:
@@ -721,6 +754,69 @@ def test_gap_sync_stops_batch_after_rest_unavailable(tmp_path, monkeypatch) -> N
     assert not results["BTC-USDT-SWAP"].success
     assert not results["ETH-USDT-SWAP"].success
     assert "dns unavailable" in results["ETH-USDT-SWAP"].errors[0]
+
+
+def test_gap_detection_read_failure_fails_sync_instead_of_reporting_no_gap(tmp_path, monkeypatch) -> None:
+    (tmp_path / "BTC_USDT_USDT_1h.parquet").write_text("not parquet")
+
+    def fail_read(*_args, **_kwargs):
+        raise OSError("cannot read parquet")
+
+    monkeypatch.setattr("okx_signal_system.data.gap_handler.read_parquet_with_retry", fail_read)
+    handler = DataGapHandler(tmp_path)
+
+    result = handler.sync_symbol("BTC-USDT-SWAP")
+
+    assert not result.success
+    assert result.errors
+    assert "GAP_DETECTION_FAILED" in result.errors[0]
+
+
+def test_gap_sync_attempts_minor_gap_instead_of_skipping(tmp_path, monkeypatch) -> None:
+    now = pd.Timestamp.now(tz="UTC").floor("h")
+    frame = pd.DataFrame(
+        {
+            "ts": [now - pd.Timedelta(hours=4), now],
+            "open": [100.0, 101.0],
+            "high": [101.0, 102.0],
+            "low": [99.0, 100.0],
+            "close": [100.5, 101.5],
+            "volume": [10.0, 12.0],
+            "quote_volume": [1000.0, 1200.0],
+            "symbol": ["BTC-USDT-SWAP", "BTC-USDT-SWAP"],
+            "timeframe": ["1h", "1h"],
+            "is_closed": [True, True],
+        }
+    )
+    frame.to_parquet(tmp_path / "BTC_USDT_USDT_1h.parquet", index=False)
+    calls = []
+
+    def fake_backfill(gap):
+        calls.append(gap)
+        return pd.DataFrame(
+            {
+                "ts": [now - pd.Timedelta(hours=3), now - pd.Timedelta(hours=2), now - pd.Timedelta(hours=1)],
+                "open": [100.0, 100.2, 100.4],
+                "high": [101.0, 101.2, 101.4],
+                "low": [99.0, 99.2, 99.4],
+                "close": [100.1, 100.3, 100.5],
+                "volume": [10.0, 10.0, 10.0],
+                "quote_volume": [1000.0, 1000.0, 1000.0],
+                "symbol": ["BTC-USDT-SWAP"] * 3,
+                "timeframe": ["1h"] * 3,
+                "is_closed": [True] * 3,
+            }
+        )
+
+    monkeypatch.setattr(DataGapHandler, "backfill_gap", lambda self, gap: fake_backfill(gap))
+    handler = DataGapHandler(tmp_path)
+
+    result = handler.sync_symbol("BTC-USDT-SWAP")
+
+    assert result.success
+    assert result.gaps_filled == 1
+    assert result.bars_added == 3
+    assert calls and calls[0].severity == "minor"
 
 
 def test_gap_merge_fills_optional_metadata(tmp_path) -> None:

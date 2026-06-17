@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from okx_signal_system.features.indicators import build_feature_frame, atr
-from okx_signal_system.risk.costs import estimate_costs, research_position_size, research_slippage_bps
+from okx_signal_system.risk.costs import CostConfig, estimate_costs, research_position_size, research_slippage_bps
 from okx_signal_system.risk.model import (
     COOL_OFF_BARS,
     EXTREME_VOLATILITY_THRESHOLD,
@@ -258,6 +258,7 @@ def exit_trade(features: pd.DataFrame, entry_idx: int, signal, params: StrategyP
         start_idx=entry_idx,
         after_signal_time=False,
         policy=SIGNAL_OUTCOME_POLICY.with_max_hold_bars(params.max_hold_bars),
+        require_complete_timeout=True,
     )
     if result is None:
         end_idx = min(entry_idx + params.max_hold_bars, len(features) - 1)
@@ -307,6 +308,7 @@ def exit_trade_from_arrays(
         start_idx=entry_idx,
         max_hold_bars=max_hold_bars,
         policy=SIGNAL_OUTCOME_POLICY.with_max_hold_bars(max_hold_bars),
+        require_complete_timeout=True,
     )
     if result is None:
         end_idx = min(entry_idx + max_hold_bars, len(open_) - 1)
@@ -320,14 +322,19 @@ def run_backtest(
     inst_id: str,
     params: StrategyParams = StrategyParams(),
     risk_config: RiskConfig | None = None,
+    cost_config: CostConfig | None = None,
     signal_timeframe: str = "1h",
     trend_timeframe: str | None = None,
     min_vote_approval_rate: float = DEFAULT_MIN_VOTE_APPROVAL_RATE,
 ) -> pd.DataFrame:
-    if risk_config is None:
+    if risk_config is None or cost_config is None:
         from okx_signal_system.config import load_runtime_config
 
-        risk_config = load_runtime_config().risk_config()
+        runtime_config = load_runtime_config()
+        if risk_config is None:
+            risk_config = runtime_config.risk_config()
+        if cost_config is None:
+            cost_config = runtime_config.cost_config()
     features = build_feature_frame(
         frame_1h,
         fast_ema=params.fast_ema,
@@ -342,6 +349,7 @@ def run_backtest(
         inst_id=inst_id,
         params=params,
         risk_config=risk_config,
+        cost_config=cost_config,
         min_vote_approval_rate=min_vote_approval_rate,
     )
 
@@ -352,12 +360,17 @@ def run_backtest_from_features(
     inst_id: str,
     params: StrategyParams = StrategyParams(),
     risk_config: RiskConfig | None = None,
+    cost_config: CostConfig | None = None,
     min_vote_approval_rate: float = DEFAULT_MIN_VOTE_APPROVAL_RATE,
 ) -> pd.DataFrame:
-    if risk_config is None:
+    if risk_config is None or cost_config is None:
         from okx_signal_system.config import load_runtime_config
 
-        risk_config = load_runtime_config().risk_config()
+        runtime_config = load_runtime_config()
+        if risk_config is None:
+            risk_config = runtime_config.risk_config()
+        if cost_config is None:
+            cost_config = runtime_config.cost_config()
     features = features.reset_index(drop=True)
     ledger = Ledger(
         inst_id=inst_id,
@@ -439,6 +452,7 @@ def run_backtest_from_features(
                 close=entry_price,
                 volume=float(volume[entry_idx]),
                 quote_volume=float(quote_volume[entry_idx]),
+                base_bps=cost_config.normal_slippage_bps,
             )
         except ValueError:
             continue
@@ -448,6 +462,7 @@ def run_backtest_from_features(
             start_idx=entry_idx,
             after_signal_time=False,
             policy=SIGNAL_OUTCOME_POLICY.with_max_hold_bars(params.max_hold_bars),
+            require_complete_timeout=True,
         )
         if outcome is None:
             continue
@@ -463,6 +478,7 @@ def run_backtest_from_features(
             qty=qty,
             entry_time=pd.Timestamp(ts[entry_idx]),
             exit_time=pd.Timestamp(ts[exit_idx]),
+            config=cost_config,
             slippage_bps=slip_bps,
         )
         net_pnl = gross_pnl - costs.total

@@ -12,6 +12,7 @@ from okx_signal_system.backtest.research import (
     build_data_manifest,
     build_acceptance_checklist,
     common_calendar_split,
+    evaluate_blind_portfolio,
     replay_cost_stress,
     run_dataset_research,
     run_dataset_research_artifacts,
@@ -180,6 +181,24 @@ def test_data_manifest_identity_hash_ignores_source_path(tmp_path) -> None:
     assert first["dataset_identity_hash"] == second["dataset_identity_hash"]
     assert first["manifest_hash"] == second["manifest_hash"]
     assert first["location_metadata"]["BTC-USDT-SWAP"]["source_path"] != second["location_metadata"]["BTC-USDT-SWAP"]["source_path"]
+
+
+def test_data_manifest_identity_hash_ignores_dataset_name_and_row_order(tmp_path) -> None:
+    frame = _research_frame(20)
+    shuffled = frame.iloc[::-1].reset_index(drop=True)
+
+    first = build_data_manifest("dataset_A", [SymbolData("BTC-USDT-SWAP", tmp_path / "btc.parquet", frame)])
+    second = build_data_manifest("dataset_B", [SymbolData("BTC-USDT-SWAP", tmp_path / "btc-renamed.parquet", shuffled)])
+
+    assert first["dataset_identity_hash"] == second["dataset_identity_hash"]
+    assert first["manifest_hash"] == second["manifest_hash"]
+
+
+def test_data_manifest_rejects_duplicate_symbol_timestamps(tmp_path) -> None:
+    frame = pd.concat([_research_frame(3), _research_frame(1)], ignore_index=True)
+
+    with pytest.raises(ValueError, match="DUPLICATE_DATASET_TIMESTAMP"):
+        build_data_manifest("unit", [SymbolData("BTC-USDT-SWAP", tmp_path / "btc.parquet", frame)])
 
 
 def test_blind_registry_allows_one_open_then_rejects_same_research_id(tmp_path) -> None:
@@ -361,6 +380,26 @@ def test_replay_cost_stress_outputs_three_scenarios() -> None:
     assert stress.loc[stress["scenario"] == "stress_2x", "funding_fee"].iloc[0] > stress.loc[stress["scenario"] == "baseline", "funding_fee"].iloc[0]
 
 
+def test_losing_blind_portfolio_cannot_be_sealed_pass() -> None:
+    blind_trades = pd.DataFrame(
+        [
+            {"inst_id": "BTC-USDT-SWAP", "side": "long", "net_pnl": -50.0},
+            {"inst_id": "ETH-USDT-SWAP", "side": "short", "net_pnl": -25.0},
+        ]
+    )
+    blind_portfolio = {
+        "total_trades": 30,
+        "profit_factor": 0.5,
+        "total_return": -0.2,
+        "max_drawdown": 0.4,
+    }
+
+    evaluation = evaluate_blind_portfolio(blind_trades, blind_portfolio, symbol_count=2)
+    assert evaluation["status"] == "BLIND_SEALED_FAIL"
+    assert evaluation["passed"] is False
+    assert {"profit_factor", "total_return", "max_drawdown"}.issubset(set(evaluation["reasons"]))
+
+
 def test_acceptance_checklist_requires_real_blind_lock_and_walk_forward() -> None:
     train_grid = pd.DataFrame(
         [
@@ -403,6 +442,36 @@ def test_acceptance_checklist_requires_real_blind_lock_and_walk_forward() -> Non
 
     blind_check = checklist.set_index("check").loc["blind_final_sealed_pass"]
     assert bool(blind_check["passed"]) is False
+
+
+def test_acceptance_checklist_rejects_hand_written_blind_pass_without_metrics() -> None:
+    train_grid = pd.DataFrame(
+        [{"finite_profit_factor": True, "stable_neighbor_count": 3, "stable_neighbor_ratio": 0.5, "passed_train_gate": True}]
+    )
+    checklist = build_acceptance_checklist(
+        train_grid_results=train_grid,
+        selected=StrategyParams(),
+        selected_params_available=True,
+        validation_results=pd.DataFrame([{"symbol": "BTC-USDT-SWAP"}]),
+        portfolio_results=pd.DataFrame([{"valid_total_trades": 100, "blind_total_trades": 30}]),
+        leverage_risk=pd.DataFrame([{"near_liq_flag": False}]),
+        cost_stress=pd.DataFrame(
+            [
+                {"scenario": "baseline", "recompute_source": "trade_fact_recompute"},
+                {"scenario": "stress_1_5x", "recompute_source": "trade_fact_recompute"},
+                {"scenario": "stress_2x", "recompute_source": "trade_fact_recompute"},
+            ]
+        ),
+        walk_forward_results={"window_count": 2, "valid_pf_pass_ratio": 0.5, "valid_pf_median": 1.1, "purge_bars": 2, "embargo_bars": 1},
+        shared_params=True,
+        split_status="strict",
+        blind_lock_status="sealed_pass",
+        blind_evaluation={"passed": False, "profit_factor": 0.5, "total_return": -0.2, "total_trades": 30},
+        expected_parameter_combinations=1,
+        completed_parameter_combinations=1,
+    ).set_index("check")
+
+    assert bool(checklist.loc["blind_final_sealed_pass", "passed"]) is False
 
 
 def test_acceptance_checklist_rejects_non_formal_smoke_grid() -> None:

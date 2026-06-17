@@ -8,7 +8,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "check": "npm run lint && npm run build"
+    "typecheck": "tsc --noEmit --pretty false",
+    "test": "tsc -p tsconfig.test.json --noEmit --pretty false && node --experimental-strip-types --test \"src/**/*.test.ts\"",
+    "check": "npm run lint && npm run typecheck && npm run test && npm run build"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",

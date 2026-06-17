@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from okx_signal_system.data.loader import SymbolData, load_all_symbols
+from okx_signal_system.data.loader import MISSING_REQUIRED_IS_CLOSED_COLUMN, SymbolData, load_all_symbols
 from okx_signal_system.timeframe import timeframe_spec
 
 
@@ -36,6 +36,7 @@ class QualityResult:
     symbol_mismatch_rows: int = 0
     timeframe_mismatch_rows: int = 0
     invalid_quote_volume_rows: int = 0
+    error_code: str = ""
 
 
 def _is_closed_value(value: object) -> bool:
@@ -123,6 +124,7 @@ def audit_symbol(
     allow_runtime_open_tail: bool = False,
 ) -> QualityResult:
     df = data.frame.copy()
+    missing_required_is_closed = "is_closed" not in df.columns
     df["ts"] = pd.to_datetime(df["ts"], utc=True, errors="coerce")
     df = df.sort_values("ts", na_position="last").reset_index(drop=True)
     rows = len(df)
@@ -181,6 +183,8 @@ def audit_symbol(
     timeframe_mismatch_rows = _timeframe_mismatch_rows(df["timeframe"], spec.key) if "timeframe" in df.columns else 0
 
     failed = (
+        missing_required_is_closed
+        or
         invalid_timestamp_rows > 0
         or timestamp_boundary_rows > 0
         or duplicate_ts > 0
@@ -222,6 +226,7 @@ def audit_symbol(
         symbol_mismatch_rows=symbol_mismatch_rows,
         timeframe_mismatch_rows=timeframe_mismatch_rows,
         invalid_quote_volume_rows=int(invalid_quote_volume.sum()),
+        error_code=MISSING_REQUIRED_IS_CLOSED_COLUMN if missing_required_is_closed else "",
     )
 
 

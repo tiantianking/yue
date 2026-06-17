@@ -180,6 +180,7 @@ class SignalOutcomeSimulator:
         max_hold_bars: int | None = None,
         closed_only: bool = True,
         policy: SignalOutcomePolicy = SIGNAL_OUTCOME_POLICY,
+        require_complete_timeout: bool = False,
     ) -> SignalOutcomeResult | None:
         df = self._market_frame(
             frame,
@@ -198,7 +199,7 @@ class SignalOutcomeSimulator:
         if scan_start_pos >= len(df) or scan_start_pos > end_pos:
             return None
         signal = type("OutcomeSignal", (), {"side": side})()
-        return self._scan_window(
+        result = self._scan_window(
             signal=signal,
             df=df,
             entry_pos=entry_pos,
@@ -207,6 +208,11 @@ class SignalOutcomeSimulator:
             levels=levels,
             policy=policy,
         )
+        if result is None:
+            return None
+        if result.exit_reason == "max_hold" and require_complete_timeout and end_pos < expected_end_pos:
+            return None
+        return result
 
     def _scan_window(
         self,

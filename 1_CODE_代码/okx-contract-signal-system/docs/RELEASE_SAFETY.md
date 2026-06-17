@@ -33,3 +33,10 @@ v3.52 release boundary:
 - Strict research defaults to formal mode and full-grid execution unless `--smoke` is explicitly requested. Smoke runs remain non-formal and cannot become promotion eligible.
 - Research manifests keep dataset identity separate from file location metadata, and blind access requires both a release token and its expected SHA-256 hash.
 - Closed-candle startup backfill may repair internal gaps from OKX before the monitor starts. If the gap cannot be repaired, startup remains blocked instead of silently continuing on incomplete data.
+
+v3.53 release boundary:
+- Package metadata, launcher display, GUI display, and strict research artifact defaults are synchronized to `3.53.0` / `v3.53-strict`.
+- Final blind acceptance requires passing portfolio evidence, not only an opened or sealed blind state. Losing, concentrated, one-sided, or insufficient blind results remain non-promotable.
+- Formal data must carry closed-candle evidence through `is_closed`; only explicitly declared runtime cache compatibility may synthesize that field.
+- The dashboard release check is `npm run check`, which must include lint, typecheck, tests, and build before packaging.
+- Lifecycle notification state must be updated by the runtime caller that attempted delivery. Dispatch helpers must not double-count attempts or silently convert failed direct sends into sent outbox state.

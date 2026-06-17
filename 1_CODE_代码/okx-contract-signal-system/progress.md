@@ -541,3 +541,22 @@
 ### Notes
 - Modified files in this closure: `docs/RELEASE_SAFETY.md` and `docs/SYSTEM_ARCHITECTURE.md` for v3.52 behavior notes; no code change in this substep.
 - Rollback: remove this appended progress entry only.
+
+## 2026-06-17 - Task: v3.53 comprehensive audit closure
+### What was done
+- Closed the v3.52 counterexample audit as v3.53 by making final blind acceptance depend on explicit blind portfolio evidence instead of lock/open state alone.
+- Canonicalized strict research dataset identity so dataset name and row order do not change identity, while duplicate timestamps fail fast.
+- Extended validation and blind frames with outcome tail history and required complete `max_hold_bars` windows before emitting timeout outcomes.
+- Routed backtest slippage and fee calculation through shared `CostConfig`, and kept formal historical data strict about required `is_closed`.
+- Changed gap detection to fail closed on unreadable data and to process minor gaps instead of skipping them.
+- Hardened dashboard `npm run check` to include lint, production typecheck, isolated test typecheck, Node tests, and production build.
+- Clarified lifecycle notification ownership so direct-send callers mark sent/failed state, dispatcher only sends, sent rows do not increment attempts, and repeated failure marking is idempotent.
+- Bumped package/version metadata, GUI/launcher visible version source, and strict research artifact identity to `3.53.0` / `v3.53-strict`.
+### Testing
+- `python -m compileall -q src main.py gui.py tests` -> passed.
+- `py -3.12 -m pytest -q` -> passed with expected local-data/integration skips.
+- `npm.cmd run check` in `dashboard` -> lint, typecheck, Node tests, and production build passed; Node reported experimental Type Stripping warnings only.
+- `git diff --check` -> passed; Git reported LF-to-CRLF working-copy normalization warnings only.
+### Notes
+- Modified files: `src/okx_signal_system/backtest/research.py` adds canonical content identity, blind portfolio acceptance, outcome-tail split windows, grid hash metadata, and `v3.53-strict`; `src/okx_signal_system/backtest/runner.py` uses shared `CostConfig` and complete timeout windows; `src/okx_signal_system/signal_quality/outcome.py` suppresses incomplete tail timeouts; `src/okx_signal_system/data/loader.py`, `src/okx_signal_system/data/quality.py`, and `src/okx_signal_system/data/gap_handler.py` enforce formal closed-candle data and fail closed on gap detection errors; `src/okx_signal_system/notify/dispatcher.py`, `src/okx_signal_system/scheduler.py`, `gui.py`, and `src/okx_signal_system/signal_quality/lifecycle.py` align direct-send outbox ownership; dashboard config files add full check coverage; tests add regressions for the audit counterexamples; release metadata and docs are synchronized to v3.53.
+- Rollback: revert only the v3.53 hunks in the listed source, dashboard, test, version, and docs files, then remove this appended progress entry.

@@ -29,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--blind-release-token", default=None)
     parser.add_argument("--blind-release-token-sha256", default=None)
     parser.add_argument("--blind-registry-path", default=None)
-    parser.add_argument("--research-version", default="v3.52-strict")
+    parser.add_argument("--research-version", default="v3.53-strict")
     return parser
 
 

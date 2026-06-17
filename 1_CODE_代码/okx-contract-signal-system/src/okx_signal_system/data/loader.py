@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import time
+from typing import Literal
 
 import pandas as pd
 
@@ -13,6 +14,8 @@ from okx_signal_system.timeframe import SUPPORTED_TIMEFRAMES, normalize_timefram
 
 OHLCV_COLUMNS = ["ts", "open", "high", "low", "close", "volume"]
 OPTIONAL_COLUMNS = ["symbol", "timeframe", "quote_volume", "is_closed"]
+MISSING_REQUIRED_IS_CLOSED_COLUMN = "MISSING_REQUIRED_IS_CLOSED_COLUMN"
+DataRole = Literal["formal_history", "runtime_cache"]
 
 
 @dataclass(frozen=True)
@@ -43,7 +46,13 @@ def list_parquet_files(dataset: str = "okx_15m_extended") -> list[Path]:
     return sorted(path for path in root.glob("*.parquet") if ".tmp" not in path.name)
 
 
-def normalize_ohlcv(frame: pd.DataFrame, *, inst_id: str, timeframe: str = "1h") -> pd.DataFrame:
+def normalize_ohlcv(
+    frame: pd.DataFrame,
+    *,
+    inst_id: str,
+    timeframe: str = "1h",
+    data_role: DataRole = "formal_history",
+) -> pd.DataFrame:
     df = frame.copy()
     timeframe = normalize_timeframe(timeframe)
     if "time" in df.columns and "ts" not in df.columns:
@@ -55,6 +64,8 @@ def normalize_ohlcv(frame: pd.DataFrame, *, inst_id: str, timeframe: str = "1h")
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     if "is_closed" not in df.columns:
+        if data_role == "formal_history":
+            raise ValueError(f"{inst_id} {MISSING_REQUIRED_IS_CLOSED_COLUMN}")
         df["is_closed"] = True
     if "symbol" not in df.columns:
         df["symbol"] = inst_id
@@ -67,7 +78,7 @@ def normalize_ohlcv(frame: pd.DataFrame, *, inst_id: str, timeframe: str = "1h")
     return df[[*ordered, *rest]].sort_values("ts").reset_index(drop=True)
 
 
-def load_symbol_file(path: Path) -> SymbolData:
+def load_symbol_file(path: Path, *, data_role: DataRole = "formal_history") -> SymbolData:
     inst_id = file_symbol_to_inst_id(path)
     last_error: Exception | None = None
     for attempt in range(3):
@@ -81,7 +92,7 @@ def load_symbol_file(path: Path) -> SymbolData:
     else:
         assert last_error is not None
         raise last_error
-    frame = normalize_ohlcv(raw, inst_id=inst_id, timeframe=file_timeframe(path))
+    frame = normalize_ohlcv(raw, inst_id=inst_id, timeframe=file_timeframe(path), data_role=data_role)
     return SymbolData(inst_id=inst_id, source_path=path, frame=frame)
 
 

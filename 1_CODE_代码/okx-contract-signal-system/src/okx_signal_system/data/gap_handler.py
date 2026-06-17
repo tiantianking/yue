@@ -66,6 +66,10 @@ class DataGap:
     severity: str  # minor, moderate, severe
 
 
+class DataGapDetectionError(RuntimeError):
+    """Raised when local gap detection cannot determine continuity."""
+
+
 @dataclass
 class SyncResult:
     """同步结果"""
@@ -106,6 +110,18 @@ class DataGapHandler:
         self.data_dir = data_dir
         self.read_only = _configured_read_only() if read_only is None and uses_default_history_root else bool(read_only)
         self._api_unavailable_reason: str | None = None
+
+    @staticmethod
+    def _closed_bool(value: object) -> bool:
+        if pd.isna(value):
+            return True
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"true", "1", "yes"}
+
+    @classmethod
+    def _coerce_closed_series(cls, values: pd.Series) -> pd.Series:
+        return values.map(cls._closed_bool).astype("bool")
 
     def detect_gaps(self, inst_id: str) -> list[DataGap]:
         """
@@ -166,7 +182,7 @@ class DataGapHandler:
 
         except Exception as e:
             log.error(f"Error detecting gaps for {inst_id}: {e}")
-            return []
+            raise DataGapDetectionError(f"GAP_DETECTION_FAILED: {inst_id}: {e}") from e
 
     def backfill_gap(self, gap: DataGap) -> pd.DataFrame | None:
         """
@@ -276,7 +292,7 @@ class DataGapHandler:
             if "is_closed" not in df.columns:
                 df["is_closed"] = True
             else:
-                df["is_closed"] = df["is_closed"].fillna(True)
+                df["is_closed"] = self._coerce_closed_series(df["is_closed"])
             if "symbol" not in df.columns:
                 df["symbol"] = inst_id
             else:
@@ -300,7 +316,7 @@ class DataGapHandler:
         同步单个币种数据
         检测缺口并回填
         """
-        gaps = self.detect_gaps(inst_id)
+        gaps: list[DataGap] = []
         result = SyncResult(
             inst_id=inst_id,
             gaps_filled=0,
@@ -308,11 +324,14 @@ class DataGapHandler:
             last_bar_time=datetime.now(timezone.utc),
             success=True,
         )
+        try:
+            gaps = self.detect_gaps(inst_id)
+        except DataGapDetectionError as exc:
+            result.success = False
+            result.errors.append(str(exc))
+            return result
 
         for gap in gaps:
-            if gap.severity == "minor":
-                continue  # 小缺口忽略
-
             if self._api_unavailable_reason:
                 result.success = False
                 result.errors.append(self._api_unavailable_reason)

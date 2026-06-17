@@ -97,6 +97,15 @@ def _is_closed_value(value: Any) -> bool:
 
 
 def lifecycle_payload(record: SignalLifecycleRecord) -> dict[str, Any]:
+    if record.confirmed_at:
+        setup_state = "CONFIRMED"
+    elif record.invalidated_at:
+        setup_state = "INVALIDATED"
+    elif record.expired_at:
+        setup_state = "EXPIRED"
+    else:
+        setup_state = record.status
+    outcome_state = record.status if record.status in {"TARGET_REACHED", "STOP_REACHED", "TIMEOUT_RESULT"} else None
     return {
         "signal_id": record.signal_id,
         "inst_id": record.inst_id,
@@ -104,6 +113,8 @@ def lifecycle_payload(record: SignalLifecycleRecord) -> dict[str, Any]:
         "side": record.side,
         "signal_time": record.signal_time,
         "entry_ref": record.entry_ref,
+        "setup_state": setup_state,
+        "outcome_state": outcome_state,
         "state": record.status,
         "status": record.status,
         "lifecycle_event": {
@@ -666,7 +677,6 @@ class SignalLifecycleStore:
                     sent_at = ?,
                     last_error = NULL,
                     locked_until = NULL,
-                    attempt_count = attempt_count + CASE WHEN status != 'SENT' THEN 1 ELSE 0 END,
                     updated_at = ?
                 WHERE outbox_id = ?
                    OR (signal_id = ? AND event_type = 'TRIGGERED')
@@ -678,8 +688,15 @@ class SignalLifecycleStore:
         now = _now_text()
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT attempt_count FROM notification_outbox WHERE outbox_id = ?",
-                (outbox_id,),
+                """
+                SELECT attempt_count
+                FROM notification_outbox
+                WHERE outbox_id = ?
+                   OR (signal_id = ? AND event_type = 'TRIGGERED')
+                ORDER BY CASE WHEN outbox_id = ? THEN 0 ELSE 1 END
+                LIMIT 1
+                """,
+                (outbox_id, outbox_id, outbox_id),
             ).fetchone()
             attempt_count = int(row["attempt_count"]) if row is not None else 0
             retry_delay = min(
@@ -695,9 +712,11 @@ class SignalLifecycleStore:
                     locked_until = NULL,
                     attempt_count = attempt_count + 1,
                     updated_at = ?
-                WHERE outbox_id = ?
+                WHERE (outbox_id = ?
+                   OR (signal_id = ? AND event_type = 'TRIGGERED'))
+                  AND status NOT IN ('SENT', 'FAILED', 'DEAD_LETTER')
                 """,
-                (error[:1000], _future_text(retry_delay), now, outbox_id),
+                (error[:1000], _future_text(retry_delay), now, outbox_id, outbox_id),
             )
 
     def mark_notification_dead_letter(self, outbox_id: str, error: str) -> None:
