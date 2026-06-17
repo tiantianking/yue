@@ -11,27 +11,23 @@ from okx_signal_system.data.closed_backfill import latest_closed_candle_start
 from okx_signal_system.data.loader import closed_bars
 from okx_signal_system.features.indicators import build_feature_frame
 from okx_signal_system.risk.model import RiskConfig, RiskDecision, validate_signal
-from okx_signal_system.signal_quality import (
-    QualityModelShadowScorer,
-    SignalCandidate,
-    SignalLifecycleStore,
-    assign_tiers,
-    lifecycle_payload,
-)
-from okx_signal_system.signal_quality.candidate import CandidateLike, ObservationCandidate
+from okx_signal_system.signal_quality.candidate import CandidateLike, ObservationCandidate, SignalCandidate
 from okx_signal_system.signal_quality.correlation import DEFAULT_MIN_CORRELATION_SAMPLES
+from okx_signal_system.signal_quality.lifecycle import SignalLifecycleStore, lifecycle_payload
 from okx_signal_system.signal_quality.observation import (
     NEAR_BREAKOUT_DISTANCE_ATR,
     breakout_distance_atr,
     near_breakout_observation,
 )
+from okx_signal_system.signal_quality.quality_shadow import QualityModelShadowScorer
 from okx_signal_system.signal_quality.selector import TieredSelection
+from okx_signal_system.signal_quality.selector import assign_tiers
+from okx_signal_system.signal_service.runtime import is_latest_bar_fresh
 from okx_signal_system.signal_runtime import DEFAULT_MAX_SIGNAL_LAG_MINUTES, signal_is_stale
 from okx_signal_system.strategy.ensemble import ensemble_vote
 from okx_signal_system.strategy.trend_breakout import StrategyParams, TradeSignal, build_signal
 from okx_signal_system.strategy.vote_gate import vote_gate_passed
 from okx_signal_system.timeframe import timeframe_spec
-from okx_signal_system.training.startup_quality import is_latest_bar_fresh
 
 
 def live_signal_history_limit(params: StrategyParams, *, signal_timeframe: str, trend_timeframe: str) -> int:
@@ -74,13 +70,15 @@ def _signal_risk_payload(decision: RiskDecision) -> dict[str, Any]:
     return {
         "accepted": bool(decision.accepted),
         "reason": decision.reason,
+        "expected_move_pct": decision.expected_move_pct,
+        "failure_probability": decision.failure_probability,
+        "volatility_adjusted_score": decision.volatility_adjusted_score,
         "stop_distance_pct": decision.stop_distance_pct,
         "risk_reward_ratio": decision.risk_reward_ratio,
         "cost_buffer_pct": decision.cost_buffer_pct,
         "signal_score": decision.signal_score,
         "stop_reason": decision.stop_reason,
         "tp_reason": decision.tp_reason,
-        "near_liq_flag": bool(decision.near_liq_flag),
     }
 
 
@@ -156,7 +154,17 @@ class SignalScanService:
                 trend_timeframe=context.trend_timeframe,
             )
             raw_frame = await self._candle_loader(inst_id, history_limit)
-            df = closed_bars(raw_frame)
+            try:
+                df = closed_bars(raw_frame)
+            except ValueError as exc:
+                cycle_health.append(
+                    self._candidate_health_item(
+                        inst_id=inst_id,
+                        reason="invalid_closed_bar_schema",
+                        risk_reason=str(exc),
+                    )
+                )
+                continue
             if len(df) < context.min_history_bars:
                 cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="history_too_short"))
                 continue
@@ -222,8 +230,6 @@ class SignalScanService:
                     idx=len(features) - 1,
                 )
                 candidate_history[inst_id] = df
-                if self._shadow_ledger is not None:
-                    self._shadow_ledger.update_symbol(inst_id, df)
                 if self._lifecycle_store is not None:
                     self._lifecycle_store.update_symbol(inst_id, df)
                 if not signal.accepted:
@@ -614,9 +620,7 @@ class SignalScanService:
         )
 
     def _shadow_adjustment(self, inst_id: str, side: str, *, min_closed: int) -> float:
-        if self._shadow_ledger is None:
-            return 0.0
-        return float(self._shadow_ledger.score_adjustment(inst_id, side, min_closed=min_closed))
+        return 0.0
 
     def _quality_model_scorer(self) -> QualityModelShadowScorer:
         if self._quality_model_shadow is None:

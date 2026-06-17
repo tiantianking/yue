@@ -53,7 +53,8 @@ class TradingBrain:
         self.dataset = data_cfg.get("historical_dataset", "okx_15m_extended")
         self.signal_timeframe = timeframe_spec(data_cfg.get("timeframe", "15m")).key
         self.trend_timeframe = timeframe_spec(data_cfg.get("trend_timeframe", "1h")).key
-        self.live_param_updates_enabled = bool(learning_cfg.get("live_param_updates_enabled", False))
+        self.live_param_updates_enabled = False
+        self.live_param_updates_requested = bool(learning_cfg.get("live_param_updates_enabled", False))
         self.param_suggestions: list[dict] = []
 
         self.online_learning = create_learning_engine(self.data_dir / "online_learning")
@@ -284,6 +285,7 @@ class TradingBrain:
             "is_running": self._running,
             "current_params": asdict(self.current_params),
             "live_param_updates_enabled": self.live_param_updates_enabled,
+            "live_param_updates_requested": self.live_param_updates_requested,
             "param_suggestions": self.param_suggestions[-5:],
             "active_symbols": self.symbol_rotator.get_active_symbols(),
             "learning_stats": self.online_learning.get_performance_summary(),

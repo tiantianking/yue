@@ -212,10 +212,18 @@ class AdaptiveParamsManager:
 
     def get_score_penalty(self) -> float:
         """获取当前环境的信号评分惩罚"""
+        return 0.0
+
+    def offline_score_penalty(self) -> float:
+        """Return the observed regime penalty for offline/research analysis."""
         return REGIME_SCORE_PENALTY.get(self.current_regime, 0.0)
 
     def get_leverage_factor(self) -> float:
         """获取当前环境的杠杆调整系数"""
+        return 1.0
+
+    def offline_leverage_factor(self) -> float:
+        """Return the observed regime leverage factor for offline/research analysis."""
         return REGIME_LEVERAGE_FACTOR.get(self.current_regime, 1.0)
 
     def get_regime_name_cn(self) -> str:
@@ -236,6 +244,8 @@ class AdaptiveParamsManager:
             "regime_name_cn": self.get_regime_name_cn(),
             "current_params": asdict(self.current_params),
             "score_penalty": self.get_score_penalty(),
+            "observed_score_penalty": self.offline_score_penalty(),
             "leverage_factor": self.get_leverage_factor(),
+            "observed_leverage_factor": self.offline_leverage_factor(),
             "switch_count": len(self._regime_history),
         }

@@ -14,6 +14,7 @@ from okx_signal_system.data.closed_backfill import (
 from okx_signal_system.data.gap_handler import DataGap, DataGapHandler, summarize_sync_error
 from okx_signal_system.data.loader import (
     MISSING_REQUIRED_IS_CLOSED_COLUMN,
+    MISSING_REQUIRED_STRUCTURE_COLUMNS,
     SymbolData,
     closed_bars,
     file_symbol_to_inst_id,
@@ -185,6 +186,13 @@ def test_closed_bars_filters_unclosed_rows() -> None:
     assert len(closed_bars(frame)) == 1
 
 
+def test_closed_bars_requires_explicit_is_closed_column() -> None:
+    frame = pd.DataFrame({"ts": pd.date_range("2026-01-01", periods=2, tz="UTC")})
+
+    with pytest.raises(ValueError, match=MISSING_REQUIRED_IS_CLOSED_COLUMN):
+        closed_bars(frame)
+
+
 def test_closed_bars_parses_string_closed_flags() -> None:
     frame = pd.DataFrame(
         {
@@ -205,13 +213,28 @@ def test_formal_loader_rejects_missing_is_closed_column() -> None:
         normalize_ohlcv(frame, inst_id="BTC-USDT-SWAP", timeframe="15m")
 
 
-def test_runtime_cache_loader_requires_explicit_role_to_fill_missing_is_closed() -> None:
+def test_runtime_cache_loader_rejects_missing_is_closed_column() -> None:
     frame = _valid_15m_frame().drop(columns=["is_closed"])
 
-    result = normalize_ohlcv(frame, inst_id="BTC-USDT-SWAP", timeframe="15m", data_role="runtime_cache")
+    with pytest.raises(ValueError, match=MISSING_REQUIRED_IS_CLOSED_COLUMN):
+        normalize_ohlcv(frame, inst_id="BTC-USDT-SWAP", timeframe="15m", data_role="runtime_cache")
+
+
+def test_raw_ingest_loader_is_only_role_allowed_to_fill_missing_is_closed() -> None:
+    frame = _valid_15m_frame().drop(columns=["is_closed"])
+
+    result = normalize_ohlcv(frame, inst_id="BTC-USDT-SWAP", timeframe="15m", data_role="raw_ingest")
 
     assert "is_closed" in result.columns
     assert result["is_closed"].astype(bool).all()
+
+
+@pytest.mark.parametrize("data_role", ["formal_history", "runtime_cache", "research", "runtime"])
+def test_strict_data_roles_reject_missing_symbol_or_timeframe(data_role) -> None:
+    frame = _valid_15m_frame().drop(columns=["symbol"])
+
+    with pytest.raises(ValueError, match=MISSING_REQUIRED_STRUCTURE_COLUMNS):
+        normalize_ohlcv(frame, inst_id="BTC-USDT-SWAP", timeframe="15m", data_role=data_role)
 
 
 def test_quality_audit_fails_formal_history_missing_is_closed_column() -> None:
@@ -566,11 +589,30 @@ def test_realtime_store_preserves_quote_volume(tmp_path) -> None:
             "close": 0.65,
             "volume": 1000,
             "quote_volume": 10000,
+            "is_closed": True,
         },
     )
     frame = store.load("ADA-USDT-SWAP")
     assert frame.iloc[-1]["quote_volume"] == 10000
     assert (tmp_path / "ADA_USDT_USDT_15m.parquet").name == store._get_file_path("ADA-USDT-SWAP").name
+
+
+def test_realtime_store_rejects_missing_closed_flag(tmp_path) -> None:
+    store = RealtimeDataStore(tmp_path, timeframe="15m")
+
+    assert not store.append_candle(
+        "ADA-USDT-SWAP",
+        {
+            "ts": "2026-06-13T10:00:00Z",
+            "open": 0.6,
+            "high": 0.7,
+            "low": 0.5,
+            "close": 0.65,
+            "volume": 1000,
+            "quote_volume": 10000,
+        },
+    )
+    assert store.load("ADA-USDT-SWAP").empty
 
 
 def test_realtime_store_overwrites_same_bar_without_dtype_error(tmp_path) -> None:
@@ -649,6 +691,7 @@ def test_realtime_store_appends_to_empty_or_all_na_cache_without_concat(tmp_path
             "close": 100.5,
             "volume": 10.0,
             "quote_volume": 1000.0,
+            "is_closed": True,
         },
     )
 
@@ -671,6 +714,9 @@ def test_realtime_store_writes_runtime_cache_without_mutating_history(tmp_path) 
             "close": [100.0],
             "volume": [10.0],
             "quote_volume": [1000.0],
+            "symbol": ["BTC-USDT-SWAP"],
+            "timeframe": ["15m"],
+            "is_closed": [True],
         }
     ).to_parquet(history_path, index=False)
 
@@ -690,6 +736,7 @@ def test_realtime_store_writes_runtime_cache_without_mutating_history(tmp_path) 
             "close": 101.5,
             "volume": 20.0,
             "quote_volume": 2000.0,
+            "is_closed": True,
         },
     )
 
@@ -716,6 +763,7 @@ def test_realtime_store_retains_at_least_3500_bars(tmp_path) -> None:
                 "close": 100.5,
                 "volume": 10.0,
                 "quote_volume": 1000.0,
+                "is_closed": True,
             },
         )
 
@@ -726,18 +774,22 @@ def test_realtime_store_retains_at_least_3500_bars(tmp_path) -> None:
 
 
 def test_gap_sync_stops_batch_after_rest_unavailable(tmp_path, monkeypatch) -> None:
-    stale = pd.DataFrame(
-        {
-            "ts": [pd.Timestamp.now("UTC") - pd.Timedelta(days=4)],
-            "open": [100.0],
-            "high": [101.0],
-            "low": [99.0],
-            "close": [100.0],
-            "volume": [10.0],
-            "quote_volume": [1000.0],
-        }
-    )
     for symbol in ["BTC", "ETH"]:
+        inst_id = f"{symbol}-USDT-SWAP"
+        stale = pd.DataFrame(
+            {
+                "ts": [pd.Timestamp.now("UTC") - pd.Timedelta(days=4)],
+                "open": [100.0],
+                "high": [101.0],
+                "low": [99.0],
+                "close": [100.0],
+                "volume": [10.0],
+                "quote_volume": [1000.0],
+                "symbol": [inst_id],
+                "timeframe": ["1h"],
+                "is_closed": [True],
+            }
+        )
         stale.to_parquet(tmp_path / f"{symbol}_USDT_USDT_1h.parquet", index=False)
 
     calls = []
@@ -819,7 +871,31 @@ def test_gap_sync_attempts_minor_gap_instead_of_skipping(tmp_path, monkeypatch) 
     assert calls and calls[0].severity == "minor"
 
 
-def test_gap_merge_fills_optional_metadata(tmp_path) -> None:
+def test_gap_merge_accepts_complete_metadata(tmp_path) -> None:
+    handler = DataGapHandler(tmp_path)
+    frame = pd.DataFrame(
+        {
+            "ts": [pd.Timestamp("2026-06-13T10:00:00Z")],
+            "open": [10.0],
+            "high": [11.0],
+            "low": [9.0],
+            "close": [10.5],
+            "volume": [100.0],
+            "quote_volume": [1000.0],
+            "symbol": ["HYPE-USDT-SWAP"],
+            "timeframe": ["1h"],
+            "is_closed": [True],
+        }
+    )
+
+    assert handler.merge_and_save("HYPE-USDT-SWAP", frame, mode="replace")
+    saved = pd.read_parquet(tmp_path / "HYPE_USDT_USDT_1h.parquet")
+    assert saved.iloc[0]["symbol"] == "HYPE-USDT-SWAP"
+    assert saved.iloc[0]["timeframe"] == "1h"
+    assert bool(saved.iloc[0]["is_closed"]) is True
+
+
+def test_gap_merge_rejects_missing_metadata_instead_of_filling_it(tmp_path) -> None:
     handler = DataGapHandler(tmp_path)
     frame = pd.DataFrame(
         {
@@ -833,11 +909,29 @@ def test_gap_merge_fills_optional_metadata(tmp_path) -> None:
         }
     )
 
-    assert handler.merge_and_save("HYPE-USDT-SWAP", frame, mode="replace")
-    saved = pd.read_parquet(tmp_path / "HYPE_USDT_USDT_1h.parquet")
-    assert saved.iloc[0]["symbol"] == "HYPE-USDT-SWAP"
-    assert saved.iloc[0]["timeframe"] == "1h"
-    assert bool(saved.iloc[0]["is_closed"]) is True
+    assert not handler.merge_and_save("HYPE-USDT-SWAP", frame, mode="replace")
+    assert not (tmp_path / "HYPE_USDT_USDT_1h.parquet").exists()
+
+
+def test_gap_merge_rejects_open_candle_rows(tmp_path) -> None:
+    handler = DataGapHandler(tmp_path)
+    frame = pd.DataFrame(
+        {
+            "ts": [pd.Timestamp("2026-06-13T10:00:00Z")],
+            "open": [10.0],
+            "high": [11.0],
+            "low": [9.0],
+            "close": [10.5],
+            "volume": [100.0],
+            "quote_volume": [1000.0],
+            "symbol": ["HYPE-USDT-SWAP"],
+            "timeframe": ["1h"],
+            "is_closed": [False],
+        }
+    )
+
+    assert not handler.merge_and_save("HYPE-USDT-SWAP", frame, mode="replace")
+    assert not (tmp_path / "HYPE_USDT_USDT_1h.parquet").exists()
 
 
 def test_backfill_uses_detected_gap_boundaries(tmp_path, monkeypatch) -> None:

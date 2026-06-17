@@ -166,6 +166,28 @@ def test_signal_risk_does_not_reject_existing_account_position() -> None:
     assert decision.reason is None
 
 
+def test_signal_risk_score_output_ignores_execution_state() -> None:
+    signal = build_signal(base_row(), inst_id="BTC-USDT-SWAP")
+    ledger = Ledger(
+        "BTC-USDT-SWAP",
+        init_capital=10000,
+        equity=9200,
+        open_positions=3,
+        loss_streak=4,
+        max_drawdown=0.2,
+        cool_off_bars=8,
+    )
+
+    decision = validate_signal(signal, ledger, RiskConfig(max_leverage=10))
+
+    assert decision.accepted
+    assert decision.signal_score == signal.signal_score
+    assert decision.leverage_cap == 0
+    assert decision.leverage_used is None
+    assert decision.qty is None
+    assert decision.notional is None
+
+
 def test_strategy_rejects_too_close_protection_after_costs() -> None:
     signal = build_signal(base_row(atr=0.05, atr_pct=0.00045), inst_id="BTC-USDT-SWAP")
     assert not signal.accepted

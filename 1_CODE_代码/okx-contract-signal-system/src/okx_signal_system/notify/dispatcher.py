@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any
 
 import pandas as pd
@@ -23,12 +24,62 @@ def _format_beijing_time(value: Any) -> str:
     return ts.tz_convert("Asia/Shanghai").strftime("%Y-%m-%d %H:%M:%S 北京时间")
 
 
+def _now_dispatch_time() -> str:
+    return pd.Timestamp.now(tz="Asia/Shanghai").strftime("%Y-%m-%d %H:%M:%S 北京时间")
+
+
 def _payload_value(payload: dict[str, Any], *names: str) -> Any:
     for name in names:
         value = payload.get(name)
         if value is not None:
             return value
     return None
+
+
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    if hasattr(value, "isoformat") and not isinstance(value, (str, bytes)):
+        try:
+            return value.isoformat()
+        except Exception:
+            pass
+    if isinstance(value, tuple):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, list):
+        return [_jsonable(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    return value
+
+
+def _public_object_payload(value: Any) -> dict[str, Any]:
+    try:
+        return asdict(value)
+    except TypeError:
+        return {
+            key: getattr(value, key)
+            for key in dir(value)
+            if not key.startswith("_") and not callable(getattr(value, key))
+        }
+
+
+def _candidate_payload(candidate: Any) -> dict[str, Any]:
+    if isinstance(candidate, dict):
+        return _jsonable(candidate)
+    payload: dict[str, Any] = {}
+    for name in ("inst_id", "side", "rank", "tier", "rank_score", "raw_score", "correlation_group"):
+        if hasattr(candidate, name):
+            payload[name] = getattr(candidate, name)
+    for name in ("payload", "health_item"):
+        value = getattr(candidate, name, None)
+        if isinstance(value, dict):
+            payload[name] = value
+    for name in ("signal", "decision"):
+        value = getattr(candidate, name, None)
+        if value is not None:
+            payload[name] = _public_object_payload(value)
+    return _jsonable(payload)
 
 
 class NotificationDispatcher:
@@ -56,7 +107,7 @@ class NotificationDispatcher:
             record = self._lifecycle_store.get(notify_key)
             if record is not None:
                 lifecycle = lifecycle_payload(record)
-        sent = send_signal_observation(
+        return send_signal_observation(
             inst_id=signal.inst_id,
             side=signal.side,
             entry_ref=signal.entry_ref or 0,
@@ -77,7 +128,6 @@ class NotificationDispatcher:
             invalidation_price=invalidation_price,
             quality_model=quality_model,
         )
-        return sent
 
     def send_a_tier_signal(self, candidate: Any, *, signal_timeframe: str, trend_timeframe: str) -> bool:
         signal = candidate.signal
@@ -128,10 +178,99 @@ class NotificationDispatcher:
             selected_params=selected_params,
         )
 
-    def send_lifecycle_event(self, event: dict[str, Any]) -> bool:
-        if event.get("event_type") == "A_TIER_SIGNAL":
-            return self._send_a_tier_outbox_event(event)
+    def send_startup(self, *, symbol_count: int, environment: str) -> bool:
+        return send_text(
+            "\n".join(
+                [
+                    "OKX signal observation platform started",
+                    f"time: {_now_dispatch_time()}",
+                    f"symbols: {symbol_count}",
+                    "mode: SIGNAL_ONLY",
+                    "purpose: signal observation and manual review",
+                    f"data_environment: {environment}",
+                ]
+            )
+        )
 
+    def enqueue_b_tier_summary(
+        self,
+        outbox_id: str,
+        candidates: list[Any],
+        *,
+        total_candidates: int,
+        signal_timeframe: str,
+        trend_timeframe: str,
+    ) -> bool:
+        if self._lifecycle_store is None or not candidates:
+            return False
+        self._lifecycle_store.enqueue_notification(
+            outbox_id,
+            signal_id=None,
+            event_type="B_TIER_SUMMARY",
+            payload={
+                "candidates": [_candidate_payload(candidate) for candidate in candidates],
+                "total_candidates": total_candidates,
+                "signal_timeframe": signal_timeframe,
+                "trend_timeframe": trend_timeframe,
+            },
+        )
+        return True
+
+    def enqueue_status(self, *, outbox_id: str, cycle_count: int, status: str, last_signal_count: int | None = None) -> bool:
+        if self._lifecycle_store is None:
+            return False
+        self._lifecycle_store.enqueue_notification(
+            outbox_id,
+            signal_id=None,
+            event_type="STATUS_REPORT",
+            payload={"cycle_count": cycle_count, "status": status, "last_signal_count": last_signal_count},
+        )
+        return True
+
+    def enqueue_candidate_health_report(
+        self,
+        *,
+        outbox_id: str,
+        items: list[dict[str, Any]],
+        push_allowed: bool,
+        selected_params: dict[str, Any] | None = None,
+    ) -> bool:
+        if self._lifecycle_store is None:
+            return False
+        self._lifecycle_store.enqueue_notification(
+            outbox_id,
+            signal_id=None,
+            event_type="CANDIDATE_HEALTH_REPORT",
+            payload={"items": items, "push_allowed": push_allowed, "selected_params": selected_params or {}},
+        )
+        return True
+
+    def enqueue_startup(self, *, outbox_id: str, symbol_count: int, environment: str) -> bool:
+        if self._lifecycle_store is None:
+            return False
+        self._lifecycle_store.enqueue_notification(
+            outbox_id,
+            signal_id=None,
+            event_type="STARTUP",
+            payload={"symbol_count": symbol_count, "environment": environment},
+        )
+        return True
+
+    def send_lifecycle_event(self, event: dict[str, Any]) -> bool:
+        event_type = event.get("event_type")
+        if event_type == "A_TIER_SIGNAL":
+            return self._send_a_tier_outbox_event(event)
+        if event_type == "B_TIER_SUMMARY":
+            return self._send_b_tier_outbox_event(event)
+        if event_type == "STATUS_REPORT":
+            return self._send_status_outbox_event(event)
+        if event_type == "CANDIDATE_HEALTH_REPORT":
+            return self._send_candidate_health_outbox_event(event)
+        if event_type == "STARTUP":
+            return self._send_startup_outbox_event(event)
+        return self._send_generic_lifecycle_event(event)
+
+    def _send_generic_lifecycle_event(self, event: dict[str, Any]) -> bool:
         payload = event.get("payload") if isinstance(event.get("payload"), dict) else event
         lifecycle_event = payload.get("lifecycle_event") if isinstance(payload.get("lifecycle_event"), dict) else {}
         status = _payload_value(payload, "status", "state") or event.get("event_type")
@@ -140,7 +279,6 @@ class NotificationDispatcher:
         tier = _payload_value(payload, "tier", "level")
         score = _payload_value(payload, "score", "signal_score")
         signal_time = _payload_value(payload, "signal_time", "triggered_at")
-        send_time = _now_dispatch_time()
         event_time = lifecycle_event.get("at") or event.get("available_at")
         lines = [
             "OKX signal lifecycle event",
@@ -148,7 +286,7 @@ class NotificationDispatcher:
             f"symbol: {symbol}",
             f"side: {side}",
             f"signal_time: {_format_beijing_time(signal_time)}",
-            f"send_time: {send_time}",
+            f"send_time: {_now_dispatch_time()}",
         ]
         if tier is not None:
             lines.append(f"tier: {tier}")
@@ -169,10 +307,7 @@ class NotificationDispatcher:
         risk = payload.get("risk") if isinstance(payload.get("risk"), dict) else {}
         lifecycle = payload.get("lifecycle") if isinstance(payload.get("lifecycle"), dict) else {}
         reason_codes = signal.get("reason_codes") or ()
-        if isinstance(reason_codes, str):
-            reason = reason_codes
-        else:
-            reason = ", ".join(str(code) for code in reason_codes if code)
+        reason = reason_codes if isinstance(reason_codes, str) else ", ".join(str(code) for code in reason_codes if code)
         return send_signal_observation(
             inst_id=str(signal.get("inst_id") or payload.get("symbol") or event.get("signal_id") or "-"),
             side=str(signal.get("side") or payload.get("side") or "-"),
@@ -195,23 +330,42 @@ class NotificationDispatcher:
             quality_model=payload.get("quality_model") if isinstance(payload.get("quality_model"), dict) else None,
         )
 
-    def send_startup(self, *, symbol_count: int, environment: str) -> bool:
-        return send_text(
-            "\n".join(
-                [
-                    "OKX signal observation platform started",
-                    f"time: {pd.Timestamp.now(tz='Asia/Shanghai').strftime('%Y-%m-%d %H:%M:%S 北京时间')}",
-                    f"symbols: {symbol_count}",
-                    "mode: SIGNAL_ONLY",
-                    "purpose: signal observation and manual review",
-                    f"data_environment: {environment}",
-                ]
-            )
+    def _send_b_tier_outbox_event(self, event: dict[str, Any]) -> bool:
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        candidates = payload.get("candidates")
+        if not isinstance(candidates, list):
+            candidates = []
+        return send_b_tier_summary(
+            candidates,
+            total_candidates=payload.get("total_candidates"),
+            signal_timeframe=payload.get("signal_timeframe"),
+            trend_timeframe=payload.get("trend_timeframe"),
         )
 
+    def _send_status_outbox_event(self, event: dict[str, Any]) -> bool:
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        return send_status_report(
+            cycle_count=int(payload.get("cycle_count") or 0),
+            status=str(payload.get("status") or ""),
+            last_signal_count=payload.get("last_signal_count"),
+        )
 
-def _now_dispatch_time() -> str:
-    return pd.Timestamp.now(tz="Asia/Shanghai").strftime("%Y-%m-%d %H:%M:%S 北京时间")
+    def _send_candidate_health_outbox_event(self, event: dict[str, Any]) -> bool:
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        items = payload.get("items")
+        selected_params = payload.get("selected_params")
+        return send_candidate_health_report(
+            items=items if isinstance(items, list) else [],
+            push_allowed=bool(payload.get("push_allowed")),
+            selected_params=selected_params if isinstance(selected_params, dict) else None,
+        )
+
+    def _send_startup_outbox_event(self, event: dict[str, Any]) -> bool:
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        return self.send_startup(
+            symbol_count=int(payload.get("symbol_count") or 0),
+            environment=str(payload.get("environment") or ""),
+        )
 
 
 __all__ = ["NotificationDispatcher"]

@@ -300,6 +300,9 @@ class RealtimeDataStore:
         candle格式: {"ts": ..., "open": ..., "high": ..., "low": ..., "close": ..., "volume": ...}
         """
         df = self.load(inst_id)
+        if "is_closed" not in candle:
+            log.warning("Rejecting runtime candle without explicit is_closed flag: %s", inst_id)
+            return False
 
         quote_volume = candle.get("quote_volume")
         if quote_volume is None:
@@ -314,7 +317,7 @@ class RealtimeDataStore:
             "quote_volume": float(quote_volume) if quote_volume not in (None, "") else float("nan"),
             "symbol": inst_id,
             "timeframe": self.timeframe.key,
-            "is_closed": bool(candle.get("is_closed", True)),
+            "is_closed": bool(candle["is_closed"]),
         }])
 
         # Merge then de-duplicate instead of assigning by row; old parquet
@@ -946,16 +949,14 @@ class LiveSignalMonitor:
         )
 
         # --- 市场环境自适应（延迟导入避免循环依赖） ---
-        from okx_signal_system.ml.regime_adaptive import AdaptiveParamsManager
-        from okx_signal_system.ml.shadow_trading import ShadowTradingLedger
-        from okx_signal_system.training.startup_quality import load_selected_strategy_params
+        from okx_signal_system.signal_service.regime import AdaptiveParamsManager
+        from okx_signal_system.signal_service.runtime import load_selected_strategy_params
         self._regime_mgr = AdaptiveParamsManager()
         self._strategy_params = load_selected_strategy_params()
         from okx_signal_system.strategy.vote_gate import min_vote_approval_rate
         learning_cfg = self.api.config.get("learning", {}) if isinstance(self.api.config, dict) else {}
         self._min_vote_approval_rate = min_vote_approval_rate(self.api.config if isinstance(self.api.config, dict) else {})
         self._shadow_score_min_closed = int(learning_cfg.get("shadow_score_min_closed_signals", 6))
-        self._shadow_ledger = ShadowTradingLedger()
         self._lifecycle_store = SignalLifecycleStore()
         self._quality_model_shadow = QualityModelShadowScorer()
         self._scan_service = SignalScanService(
@@ -963,10 +964,9 @@ class LiveSignalMonitor:
             regime_manager=self._regime_mgr,
             quality_model_shadow=self._quality_model_shadow,
             lifecycle_store=self._lifecycle_store,
-            shadow_ledger=self._shadow_ledger,
             notify_key_builder=self._signal_notification_key,
         )
-        self._quality_gate_allows_push = False
+        self._quality_gate_allows_push = True
         self._last_candidate_health_report_ts = 0.0
         self._last_ready_signal: dict[str, Any] | None = None
         self._sent_startup_health_report = False
@@ -1045,26 +1045,14 @@ class LiveSignalMonitor:
         log.info("Live signal monitor started")
 
         try:
-            from okx_signal_system.training.startup_quality import run_startup_quality_gate
-            report = run_startup_quality_gate(
-                symbols=self.api._watched_symbols or None,
-                dataset=self.api.dataset,
-                signal_timeframe=self.api.timeframe.key,
-                trend_timeframe=self.api.trend_timeframe.key,
-                max_symbols=None,
-            )
-            self._strategy_params = report.strategy_params
-            self._quality_gate_allows_push = bool(getattr(report, "push_allowed", report.status == "passed"))
-            if not self._quality_gate_allows_push:
-                log.warning(
-                    "Startup quality gate blocked Feishu push: %s",
-                    getattr(report, "push_blocking_reasons", report.reasons),
-                )
-            elif report.reasons:
-                log.warning("Startup quality gate warnings do not block Feishu push: %s", report.reasons)
+            from okx_signal_system.signal_service.runtime import load_selected_strategy_params
+
+            self._strategy_params = load_selected_strategy_params()
+            self._quality_gate_allows_push = True
+            log.info("Loaded runtime signal parameters without running offline research gates")
         except Exception as exc:
-            self._quality_gate_allows_push = False
-            log.warning("Startup quality gate failed; Feishu push paused: %s", exc)
+            self._quality_gate_allows_push = True
+            log.warning("Runtime parameter load failed; using existing signal parameters: %s", exc)
 
         # 启动后台持久化任务
         self._monitor_task = asyncio.create_task(self._monitor_loop())
@@ -1134,10 +1122,7 @@ class LiveSignalMonitor:
         }
 
     def _write_latest_scan_status(self, items: list[dict[str, Any]], *, error: str | None = None) -> None:
-        try:
-            shadow_summary = self._shadow_ledger.summary()
-        except Exception:
-            shadow_summary = {}
+        shadow_summary = {}
         try:
             lifecycle_summary = self._lifecycle_store.summary()
         except Exception:
@@ -1170,23 +1155,19 @@ class LiveSignalMonitor:
 
     def _send_candidate_health_report(self, items: list[dict[str, Any]]) -> None:
         try:
-            shadow_summary = self._shadow_ledger.summary()
-
-            self._notification_dispatcher.send_candidate_health_report(
+            queued = self._notification_dispatcher.enqueue_candidate_health_report(
+                outbox_id=f"candidate_health:{pd.Timestamp.now(tz='UTC').strftime('%Y%m%dT%H%M')}",
                 items=items,
                 push_allowed=self._quality_gate_allows_push,
                 selected_params={
                     **asdict(self._strategy_params),
                     "signal_timeframe": self.api.timeframe.key,
                     "trend_timeframe": self.api.trend_timeframe.key,
-                    "shadow_open": shadow_summary.get("open", 0),
-                    "shadow_closed": shadow_summary.get("closed", 0),
-                    "shadow_take_profit": shadow_summary.get("take_profit", 0),
-                    "shadow_stop_loss": shadow_summary.get("stop_loss", 0),
-                    "shadow_avg_quality_score": shadow_summary.get("avg_quality_score", 0.0),
                 },
             )
-            log.info("Candidate health report sent: %s symbols", len(items))
+            if queued:
+                self._run_lifecycle_outbox_once()
+            log.info("Candidate health report queued: %s symbols", len(items))
         except Exception as exc:
             log.warning("Candidate health report failed: %s", exc)
 
@@ -1247,7 +1228,6 @@ class LiveSignalMonitor:
                     self._call_signal_callback(self.signal_callback, signal, decision, candidate)
                 except Exception as cb_err:
                     log.error("Signal callback error: %s", cb_err)
-            self._shadow_ledger.record_signal(signal, decision)
         if selection.tier_b:
             log.info("B-tier candidates retained for summary: %s", len(selection.tier_b))
             summary_key = self._b_tier_summary_key(selection.tier_b)
@@ -1255,20 +1235,21 @@ class LiveSignalMonitor:
                 log.info("B-tier summary already sent for this candle: %s", summary_key)
             else:
                 try:
-                    summary_sent = self._notification_dispatcher.send_b_tier_summary(
+                    summary_sent = self._notification_dispatcher.enqueue_b_tier_summary(
+                        summary_key or f"live_b_tier:{pd.Timestamp.now(tz='UTC').strftime('%Y%m%dT%H%M%S')}",
                         selection.tier_b,
                         total_candidates=total_formal_candidates,
                         signal_timeframe=self.api.timeframe.key,
                         trend_timeframe=self.api.trend_timeframe.key,
                     )
                 except Exception as exc:
-                    log.error("B-tier summary push failed: %s", exc)
+                    log.error("B-tier summary enqueue failed: %s", exc)
                     summary_sent = False
                 if summary_sent and summary_key:
                     self._mark_b_tier_summary_notified(summary_key, selection.tier_b)
-                    log.info("B-tier summary sent: %s candidates", len(selection.tier_b))
+                    log.info("B-tier summary queued: %s candidates", len(selection.tier_b))
                 elif summary_key:
-                    log.warning("B-tier summary was not delivered; will retry next scan")
+                    log.warning("B-tier summary was not queued; will retry next scan")
 
     @staticmethod
     def _call_signal_callback(callback, signal, decision, candidate):
@@ -1395,7 +1376,7 @@ class LiveSignalMonitor:
         if inst_id not in self._position_entries:
             self._position_entries[inst_id] = (
                 pd.Timestamp.now(tz="UTC"),
-                self._regime_mgr.current_params,
+                self._strategy_params,
             )
             return
 

@@ -14,8 +14,11 @@ from okx_signal_system.timeframe import SUPPORTED_TIMEFRAMES, normalize_timefram
 
 OHLCV_COLUMNS = ["ts", "open", "high", "low", "close", "volume"]
 OPTIONAL_COLUMNS = ["symbol", "timeframe", "quote_volume", "is_closed"]
+REQUIRED_METADATA_COLUMNS = ["symbol", "timeframe", "is_closed"]
 MISSING_REQUIRED_IS_CLOSED_COLUMN = "MISSING_REQUIRED_IS_CLOSED_COLUMN"
-DataRole = Literal["formal_history", "runtime_cache"]
+MISSING_REQUIRED_STRUCTURE_COLUMNS = "MISSING_REQUIRED_STRUCTURE_COLUMNS"
+STRICT_DATA_ROLES = {"formal_history", "runtime_cache", "research", "runtime"}
+DataRole = Literal["formal_history", "runtime_cache", "research", "runtime", "raw_ingest"]
 
 
 @dataclass(frozen=True)
@@ -41,6 +44,16 @@ def file_timeframe(path: Path, default: str = "1h") -> str:
     return normalize_timeframe(default)
 
 
+def _strict_role(data_role: DataRole) -> bool:
+    return data_role in STRICT_DATA_ROLES
+
+
+def _raise_missing_required_metadata(inst_id: str, missing: list[str]) -> None:
+    if missing == ["is_closed"]:
+        raise ValueError(f"{inst_id} {MISSING_REQUIRED_IS_CLOSED_COLUMN}")
+    raise ValueError(f"{inst_id} {MISSING_REQUIRED_STRUCTURE_COLUMNS}: {missing}")
+
+
 def list_parquet_files(dataset: str = "okx_15m_extended") -> list[Path]:
     root = find_lightweight_history(dataset)
     return sorted(path for path in root.glob("*.parquet") if ".tmp" not in path.name)
@@ -63,16 +76,24 @@ def normalize_ohlcv(
     df["ts"] = pd.to_datetime(df["ts"], utc=True)
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    if "is_closed" not in df.columns:
-        if data_role == "formal_history":
-            raise ValueError(f"{inst_id} {MISSING_REQUIRED_IS_CLOSED_COLUMN}")
-        df["is_closed"] = True
-    if "symbol" not in df.columns:
-        df["symbol"] = inst_id
-    if "timeframe" not in df.columns:
-        df["timeframe"] = timeframe
+    missing_metadata = [col for col in REQUIRED_METADATA_COLUMNS if col not in df.columns]
+    if _strict_role(data_role):
+        if missing_metadata:
+            if "is_closed" in missing_metadata:
+                raise ValueError(f"{inst_id} {MISSING_REQUIRED_IS_CLOSED_COLUMN}")
+            _raise_missing_required_metadata(inst_id, missing_metadata)
+        null_metadata = [col for col in REQUIRED_METADATA_COLUMNS if df[col].isna().any()]
+        if null_metadata:
+            _raise_missing_required_metadata(inst_id, null_metadata)
     else:
-        df["timeframe"] = df["timeframe"].fillna(timeframe)
+        if "is_closed" not in df.columns:
+            df["is_closed"] = True
+        if "symbol" not in df.columns:
+            df["symbol"] = inst_id
+        if "timeframe" not in df.columns:
+            df["timeframe"] = timeframe
+        else:
+            df["timeframe"] = df["timeframe"].fillna(timeframe)
     ordered = [*OHLCV_COLUMNS, *[c for c in OPTIONAL_COLUMNS if c in df.columns]]
     rest = [c for c in df.columns if c not in ordered]
     return df[[*ordered, *rest]].sort_values("ts").reset_index(drop=True)
@@ -102,7 +123,7 @@ def load_all_symbols(dataset: str = "okx_15m_extended") -> list[SymbolData]:
 
 def closed_bars(frame: pd.DataFrame) -> pd.DataFrame:
     if "is_closed" not in frame.columns:
-        return frame.copy()
+        raise ValueError(MISSING_REQUIRED_IS_CLOSED_COLUMN)
     closed = frame["is_closed"]
     if pd.api.types.is_bool_dtype(closed):
         mask = closed.fillna(False)

@@ -578,3 +578,22 @@
 ### Notes
 - Modified files include strict research/grid search and CLI, lifecycle store/tests, A-tier notification runtime paths/tests, dashboard runtime path tests, version metadata, release docs, and this progress entry.
 - Rollback: revert only the v3.54 hunks in the listed source, dashboard, test, version, and docs files, then remove this appended progress entry.
+
+## 2026-06-17 - Task: v3.55 lightweight realtime signal chain closure
+### What was done
+- Isolated the realtime chain from research/training/ML decision roots: `main.py`, `gui.py`, `exchange/realtime.py`, `scheduler.py`, and `signal_service/*` no longer import or start backtest, training, daily learning, or ML decision modules.
+- Routed runtime notifications through `notification_outbox` and `LifecycleOutboxWorker`: A-tier signals, B-tier summaries, candidate health reports, status reports, startup notices, and lifecycle events now share one delivery/retry path.
+- Enforced fail-fast candle structure for formal/runtime data. Missing `is_closed` is rejected, runtime append requires an explicit closed flag, and raw OKX ingestion is the only permissive metadata conversion path.
+- Kept lifecycle outcome ownership in `SignalOutcomeSimulator` while lifecycle storage tracks setup and outcome state separately.
+- Changed runtime risk payloads to signal-scoring fields: `expected_move_pct`, `failure_probability`, and `volatility_adjusted_score`, with execution/account fields left unset in formal payloads.
+- Made ML/shadow scoring observation-only in live paths and kept offline methods for research diagnostics.
+- Bumped shared package/version metadata and strict research artifact identity to `3.55.0` / `v3.55-strict`.
+### Testing
+- `py -3.12 -m pytest tests/test_realtime_research_isolation.py tests/test_lifecycle_outbox_runtime.py tests/test_scheduler_notifications.py tests/test_desktop_runtime.py tests/test_signal_scan_service.py tests/test_shadow_trading.py tests/test_strategy_risk.py -q` -> passed.
+- `python -m compileall -q src main.py gui.py tests` -> passed.
+- `py -3.12 -m pytest -q` -> passed with expected local-data/integration skips.
+- `npm.cmd run check` in `dashboard` -> lint, typecheck, 9 Node tests, and production build passed; Node reported experimental Type Stripping warnings only.
+- `git diff --check` -> passed; Git reported LF-to-CRLF working-copy normalization warnings only.
+### Notes
+- Modified files include runtime entrypoints, signal service runtime helpers, data loader/gap handler, notification dispatcher/outbox tests, lifecycle tests, ML observation locks, risk model, version metadata, release docs, and this progress entry.
+- Rollback: revert only the v3.55 hunks in the listed source, test, version, and docs files, then remove this appended progress entry.

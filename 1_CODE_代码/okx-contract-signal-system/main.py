@@ -171,13 +171,6 @@ async def run_closed_kline_backfill_service(symbols: list[str]) -> None:
         logger.error("closed kline backfill service stopped: %s", exc)
 
 
-async def run_daily_learning_review_service(symbols: list[str]) -> None:
-    """Run the guarded learning review loop in the background."""
-    from okx_signal_system.training.daily_learning import run_daily_learning_review_service as run_service
-
-    await run_service(symbols)
-
-
 async def run_dashboard_5m_backfill_service(symbols: list[str]) -> None:
     """Keep dashboard 5m candles local and fresh for fast chart rendering."""
     from okx_signal_system.config import load_config, project_paths
@@ -353,7 +346,6 @@ async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -
 
     monitor = LiveSignalMonitor(api, signal_callback=on_signal, risk_config=None)
     backfill_task = asyncio.create_task(run_closed_kline_backfill_service(symbols))
-    learning_task = asyncio.create_task(run_daily_learning_review_service(symbols))
     dashboard_5m_task = asyncio.create_task(run_dashboard_5m_backfill_service(symbols))
 
     logger.info("信号监控系统已启动")
@@ -362,11 +354,21 @@ async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -
     print("按 Ctrl+C 退出")
     print("=" * 50 + "\n")
 
-    # 推送启动通知到飞书
+    # Queue startup notification through the shared outbox.
     if feishu_enabled:
         try:
             env_label = "simulation" if os.environ.get("OKX_IS_SIMULATED", "true").lower() != "false" else "external_data"
-            dispatcher.send_startup(symbol_count=len(symbols), environment=env_label)
+            from okx_signal_system.notify import NotificationDispatcher
+            from okx_signal_system.signal_quality import LifecycleOutboxWorker, SignalLifecycleStore
+
+            startup_store = SignalLifecycleStore()
+            startup_dispatcher = NotificationDispatcher(startup_store)
+            startup_dispatcher.enqueue_startup(
+                outbox_id=f"startup:{pd.Timestamp.now(tz='UTC').strftime('%Y%m%dT%H%M')}",
+                symbol_count=len(symbols),
+                environment=env_label,
+            )
+            LifecycleOutboxWorker(startup_store, startup_dispatcher).run_once()
         except Exception as e:
             logger.error(f"启动通知推送失败: {e}")
 
@@ -387,7 +389,7 @@ async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -
         logger.error(f"监控异常: {e}")
         print(f"\n[ERROR] 监控异常: {e}")
     finally:
-        for task in (backfill_task, learning_task, dashboard_5m_task):
+        for task in (backfill_task, dashboard_5m_task):
             task.cancel()
             try:
                 await task

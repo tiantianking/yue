@@ -67,6 +67,9 @@ class SignalRiskAssessment:
     tp_reason: str | None = None
     max_position_loss_pct: float | None = None
     position_margin_loss_pct: float | None = None
+    expected_move_pct: float | None = None
+    failure_probability: float | None = None
+    volatility_adjusted_score: float | None = None
 
     @property
     def max_loss_pct(self) -> float | None:
@@ -104,6 +107,45 @@ def _protection_metrics(signal: TradeSignal) -> tuple[float, float, float]:
     take_dist = abs(float(signal.take_profit) - entry)
     rr = take_dist / stop_dist if stop_dist > 0 else 0.0
     return stop_dist, take_dist, rr
+
+
+def _clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
+
+
+def _signal_scoring_metrics(
+    signal: TradeSignal | None,
+    *,
+    stop_distance_pct: float | None = None,
+    config: RiskConfig | None = None,
+) -> tuple[float | None, float | None, float | None]:
+    if signal is None or signal.entry_ref is None or signal.take_profit is None:
+        return None, None, None
+    try:
+        entry = float(signal.entry_ref)
+        if entry <= 0:
+            return None, None, None
+        stop_dist, take_dist, rr = _protection_metrics(signal)
+        take_pct = take_dist / entry
+        if stop_distance_pct is None and stop_dist > 0:
+            stop_distance_pct = stop_dist / entry
+    except (TypeError, ValueError):
+        return None, None, None
+
+    if take_pct <= 0:
+        return None, None, None
+
+    cfg = config or RiskConfig()
+    score = _signal_score(signal)
+    rr_value = float(signal.risk_reward_ratio or rr or 0.0)
+    score_confidence = _clamp((score - 1.0) / 9.0, 0.0, 1.0)
+    rr_confidence = _clamp(rr_value / max(cfg.min_reward_to_risk, RR_EPSILON), 0.0, 2.0) / 2.0
+    failure_probability = _clamp(1.0 - (0.7 * score_confidence + 0.3 * rr_confidence), 0.05, 0.95)
+
+    cost_adjusted_stop_pct = max(float(stop_distance_pct or 0.0) + COST_BUFFER_RATE, RR_EPSILON)
+    move_efficiency = _clamp((take_pct / cost_adjusted_stop_pct) / max(cfg.min_reward_to_risk, RR_EPSILON), 0.0, 1.0)
+    volatility_adjusted_score = _clamp(score * (0.5 + 0.5 * move_efficiency), 1.0, 10.0)
+    return float(take_pct), float(failure_probability), float(volatility_adjusted_score)
 
 
 def leverage_cap_for_signal(signal: TradeSignal, ledger: Ledger, config: RiskConfig) -> float:
@@ -193,7 +235,13 @@ def _reject(
     est_liq_buffer_pct: float | None = None,
     near_liq_flag: bool = False,
     position_margin_loss_pct: float | None = None,
+    config: RiskConfig | None = None,
 ) -> SignalRiskAssessment:
+    expected_move_pct, failure_probability, volatility_adjusted_score = _signal_scoring_metrics(
+        signal,
+        stop_distance_pct=stop_distance_pct,
+        config=config,
+    )
     return SignalRiskAssessment(
         accepted=False,
         reason=reason,
@@ -211,6 +259,9 @@ def _reject(
         tp_reason=signal.tp_reason if signal else None,
         max_position_loss_pct=None,
         position_margin_loss_pct=position_margin_loss_pct,
+        expected_move_pct=expected_move_pct,
+        failure_probability=failure_probability,
+        volatility_adjusted_score=volatility_adjusted_score,
     )
 
 
@@ -224,21 +275,21 @@ def validate_signal(
 
         config = load_runtime_config().risk_config()
     if not signal.accepted:
-        return _reject(signal.reject_reason or "signal_rejected", signal=signal)
+        return _reject(signal.reject_reason or "signal_rejected", signal=signal, config=config)
     if signal.entry_ref is None or signal.stop_loss is None or signal.take_profit is None or signal.max_hold_bars is None:
-        return _reject("missing_signal_protection", signal=signal)
+        return _reject("missing_signal_protection", signal=signal, config=config)
     if _signal_score(signal) < config.min_signal_score:
-        return _reject("signal_score_below_threshold", signal=signal)
+        return _reject("signal_score_below_threshold", signal=signal, config=config)
 
     entry = float(signal.entry_ref)
     stop_loss = float(signal.stop_loss)
     take_profit = float(signal.take_profit)
     if entry <= 0:
-        return _reject("invalid_entry_price", signal=signal)
+        return _reject("invalid_entry_price", signal=signal, config=config)
     if signal.side == "long" and not (stop_loss < entry < take_profit):
-        return _reject("invalid_long_protection", signal=signal)
+        return _reject("invalid_long_protection", signal=signal, config=config)
     if signal.side == "short" and not (take_profit < entry < stop_loss):
-        return _reject("invalid_short_protection", signal=signal)
+        return _reject("invalid_short_protection", signal=signal, config=config)
 
     stop_dist, take_dist, rr = _protection_metrics(signal)
     stop_pct = stop_dist / entry
@@ -246,15 +297,21 @@ def validate_signal(
     min_stop = max(config.min_stop_distance_pct, COST_BUFFER_RATE * 2.0)
     min_take = max(config.min_take_profit_distance_pct, min_stop * config.min_reward_to_risk)
     if stop_pct < min_stop:
-        return _reject("stop_too_close_after_costs", signal=signal, stop_distance_pct=stop_pct)
+        return _reject("stop_too_close_after_costs", signal=signal, stop_distance_pct=stop_pct, config=config)
     if take_pct < min_take:
-        return _reject("take_profit_too_close_after_costs", signal=signal, stop_distance_pct=stop_pct)
+        return _reject("take_profit_too_close_after_costs", signal=signal, stop_distance_pct=stop_pct, config=config)
     if rr + RR_EPSILON < config.min_reward_to_risk:
-        return _reject("risk_reward_too_low", signal=signal, stop_distance_pct=stop_pct)
+        return _reject("risk_reward_too_low", signal=signal, stop_distance_pct=stop_pct, config=config)
 
     cost_buffered_risk = stop_dist + entry * COST_BUFFER_RATE
     if cost_buffered_risk <= 0:
-        return _reject("invalid_stop_distance", signal=signal)
+        return _reject("invalid_stop_distance", signal=signal, config=config)
+
+    expected_move_pct, failure_probability, volatility_adjusted_score = _signal_scoring_metrics(
+        signal,
+        stop_distance_pct=stop_pct,
+        config=config,
+    )
 
     return SignalRiskAssessment(
         accepted=True,
@@ -274,4 +331,7 @@ def validate_signal(
         tp_reason=signal.tp_reason,
         max_position_loss_pct=None,
         position_margin_loss_pct=None,
+        expected_move_pct=expected_move_pct,
+        failure_probability=failure_probability,
+        volatility_adjusted_score=volatility_adjusted_score,
     )

@@ -387,7 +387,7 @@ src/okx_signal_system/
 - Validation and blind evaluations run on frames that include the required indicator warmup history, then filter trade entries back to the validation or blind evaluation window. This keeps indicator state mature without allowing training-period trades into validation metrics.
 - Research data manifests now include per-symbol file SHA-256, canonical OHLCV/is_closed content SHA-256, rows, and timestamp bounds. The manifest hash changes when candle values change, even if file path, row count, and timestamp range stay unchanged.
 - Blind access is registered in SQLite under `outputs/research_registry/blind_registry.sqlite3` by default. The registry uses dataset content hash, research config hash, selected parameter hash, and git commit to build a one-time `registry_id`; a sealed blind run cannot be opened again with the same identity.
-- The strict research CLI and core function use the same default research version, currently `v3.54-strict`, so artifacts created from different entrypoints carry the same release identity.
+- The strict research CLI and core function use the same default research version, currently `v3.55-strict`, so artifacts created from different entrypoints carry the same release identity.
 
 ## v3.51 Data Reliability Closure
 
@@ -414,7 +414,7 @@ src/okx_signal_system/
 - Dataset identity is canonical content identity. The identity hash excludes dataset name and file location metadata, sorts candles by UTC timestamp, normalizes `is_closed`, and rejects duplicate timestamps with `DUPLICATE_DATASET_TIMESTAMP`.
 - Validation and blind frames include the required outcome tail in addition to indicator warmup history. Trade entries are still filtered to the evaluation window, and incomplete `max_hold_bars` tails do not produce synthetic `TIMEOUT` outcomes.
 - Backtest costs and slippage use the shared runtime `CostConfig` instead of hard-coded defaults, keeping formal research, labeler, and runtime assumptions aligned.
-- Formal historical OHLCV requires `is_closed`. Missing `is_closed` fails with `MISSING_REQUIRED_IS_CLOSED_COLUMN`; permissive compatibility is limited to explicitly declared `runtime_cache` data.
+- Formal, runtime-cache, research, and runtime OHLCV all require `symbol`, `timeframe`, and `is_closed`. Missing `is_closed` fails with `MISSING_REQUIRED_IS_CLOSED_COLUMN`; permissive compatibility is limited to explicitly declared `raw_ingest` conversion.
 - Gap detection fails closed. Local read failures return `GAP_DETECTION_FAILED` through sync results instead of being treated as no gap, and minor gaps are backfilled instead of skipped.
 - Dashboard `npm run check` now runs lint, production typecheck, isolated test typecheck, Node tests, and production build. Test files are excluded from the app build `tsconfig` and compiled through `tsconfig.test.json`.
 - Notification delivery ownership is explicit: GUI, realtime monitor, and scheduler direct-send callers mark lifecycle outbox rows sent or failed, while `NotificationDispatcher` only sends. Sent rows no longer increment `attempt_count`, and failed marking is idempotent for already terminal rows.
@@ -428,3 +428,13 @@ src/okx_signal_system/
 - Lifecycle records persist separate `setup_state` and `outcome_state` fields. Setup invalidation/expiration no longer stops independent research outcome tracking, and analysis stop/target fields are distinct from setup invalidation.
 - A-tier Feishu notifications now enter `notification_outbox` and are delivered by the outbox worker. GUI, realtime monitor, scheduler, and main runtime no longer direct-send or mark sent/failed for formal A-tier messages.
 - Dashboard runtime path resolution chooses win32 or posix path semantics from the configured value, so explicit Windows drive paths and UNC paths do not get POSIX suffix duplication under Linux/CI.
+
+## v3.55 Lightweight Realtime Signal Chain
+
+- The realtime chain is a single lightweight path: data -> signal -> rank/filter -> `notification_outbox` -> Feishu worker. `main.py`, `gui.py`, `exchange/realtime.py`, `scheduler.py`, and `signal_service/*` must not import `backtest`, `training`, or ML decision modules.
+- Backtest, strict research, daily learning review, and ML remain offline/sidecar analysis paths. They can write diagnostics or reviewed parameter suggestions, but they do not start with the realtime monitor and cannot promote live parameters by themselves.
+- Runtime notification ownership is unified. A-tier signals, B-tier summaries, candidate health reports, status reports, startup notifications, and lifecycle events are inserted into `notification_outbox`; only `LifecycleOutboxWorker` calls `NotificationDispatcher.send_lifecycle_event()` to deliver and mark result state.
+- Data loading is fail-fast. Formal history, runtime cache, research, and runtime frames reject missing metadata or missing `is_closed`; only explicit raw OKX ingestion/conversion may create canonical `symbol`, `timeframe`, and closed-candle flags from confirmed exchange bars.
+- `SignalLifecycleStore` tracks setup state and outcome state, while terminal TP/SL/TIMEOUT outcomes are read from `SignalOutcomeSimulator` instead of being recalculated independently in lifecycle.
+- Runtime signal risk output is signal-scoring oriented: `expected_move_pct`, `failure_probability`, and `volatility_adjusted_score` are exposed for notification/ranking context. Execution/account fields stay unset in formal signal payloads.
+- ML and shadow trading are observation-only. Live score adjustment and live leverage adjustment return neutral values; offline methods keep historical analysis for research reports.

@@ -178,7 +178,6 @@ class OKXSignalGUI:
         self._notification_dispatcher_instance = None
         self._lifecycle_outbox_worker_instance = None
         self._quality_model_shadow = None
-        self._shadow_ledger = None
         self._runtime_modules: dict[str, dict] = {}
         self._background_tasks: list[asyncio.Task] = []
         self.dashboard_process = None
@@ -359,72 +358,6 @@ class OKXSignalGUI:
         )
         return status
 
-    async def _run_learning_review_once_if_due(self) -> None:
-        from okx_signal_system.config import load_config, project_paths
-        from okx_signal_system.training.daily_learning import (
-            LearningReviewConfig,
-            DailyLearningReviewService,
-        )
-
-        cfg = load_config("base.yaml")
-        learning_cfg = cfg.get("learning", {})
-        review_cfg = LearningReviewConfig.from_mapping(learning_cfg if isinstance(learning_cfg, dict) else {})
-        enabled = bool(review_cfg.daily_review_enabled)
-        self._update_runtime_module_status(
-            "daily_learning_review",
-            "disabled" if not enabled else "checking",
-            auto_promote_enabled=False,
-            promotion_eligible=False,
-            live_param_updates_enabled=bool(review_cfg.live_param_updates_enabled),
-        )
-        if not enabled:
-            return
-
-        service = DailyLearningReviewService(
-            self._watched_symbols,
-            dataset=self.api.dataset,
-            signal_timeframe=self.api.timeframe.key,
-            trend_timeframe=self.api.trend_timeframe.key,
-            output_dir=project_paths().output_dir,
-            config=review_cfg,
-        )
-        if not service.should_run():
-            self._update_runtime_module_status(
-                "daily_learning_review",
-                "healthy",
-                ran_this_start=False,
-                reason="not_due",
-                output_path=str(service.output_path),
-            )
-            return
-
-        self._update_runtime_module_status("daily_learning_review", "running", ran_this_start=True)
-        try:
-            report = await asyncio.wait_for(
-                asyncio.to_thread(service.run_once),
-                timeout=max(30.0, review_cfg.max_runtime_seconds),
-            )
-        except asyncio.TimeoutError:
-            reason = f"daily_review_timeout_after_{int(review_cfg.max_runtime_seconds)}s"
-            service._write_service_status("timeout", reason)
-            self._update_runtime_module_status("daily_learning_review", "timeout", reason=reason)
-            return
-        except Exception as exc:
-            service._write_service_status("failed", str(exc))
-            self._update_runtime_module_status("daily_learning_review", "failed", error=str(exc))
-            return
-
-        self._update_runtime_module_status(
-            "daily_learning_review",
-            "healthy",
-            ran_this_start=True,
-            candidate_gate_passed=report.candidate_gate_passed,
-            promotion_eligible=report.promotion_eligible,
-            promotion_allowed=report.promotion_allowed,
-            auto_promote_enabled=report.auto_promote_enabled,
-            reasons=report.reasons[:8],
-        )
-
     async def _closed_backfill_loop(self) -> None:
         from okx_signal_system.data.closed_backfill import seconds_until_next_closed_run
 
@@ -446,30 +379,10 @@ class OKXSignalGUI:
             delay = seconds_until_next_closed_run(self.api.timeframe.key, settle_seconds=60)
             await asyncio.sleep(min(delay, 3600.0))
 
-    async def _daily_learning_review_loop(self) -> None:
-        from okx_signal_system.training.daily_learning import seconds_until_next_review, LearningReviewConfig
-        from okx_signal_system.config import load_config, project_paths
-
-        while self.monitoring:
-            try:
-                await self._run_learning_review_once_if_due()
-                cfg = load_config("base.yaml")
-                review_cfg = LearningReviewConfig.from_mapping(cfg.get("learning", {}))
-                delay = seconds_until_next_review(
-                    project_paths().output_dir / "daily_learning_review.json",
-                    interval_hours=review_cfg.review_interval_hours,
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                self._update_runtime_module_status("daily_learning_review", "failed", error=str(exc))
-                self.message_queue.put(('log', (f"每日学习复盘后台异常: {exc}", "WARNING")))
-                delay = 3600.0
-            await asyncio.sleep(min(delay, 3600.0))
-
     def _send_candidate_health_report(self, items: list[dict], params) -> None:
         try:
-            ok = self._notification_dispatcher().send_candidate_health_report(
+            ok = self._notification_dispatcher().enqueue_candidate_health_report(
+                outbox_id=f"desktop_candidate_health:{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M')}",
                 items=items,
                 push_allowed=self._quality_gate_allows_push,
                 selected_params={
@@ -480,11 +393,12 @@ class OKXSignalGUI:
             )
             self._last_candidate_health_report_ts = asyncio.get_event_loop().time()
             if ok:
-                log.info("Candidate health report sent: %s symbols", len(items))
-                self.message_queue.put(('log', (f"候选信号体检已推送：{len(items)} 个币种", "INFO")))
+                self._lifecycle_outbox_worker().run_once()
+                log.info("Candidate health report queued: %s symbols", len(items))
+                self.message_queue.put(('log', (f"候选信号体检已进入通知队列：{len(items)} 个币种", "INFO")))
             else:
-                log.warning("Candidate health report not sent: send_text returned false")
-                self.message_queue.put(('log', ("候选信号体检未送达：飞书返回失败", "WARNING")))
+                log.warning("Candidate health report not queued")
+                self.message_queue.put(('log', ("候选信号体检未入队", "WARNING")))
         except Exception as e:
             self._last_candidate_health_report_ts = asyncio.get_event_loop().time()
             log.warning("Candidate health report failed: %s", e)
@@ -534,13 +448,6 @@ class OKXSignalGUI:
 
             self._quality_model_shadow = QualityModelShadowScorer()
         return self._quality_model_shadow
-
-    def _shadow_ledger_store(self):
-        if self._shadow_ledger is None:
-            from okx_signal_system.ml.shadow_trading import ShadowTradingLedger
-
-            self._shadow_ledger = ShadowTradingLedger()
-        return self._shadow_ledger
 
     def _signal_notification_key(self, signal) -> str:
         from okx_signal_system.notify.signal_dedupe import signal_notification_key
@@ -1013,16 +920,23 @@ class OKXSignalGUI:
                     except Exception as e:
                         self.message_queue.put(('log', (f"  {inst_id}: 同步失败 {e}", "WARNING")))
 
-            # 启动训练质量门：加载历史训练参数，并用本地历史数据做一次训练/验证拆分检查
+            # 加载冻结运行时参数；离线训练/回测质量门不进入实时 GUI 主链。
             try:
-                from okx_signal_system.training.startup_quality import run_startup_quality_gate
-                self.message_queue.put(('log', ("正在执行启动训练质量门...", "INFO")))
-                report = run_startup_quality_gate(
-                    symbols=self._watched_symbols,
-                    dataset=self.api.dataset,
-                    signal_timeframe=self.api.timeframe.key,
-                    trend_timeframe=self.api.trend_timeframe.key,
-                    max_symbols=None,
+                from types import SimpleNamespace
+
+                from okx_signal_system.signal_service.runtime import load_selected_strategy_params
+
+                runtime_params = load_selected_strategy_params()
+                self.message_queue.put(('log', ("已加载运行时信号参数，跳过离线研究质量门", "INFO")))
+                report = SimpleNamespace(
+                    strategy_params=runtime_params,
+                    status="runtime",
+                    valid_summary={"total_trades": 0, "profit_factor": 0.0},
+                    selected_params=asdict(runtime_params),
+                    stale_symbols=[],
+                    reasons=[],
+                    push_allowed=True,
+                    push_blocking_reasons=[],
                 )
                 self._startup_quality_report = report
                 self._trained_params = report.strategy_params
@@ -1050,8 +964,8 @@ class OKXSignalGUI:
                         "WARNING",
                     )))
             except Exception as e:
-                self._quality_gate_allows_push = False
-                self.message_queue.put(('log', (f"启动训练质量门异常，使用默认参数: {e}", "WARNING")))
+                self._quality_gate_allows_push = True
+                self.message_queue.put(('log', (f"运行时参数加载异常，使用默认参数: {e}", "WARNING")))
 
             # 连接 WebSocket（接收实时更新）
             self.message_queue.put(('log', ('正在连接 WebSocket...', "INFO")))
@@ -1068,8 +982,14 @@ class OKXSignalGUI:
 
             self._background_tasks = [
                 asyncio.create_task(self._closed_backfill_loop()),
-                asyncio.create_task(self._daily_learning_review_loop()),
             ]
+            self._update_runtime_module_status(
+                "daily_learning_review",
+                "offline_only",
+                reason="not_started_by_realtime_main_chain",
+                auto_promote_enabled=False,
+                live_param_updates_enabled=False,
+            )
             
             # 更新状态
             self.message_queue.put(('status', 'connected'))
@@ -1157,10 +1077,10 @@ class OKXSignalGUI:
             import pandas as pd
             from okx_signal_system.strategy.trend_breakout import StrategyParams
             from okx_signal_system.config import load_config
-            from okx_signal_system.ml.regime_adaptive import AdaptiveParamsManager
             from okx_signal_system.risk.model import Ledger
             from okx_signal_system.signal_quality import SignalCandidate
             from okx_signal_system.signal_service import SignalScanContext, SignalScanService
+            from okx_signal_system.signal_service.regime import AdaptiveParamsManager
             from okx_signal_system.strategy.vote_gate import min_vote_approval_rate
 
             # 加载策略参数
@@ -1202,7 +1122,6 @@ class OKXSignalGUI:
                 regime_manager=self._adaptive_manager,
                 quality_model_shadow=self._quality_model_shadow_scorer(),
                 lifecycle_store=self._signal_lifecycle_store(),
-                shadow_ledger=self._shadow_ledger_store(),
                 notify_key_builder=self._signal_notification_key,
             )
             scan_result = await scan_service.scan_cycle(
@@ -1214,7 +1133,7 @@ class OKXSignalGUI:
                     strategy_params=base_params,
                     risk_config=runtime_risk,
                     ledger=Ledger(inst_id="desktop", init_capital=runtime_risk.initial_equity, equity=runtime_risk.initial_equity),
-                    quality_gate_allows_push=getattr(self, '_quality_gate_allows_push', False),
+                    quality_gate_allows_push=getattr(self, '_quality_gate_allows_push', True),
                     min_vote_approval_rate=min_vote_rate,
                     mode="desktop_manual_confirmation_only",
                     min_history_bars=80,
@@ -1280,7 +1199,8 @@ class OKXSignalGUI:
                     self.message_queue.put(('log', ("B-tier summary already sent for this candle", "INFO")))
                 else:
                     try:
-                        summary_sent = self._notification_dispatcher().send_b_tier_summary(
+                        summary_sent = self._notification_dispatcher().enqueue_b_tier_summary(
+                            summary_key or f"desktop_b_tier:{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}",
                             selection.tier_b,
                             total_candidates=total_formal_candidates,
                             signal_timeframe=self.api.timeframe.key if self.api else None,
@@ -1288,12 +1208,12 @@ class OKXSignalGUI:
                         )
                     except Exception as e:
                         summary_sent = False
-                        self.message_queue.put(('log', (f"B-tier summary push failed: {e}", "WARNING")))
+                        self.message_queue.put(('log', (f"B-tier summary enqueue failed: {e}", "WARNING")))
                     if summary_sent and summary_key:
                         self._mark_b_tier_summary_notified(summary_key, selection.tier_b)
-                        self.message_queue.put(('log', (f"B-tier summary sent: {len(selection.tier_b)} candidates", "INFO")))
+                        self.message_queue.put(('log', (f"B-tier summary queued: {len(selection.tier_b)} candidates", "INFO")))
                     elif summary_key:
-                        self.message_queue.put(('log', ("B-tier summary was not delivered; will retry", "WARNING")))
+                        self.message_queue.put(('log', ("B-tier summary was not queued; will retry", "WARNING")))
             self._write_latest_scan_status(cycle_health, base_params)
             try:
                 outbox_summary = self._lifecycle_outbox_worker().run_once()

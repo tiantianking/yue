@@ -395,7 +395,6 @@ def test_publish_tiered_candidates_uses_scan_service_selection() -> None:
         return True
 
     monitor.signal_callback = signal_callback
-    monitor._shadow_ledger = type("ShadowLedger", (), {"record_signal": lambda self, signal, _decision: recorded.append(signal.inst_id)})()
     monitor._lifecycle_store = type(
         "LifecycleStore",
         (),
@@ -416,7 +415,7 @@ def test_publish_tiered_candidates_uses_scan_service_selection() -> None:
     assert callback_candidates[0].payload["total_formal_candidates"] == 2
     assert callback_candidates[0].health_item["rank"] == 1
     assert callback_candidates[0].health_item["total_formal_candidates"] == 2
-    assert recorded == ["LOW-USDT-SWAP"]
+    assert recorded == []
     assert outbox == [
         (
             "pending",

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 
+import okx_signal_system.signal_quality.lifecycle as lifecycle_module
 from okx_signal_system.signal_quality.labeler import label_signal
 from okx_signal_system.signal_quality.lifecycle import LifecycleOutboxWorker, SignalLifecycleStore, lifecycle_payload
 from okx_signal_system.signal_quality.outcome import SIGNAL_OUTCOME_POLICY, SignalOutcomeSimulator
@@ -143,6 +145,57 @@ def test_lifecycle_result_matches_labeler_when_tp_hits_before_confirmation(tmp_p
     assert record.setup_state == "TRIGGERED"
     assert record.outcome_state == "TARGET_REACHED"
     assert record.target_reached_at == pd.Timestamp(expected.exit_time).isoformat()
+
+
+def test_lifecycle_maps_outcome_simulator_result_without_price_recalculation(tmp_path, monkeypatch) -> None:
+    store = SignalLifecycleStore(tmp_path / "lifecycle.json")
+    signal = _signal(entry_ref=100.0, stop_loss=95.0, take_profit=115.0, max_hold_bars=3)
+    store.record_signal(signal, signal_id="sig-simulator-owned")
+    calls = []
+
+    class FakeOutcomeSimulator:
+        def simulate_signal(self, signal_record, *, frame, closed_only, after_signal_time, policy, require_complete_timeout):
+            calls.append(
+                {
+                    "signal_id": signal_record.signal_id,
+                    "closed_only": closed_only,
+                    "after_signal_time": after_signal_time,
+                    "require_complete_timeout": require_complete_timeout,
+                    "rows": len(frame),
+                }
+            )
+            return SimpleNamespace(outcome="TP", exit_time=pd.Timestamp("2026-01-01T00:15:00Z"))
+
+    monkeypatch.setattr(lifecycle_module, "_OUTCOME_SIMULATOR", FakeOutcomeSimulator())
+
+    frame = _frame(
+        [
+            {
+                "ts": pd.Timestamp("2026-01-01T00:15:00Z"),
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 99.5,
+                "is_closed": True,
+            },
+        ]
+    )
+
+    assert store.update_symbol("BTC-USDT-SWAP", frame) == 1
+    record = store.get("sig-simulator-owned")
+    assert calls == [
+        {
+            "signal_id": "sig-simulator-owned",
+            "closed_only": True,
+            "after_signal_time": False,
+            "require_complete_timeout": True,
+            "rows": 1,
+        }
+    ]
+    assert record.setup_state == "TRIGGERED"
+    assert record.outcome_state == "TARGET_REACHED"
+    assert record.status == "TARGET_REACHED"
+    assert record.target_reached_at == "2026-01-01T00:15:00+00:00"
 
 
 def test_lifecycle_stop_reached_after_confirmation(tmp_path) -> None:

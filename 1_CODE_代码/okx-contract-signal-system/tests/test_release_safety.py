@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import re
 import subprocess
@@ -76,7 +76,7 @@ def test_release_version_sources_stay_consistent() -> None:
     gui_text = _read("gui.py")
     start_text = _read("start.bat")
 
-    assert package_version == "3.54.0"
+    assert package_version == "3.55.0"
     assert pyproject["project"]["version"] == package_version
     assert f"Version: {package_version}" in pkg_info
     assert "from okx_signal_system import __version__ as _PACKAGE_VERSION" in main_text
@@ -97,7 +97,7 @@ def test_strict_research_default_version_matches_cli_release() -> None:
     cli_text = _read("src/okx_signal_system/backtest/research_cli.py")
     default_version = research.run_dataset_research_artifacts.__kwdefaults__["research_version"]
 
-    assert default_version == "v3.54-strict"
+    assert default_version == "v3.55-strict"
     assert f'parser.add_argument("--research-version", default="{default_version}")' in cli_text
 
 
@@ -314,6 +314,19 @@ def test_release_docs_mark_learning_paths_experimental_not_production_tuning() -
     assert "not production automatic tuning features" in docs
     assert "must not promote parameters into runtime by themselves" in docs
     assert "strict research acceptance flow and operator review" in docs
+
+
+def test_ml_live_scoring_paths_are_observation_only() -> None:
+    shadow_text = _read("src/okx_signal_system/ml/shadow_trading.py")
+    regime_text = _read("src/okx_signal_system/ml/regime_adaptive.py")
+    brain_text = _read("src/okx_signal_system/ml/trading_brain.py")
+
+    assert "if _called_from_realtime_decision_path():" in shadow_text
+    assert "return 0.0" in shadow_text
+    assert "def offline_score_adjustment" in shadow_text
+    assert "def offline_score_penalty" in regime_text
+    assert "def offline_leverage_factor" in regime_text
+    assert "self.live_param_updates_enabled = False" in brain_text
 
 
 def test_release_facing_text_is_signal_only() -> None:

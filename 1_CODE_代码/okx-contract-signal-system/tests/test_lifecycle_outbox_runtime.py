@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import ast
 from dataclasses import dataclass
+from pathlib import Path
 
 import pandas as pd
 
@@ -9,6 +11,46 @@ from okx_signal_system.risk.model import Ledger, RiskDecision
 from okx_signal_system.signal_quality import TieredSelection
 from okx_signal_system.signal_service import SignalScanResult
 from okx_signal_system.strategy.trend_breakout import TradeSignal
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+RUNTIME_NOTIFICATION_FILES = [
+    PROJECT_ROOT / "src" / "okx_signal_system" / "scheduler.py",
+    PROJECT_ROOT / "src" / "okx_signal_system" / "exchange" / "realtime.py",
+    PROJECT_ROOT / "src" / "okx_signal_system" / "ml" / "trading_brain.py",
+    PROJECT_ROOT / "src" / "okx_signal_system" / "signal_service" / "job.py",
+    PROJECT_ROOT / "gui.py",
+]
+A_TIER_DIRECT_SEND_METHODS = {
+    "send_signal",
+    "send_a_tier_signal",
+    "send_signal_alert",
+    "send_signal_observation",
+    "feishu_send_signal_card",
+    "send_b_tier_summary",
+    "send_candidate_health_report",
+    "send_status",
+    "send_startup",
+}
+A_TIER_OUTBOX_MARK_METHODS = {
+    "mark_notification_sent",
+    "mark_notification_failed",
+    "mark_notification_dead_letter",
+}
+
+
+def _runtime_calls(paths: list[Path]) -> list[tuple[Path, int, str]]:
+    calls: list[tuple[Path, int, str]] = []
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else None
+            if name is not None:
+                calls.append((path, node.lineno, name))
+    return calls
 
 
 def test_scheduler_run_cycle_consumes_lifecycle_outbox(monkeypatch) -> None:
@@ -102,6 +144,30 @@ def test_live_monitor_loop_consumes_lifecycle_outbox_after_scan(monkeypatch) -> 
     asyncio.run(monitor._monitor_loop())
 
     assert calls == ["run_once"]
+
+
+def test_formal_a_tier_runtime_paths_do_not_call_feishu_signal_senders() -> None:
+    calls = _runtime_calls(RUNTIME_NOTIFICATION_FILES)
+
+    direct_calls = [
+        (path.relative_to(PROJECT_ROOT).as_posix(), line, name)
+        for path, line, name in calls
+        if name in A_TIER_DIRECT_SEND_METHODS
+    ]
+
+    assert direct_calls == []
+
+
+def test_formal_a_tier_runtime_paths_do_not_mark_outbox_status_directly() -> None:
+    calls = _runtime_calls(RUNTIME_NOTIFICATION_FILES)
+
+    direct_marks = [
+        (path.relative_to(PROJECT_ROOT).as_posix(), line, name)
+        for path, line, name in calls
+        if name in A_TIER_OUTBOX_MARK_METHODS
+    ]
+
+    assert direct_marks == []
 
 
 def test_a_tier_outbox_worker_sends_and_marks_sent_once(monkeypatch, tmp_path) -> None:

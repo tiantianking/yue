@@ -47,3 +47,11 @@ v3.54 release boundary:
 - Same-command blind token plus hash is treated as self-authorized compatibility evidence only and must not satisfy final promotion checks.
 - Formal A-tier notifications are delivered through `notification_outbox` and the worker path. Runtime entrypoints submit events; they do not directly send Feishu or mark delivery status.
 - Lifecycle storage must preserve separate setup and outcome state fields for auditability and old SQLite stores must migrate forward without losing existing status.
+
+v3.55 release boundary:
+- Package metadata, launcher display, GUI display, and strict research artifact defaults are synchronized to `3.55.0` / `v3.55-strict`.
+- The realtime signal chain must not import or start `backtest`, `training`, or ML decision modules. Daily learning and strict research remain offline sidecar flows.
+- All runtime notifications use `notification_outbox` plus `LifecycleOutboxWorker`: A-tier signals, B-tier summaries, candidate health reports, status reports, startup notices, and lifecycle events.
+- Formal history, runtime cache, research, and runtime frames fail fast on missing metadata or missing `is_closed`; only explicit raw ingestion may synthesize canonical metadata from confirmed OKX candles.
+- Runtime risk payloads are signal-scoring payloads, not trade-execution payloads. `expected_move_pct`, `failure_probability`, and `volatility_adjusted_score` are allowed; account, position, leverage, and liquidation fields must not be release-facing signal text.
+- ML/shadow scoring must be observation-only in live paths. Runtime score and leverage adjustment methods return neutral values, while offline methods can preserve research diagnostics.

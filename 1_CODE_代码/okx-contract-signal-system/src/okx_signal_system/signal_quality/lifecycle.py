@@ -147,7 +147,7 @@ def lifecycle_payload(record: SignalLifecycleRecord) -> dict[str, Any]:
 
 
 class SignalLifecycleStore:
-    """Persist and update signal lifecycle states using closed candles only."""
+    """Persist setup/outcome lifecycle states using closed candles only."""
 
     SQLITE_SUFFIXES = {".sqlite", ".sqlite3", ".db"}
 
@@ -1140,20 +1140,6 @@ class SignalLifecycleStore:
 
     @staticmethod
     def _invalidates(record: SignalLifecycleRecord, close: float) -> bool:
-        if record.side == "long":
-            return close <= record.invalidation_price
-        return close >= record.invalidation_price
-
-    @staticmethod
-    def _target_reached(record: SignalLifecycleRecord, close: float) -> bool:
-        if record.take_profit is None:
-            return False
-        if record.side == "long":
-            return close >= record.take_profit
-        return close <= record.take_profit
-
-    @staticmethod
-    def _stop_reached(record: SignalLifecycleRecord, close: float) -> bool:
         if record.side == "long":
             return close <= record.invalidation_price
         return close >= record.invalidation_price

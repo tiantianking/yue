@@ -159,7 +159,7 @@ def test_signal_scan_service_returns_ranked_ready_candidate(monkeypatch) -> None
     assert result.ready_candidates[0].payload["mode"] == "test_manual_confirmation_only"
     assert result.ready_candidates[0].payload["rank"] == 1
     assert result.ready_candidates[0].payload["total_formal_candidates"] == 1
-    assert shadow_ledger.min_closed_values == [9]
+    assert shadow_ledger.min_closed_values == []
     assert lifecycle.recorded
 
 
@@ -231,7 +231,7 @@ def test_signal_scan_service_does_not_suppress_signal_for_account_position(monke
     assert len(result.ready_candidates) == 1
 
 
-def test_signal_scan_service_applies_shadow_adjustment_once(monkeypatch) -> None:
+def test_signal_scan_service_ignores_shadow_adjustment_for_formal_score(monkeypatch) -> None:
     async def loader(_inst_id: str, _limit: int) -> pd.DataFrame:
         return _frame()
 
@@ -297,7 +297,7 @@ def test_signal_scan_service_applies_shadow_adjustment_once(monkeypatch) -> None
     result = asyncio.run(service.scan_cycle(["BTC-USDT-SWAP"], context))
     candidate = result.ready_candidates[0]
 
-    assert candidate.health_item["shadow_adjustment"] == 0.8
+    assert candidate.health_item["shadow_adjustment"] == 0.0
     assert candidate.raw_score == candidate.signal.signal_score
     assert candidate.rank_score == candidate_rank_score(final_score=candidate.raw_score, decision=candidate.decision)
 
@@ -486,6 +486,40 @@ def test_signal_scan_service_respects_checked_bar_gate() -> None:
     result = asyncio.run(service.scan_cycle(["BTC-USDT-SWAP"], context))
 
     assert result.cycle_health[0]["reason"] == "waiting_next_bar"
+    assert result.ready_candidates == []
+
+
+def test_signal_scan_service_rejects_missing_closed_flag_without_crashing_cycle() -> None:
+    frame = _frame().drop(columns=["is_closed"])
+
+    async def loader(_inst_id: str, _limit: int) -> pd.DataFrame:
+        return frame
+
+    service = SignalScanService(
+        candle_loader=loader,
+        regime_manager=FakeRegimeManager(),
+        quality_model_shadow=FakeQualityShadow(),
+        lifecycle_store=FakeLifecycleStore(),
+    )
+    context = SignalScanContext(
+        dataset="test",
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+        strategy_params=StrategyParams(),
+        risk_config=RiskConfig(),
+        ledger=Ledger("portfolio", init_capital=10000, equity=10000),
+        quality_gate_allows_push=True,
+        min_vote_approval_rate=0.4,
+        mode="test_manual_confirmation_only",
+        min_history_bars=5,
+        expected_latest_closed=pd.Timestamp("2026-01-01T02:45:00Z"),
+        now=pd.Timestamp("2026-01-01T03:05:00Z"),
+    )
+
+    result = asyncio.run(service.scan_cycle(["BTC-USDT-SWAP"], context))
+
+    assert result.cycle_health[0]["reason"] == "invalid_closed_bar_schema"
+    assert "MISSING_REQUIRED_IS_CLOSED_COLUMN" in result.cycle_health[0]["risk_reason"]
     assert result.ready_candidates == []
 
 

@@ -11,6 +11,12 @@ from pathlib import Path
 
 import pandas as pd
 
+from okx_signal_system.data.loader import (
+    MISSING_REQUIRED_IS_CLOSED_COLUMN,
+    MISSING_REQUIRED_STRUCTURE_COLUMNS,
+    OHLCV_COLUMNS,
+    REQUIRED_METADATA_COLUMNS,
+)
 from okx_signal_system.exchange.candles import okx_candles_to_frame
 from okx_signal_system.exchange.okx import get_candles  # OKXInstrument
 from okx_signal_system.io_atomic import read_parquet_with_retry, write_parquet_atomic
@@ -143,6 +149,7 @@ class DataGapHandler:
 
         try:
             df = read_parquet_with_retry(path)
+            df = self._validate_merge_frame(df, inst_id)
             df["ts"] = pd.to_datetime(df["ts"], utc=True)
             df = df.sort_values("ts")
 
@@ -221,11 +228,15 @@ class DataGapHandler:
                 if not raw_bars:
                     break
 
+                raw_bars = [row for row in raw_bars if len(row) < 9 or str(row[8]) == "1"]
                 df = self._parse_candles(raw_bars)
                 df["ts"] = pd.to_datetime(df["ts"], utc=True)
                 df = df[(df["ts"] > gap_start) & (df["ts"] < gap_end)]
                 if df.empty:
                     break
+                df["symbol"] = inst_id
+                df["timeframe"] = self.timeframe.key
+                df["is_closed"] = True
                 all_bars.append(df)
 
                 earliest = df["ts"].min()
@@ -255,6 +266,41 @@ class DataGapHandler:
         """解析OKX K线数据"""
         return okx_candles_to_frame(raw_bars)
 
+    def _validate_merge_frame(self, df: pd.DataFrame, inst_id: str) -> pd.DataFrame:
+        missing_ohlcv = [col for col in OHLCV_COLUMNS if col not in df.columns]
+        if missing_ohlcv:
+            raise ValueError(f"{inst_id} missing OHLCV columns: {missing_ohlcv}")
+        missing_metadata = [col for col in REQUIRED_METADATA_COLUMNS if col not in df.columns]
+        if missing_metadata:
+            if "is_closed" in missing_metadata:
+                raise ValueError(f"{inst_id} {MISSING_REQUIRED_IS_CLOSED_COLUMN}")
+            raise ValueError(f"{inst_id} {MISSING_REQUIRED_STRUCTURE_COLUMNS}: {missing_metadata}")
+
+        checked = df.copy()
+        checked["ts"] = pd.to_datetime(checked["ts"], utc=True, errors="coerce")
+        for col in ["open", "high", "low", "close", "volume"]:
+            checked[col] = pd.to_numeric(checked[col], errors="coerce")
+        if checked[["ts", "open", "high", "low", "close", "volume"]].isna().any(axis=None):
+            raise ValueError(f"{inst_id} invalid OHLCV values")
+
+        null_metadata = [col for col in REQUIRED_METADATA_COLUMNS if checked[col].isna().any()]
+        if null_metadata:
+            if "is_closed" in null_metadata:
+                raise ValueError(f"{inst_id} {MISSING_REQUIRED_IS_CLOSED_COLUMN}")
+            raise ValueError(f"{inst_id} {MISSING_REQUIRED_STRUCTURE_COLUMNS}: {null_metadata}")
+
+        checked["is_closed"] = self._coerce_closed_series(checked["is_closed"])
+        if not checked["is_closed"].all():
+            raise ValueError(f"{inst_id} open candles cannot be saved by gap backfill")
+
+        symbol_mismatch = checked["symbol"].astype("string").str.strip() != inst_id
+        if symbol_mismatch.fillna(True).any():
+            raise ValueError(f"{inst_id} {MISSING_REQUIRED_STRUCTURE_COLUMNS}: symbol mismatch")
+        timeframe_mismatch = checked["timeframe"].astype("string").str.strip() != self.timeframe.key
+        if timeframe_mismatch.fillna(True).any():
+            raise ValueError(f"{inst_id} {MISSING_REQUIRED_STRUCTURE_COLUMNS}: timeframe mismatch")
+        return checked
+
     def merge_and_save(
         self,
         inst_id: str,
@@ -273,12 +319,12 @@ class DataGapHandler:
             return False
 
         try:
+            new_data = self._validate_merge_frame(new_data, inst_id)
             if mode == "replace" or not path.exists():
                 df = new_data
             else:
                 existing = read_parquet_with_retry(path)
-                existing["ts"] = pd.to_datetime(existing["ts"], utc=True)
-                new_data["ts"] = pd.to_datetime(new_data["ts"], utc=True)
+                existing = self._validate_merge_frame(existing, inst_id)
 
                 if mode == "append":
                     df = pd.concat([existing, new_data], ignore_index=True)
@@ -288,21 +334,8 @@ class DataGapHandler:
                 df = df.drop_duplicates(subset=["ts"], keep="last")
                 df = df.sort_values("ts").reset_index(drop=True)
 
-            # 确保is_closed标记
-            if "is_closed" not in df.columns:
-                df["is_closed"] = True
-            else:
-                df["is_closed"] = self._coerce_closed_series(df["is_closed"])
-            if "symbol" not in df.columns:
-                df["symbol"] = inst_id
-            else:
-                df["symbol"] = df["symbol"].fillna(inst_id)
-            if "timeframe" not in df.columns:
-                df["timeframe"] = self.timeframe.key
-            else:
-                df["timeframe"] = df["timeframe"].fillna(self.timeframe.key)
+            df = self._validate_merge_frame(df, inst_id)
 
-            # 保存
             write_parquet_atomic(df, path)
             log.info(f"Saved {len(df)} bars for {inst_id}")
             return True

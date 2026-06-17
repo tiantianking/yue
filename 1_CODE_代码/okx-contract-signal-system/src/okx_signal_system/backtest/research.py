@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import logging
@@ -1530,7 +1530,7 @@ def run_dataset_research_artifacts(
     blind_release_token: str | None = None,
     blind_release_token_sha256: str | None = None,
     blind_registry_path: str | Path | None = None,
-    research_version: str = "v3.54-strict",
+    research_version: str = "v3.55-strict",
     research_mode: str = "FORMAL",
 ) -> dict[str, pd.DataFrame | dict | StrategyParams]:
     symbols = load_all_symbols(dataset)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +11,11 @@ import pandas as pd
 from okx_signal_system.config import project_paths
 from okx_signal_system.risk.model import RiskDecision
 from okx_signal_system.strategy.trend_breakout import TradeSignal
+
+REALTIME_DECISION_MODULES = {
+    "okx_signal_system.signal_service.scan",
+    "okx_signal_system.exchange.realtime",
+}
 
 
 @dataclass
@@ -44,6 +50,19 @@ def _signal_id(signal: TradeSignal) -> str:
 
 def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
+
+
+def _called_from_realtime_decision_path() -> bool:
+    frame = inspect.currentframe()
+    if frame is None:
+        return False
+    frame = frame.f_back
+    while frame is not None:
+        module_name = str(frame.f_globals.get("__name__", ""))
+        if module_name in REALTIME_DECISION_MODULES:
+            return True
+        frame = frame.f_back
+    return False
 
 
 class ShadowTradingLedger:
@@ -164,6 +183,11 @@ class ShadowTradingLedger:
         return updated
 
     def score_adjustment(self, inst_id: str, side: str, *, min_closed: int = 6) -> float:
+        if _called_from_realtime_decision_path():
+            return 0.0
+        return self.offline_score_adjustment(inst_id, side, min_closed=min_closed)
+
+    def offline_score_adjustment(self, inst_id: str, side: str, *, min_closed: int = 6) -> float:
         closed = [
             item
             for item in self.signals

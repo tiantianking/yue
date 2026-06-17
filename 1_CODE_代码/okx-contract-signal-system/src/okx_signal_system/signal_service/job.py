@@ -6,13 +6,13 @@ from pathlib import Path
 
 from okx_signal_system.data.loader import load_symbol_file
 from okx_signal_system.config import load_runtime_config
-from okx_signal_system.ml.regime_adaptive import AdaptiveParamsManager
 from okx_signal_system.paths import find_lightweight_history
 from okx_signal_system.risk.model import Ledger, RiskConfig
 from okx_signal_system.signal_service import SignalScanContext, SignalScanService
+from okx_signal_system.signal_service.regime import AdaptiveParamsManager
+from okx_signal_system.signal_service.runtime import load_selected_strategy_params
 from okx_signal_system.strategy.trend_breakout import StrategyParams
 from okx_signal_system.timeframe import timeframe_spec
-from okx_signal_system.training.startup_quality import load_selected_strategy_params
 
 
 DEFAULT_DATASET = "okx_15m_extended"

@@ -41,6 +41,10 @@ class _Dispatcher:
         self.b_summaries.append((list(candidates), total_candidates, signal_timeframe, trend_timeframe))
         return True
 
+    def enqueue_b_tier_summary(self, _outbox_id, candidates, *, total_candidates: int, signal_timeframe: str, trend_timeframe: str) -> bool:
+        self.b_summaries.append((list(candidates), total_candidates, signal_timeframe, trend_timeframe))
+        return True
+
     def send_status(self, **kwargs) -> bool:
         self.statuses.append(kwargs)
         return True
