@@ -153,8 +153,12 @@ def test_signal_scan_service_returns_ranked_ready_candidate(monkeypatch) -> None
     assert len(result.cycle_health) == 1
     assert result.cycle_health[0]["reason"] == "ready"
     assert result.cycle_health[0]["tier"] == "A"
+    assert result.cycle_health[0]["rank"] == 1
+    assert result.cycle_health[0]["total_formal_candidates"] == 1
     assert result.ready_candidates[0].notify_key == "BTC-USDT-SWAP:long"
     assert result.ready_candidates[0].payload["mode"] == "test_manual_confirmation_only"
+    assert result.ready_candidates[0].payload["rank"] == 1
+    assert result.ready_candidates[0].payload["total_formal_candidates"] == 1
     assert shadow_ledger.min_closed_values == [9]
     assert lifecycle.recorded
 
@@ -436,8 +440,12 @@ def test_signal_scan_service_places_near_breakout_watch_item_in_tier_c(monkeypat
     assert observation.tier == "C"
     assert observation.inst_id == "BTC-USDT-SWAP"
     assert observation.payload["observation"]["status"] == "not_triggered"
+    assert observation.payload["watch_rank"] == 1
+    assert observation.payload["total_observations"] == 1
     assert observation.breakout_distance_atr == pytest.approx(0.2)
     assert observation.health_item["breakout_distance_atr"] == pytest.approx(0.2)
+    assert observation.health_item["watch_rank"] == 1
+    assert observation.health_item["total_observations"] == 1
     assert result.cycle_health[0]["breakout_distance_atr"] == pytest.approx(0.2)
     assert result.selection.tier_c == [observation]
     assert result.cycle_health[0]["reason"] == "near_breakout_observation"

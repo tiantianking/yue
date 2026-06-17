@@ -23,3 +23,8 @@ Packaging rule:
 v3.50 release preparation:
 - Keep package metadata and visible launcher displays on the shared package version source.
 - Verify release zip entries keep `.env.example`, use POSIX `/` separators, and exclude sensitive environment files, cache folders, `output/`, `outputs/`, and SQLite/database artifacts before publishing.
+
+v3.51 production boundary:
+- Formal A/B signal ranking and C-tier observation ranking are separate contracts: A/B notifications use `rank/total_formal_candidates`; C observations use `watch_rank/total_observations` and never affect formal rank.
+- Experimental learning modules may write sidecar diagnostics or parameter suggestions only. Release-facing docs, config examples, and notifications must not describe online learning, reinforcement learning, symbol rotation, or automatic parameter tuning as production behavior.
+- Runtime parameter changes require the strict research acceptance path and explicit operator review; daily learning and online learning outputs cannot promote parameters automatically.

@@ -333,18 +333,25 @@ async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -
     dispatcher = NotificationDispatcher()
 
     # 构建信号回调：信号通过风控后自动推飞书
-    def on_signal(signal, decision):
+    def on_signal(signal, decision, candidate=None):
         """信号回调：推送到飞书"""
         try:
             if not feishu_enabled:
                 return False
-            sent = dispatcher.send_signal(
-                signal,
-                decision,
-                signal_timeframe=api.timeframe.key,
-                trend_timeframe=api.trend_timeframe.key,
-                reason=", ".join(signal.reason_codes) if signal.reason_codes else "",
-            )
+            if candidate is not None:
+                sent = dispatcher.send_a_tier_signal(
+                    candidate,
+                    signal_timeframe=api.timeframe.key,
+                    trend_timeframe=api.trend_timeframe.key,
+                )
+            else:
+                sent = dispatcher.send_signal(
+                    signal,
+                    decision,
+                    signal_timeframe=api.timeframe.key,
+                    trend_timeframe=api.trend_timeframe.key,
+                    reason=", ".join(signal.reason_codes) if signal.reason_codes else "",
+                )
             if sent:
                 logger.info("Feishu signal push sent: %s %s", signal.inst_id, signal.side)
             else:

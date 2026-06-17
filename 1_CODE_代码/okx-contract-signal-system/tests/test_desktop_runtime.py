@@ -387,7 +387,14 @@ def test_publish_tiered_candidates_uses_scan_service_selection() -> None:
             "trend_timeframe": type("Timeframe", (), {"key": "1h"})(),
         },
     )()
-    monitor.signal_callback = lambda signal, _decision: pushed.append(signal.inst_id) or True
+    callback_candidates = []
+
+    def signal_callback(signal, _decision, candidate):
+        pushed.append(signal.inst_id)
+        callback_candidates.append(candidate)
+        return True
+
+    monitor.signal_callback = signal_callback
     monitor._shadow_ledger = type("ShadowLedger", (), {"record_signal": lambda self, signal, _decision: recorded.append(signal.inst_id)})()
     monitor._lifecycle_store = type(
         "LifecycleStore",
@@ -405,6 +412,12 @@ def test_publish_tiered_candidates_uses_scan_service_selection() -> None:
     asyncio.run(monitor._publish_tiered_candidates(selection))
 
     assert pushed == ["LOW-USDT-SWAP"]
+    assert callback_candidates == [low_score_a]
+    assert callback_candidates[0].payload is low_score_a.payload
+    assert callback_candidates[0].payload["rank"] == 1
+    assert callback_candidates[0].payload["total_formal_candidates"] == 2
+    assert callback_candidates[0].health_item["rank"] == 1
+    assert callback_candidates[0].health_item["total_formal_candidates"] == 2
     assert recorded == ["LOW-USDT-SWAP"]
     assert outbox[0][0] == "pending"
     assert outbox[0][1] == "LOW-USDT-SWAP:6.0"
@@ -413,3 +426,84 @@ def test_publish_tiered_candidates_uses_scan_service_selection() -> None:
     assert monitor._signal_notification_store.marked[0][0] == "LOW-USDT-SWAP:6.0"
     assert low_score_a.health_item["tier"] == "A"
     assert high_score_b.health_item["tier"] == "B"
+
+
+def test_publish_tiered_candidates_keeps_legacy_two_arg_callback() -> None:
+    from okx_signal_system.exchange.realtime import LiveSignalMonitor
+    from okx_signal_system.risk.model import RiskDecision
+    from okx_signal_system.signal_quality import SignalCandidate, TieredSelection
+    from okx_signal_system.strategy.trend_breakout import TradeSignal
+
+    class Store:
+        def has(self, _key):
+            return False
+
+        def mark(self, _key, metadata=None):
+            return True
+
+    signal = TradeSignal(
+        ts=pd.Timestamp("2026-01-01T00:00:00Z"),
+        inst_id="BTC-USDT-SWAP",
+        side="long",
+        entry_ref=100.0,
+        stop_loss=98.0,
+        take_profit=107.0,
+        max_hold_bars=12,
+        reason_codes=("TEST",),
+        signal_score=8.0,
+        risk_reward_ratio=3.5,
+    )
+    decision = RiskDecision(
+        accepted=True,
+        reason=None,
+        leverage_cap=3.0,
+        qty=1.0,
+        risk_amount=100.0,
+        leverage_used=3.0,
+        signal_score=8.0,
+        risk_reward_ratio=3.5,
+    )
+    candidate = SignalCandidate(
+        signal=signal,
+        decision=decision,
+        notify_key="BTC-USDT-SWAP:8.0",
+        payload={"signal": {"signal_score": 8.0}},
+        health_item={"symbol": "BTC-USDT-SWAP", "would_push": True},
+        rank_score=8.0,
+        raw_score=8.0,
+        tier="A",
+        rank=1,
+        correlation_group="solo:BTC-USDT-SWAP",
+    )
+    pushed = []
+    monitor = LiveSignalMonitor.__new__(LiveSignalMonitor)
+    monitor.api = type(
+        "Api",
+        (),
+        {
+            "timeframe": type("Timeframe", (), {"key": "15m"})(),
+            "trend_timeframe": type("Timeframe", (), {"key": "1h"})(),
+        },
+    )()
+    monitor.signal_callback = lambda signal, _decision: pushed.append(signal.inst_id) or True
+    monitor._shadow_ledger = type("ShadowLedger", (), {"record_signal": lambda self, signal, _decision: None})()
+    monitor._lifecycle_store = type(
+        "LifecycleStore",
+        (),
+        {
+            "enqueue_notification": lambda self, key, **metadata: None,
+            "mark_notification_sent": lambda self, key: None,
+            "mark_notification_failed": lambda self, key, error: None,
+        },
+    )()
+    monitor._signal_notification_store = Store()
+    monitor._b_tier_summary_store = Store()
+    monitor._last_ready_signal = None
+
+    asyncio.run(
+        monitor._publish_tiered_candidates(
+            TieredSelection(ranked=[candidate], tier_a=[candidate], tier_b=[], tier_c=[])
+        )
+    )
+
+    assert pushed == ["BTC-USDT-SWAP"]

@@ -418,3 +418,63 @@
 - Modified files: `src/okx_signal_system/backtest/research.py` enforces strict timestamp splits, blind locking, portfolio PF aggregation, purged walk-forward acceptance, stronger neighbor stability, and trade-fact cost replay; `src/okx_signal_system/backtest/research_cli.py` exposes explicit legacy split and blind unlock flags; `src/okx_signal_system/backtest/runner.py` records fee/slippage/funding cost components and market regime in backtest trades; `tests/test_strict_research.py` covers strict split boundaries, fail-closed split behavior, portfolio PF aggregation, real blind lock checks, neighbor ratio gating, and cost replay funding effects; `docs/SYSTEM_ARCHITECTURE.md` documents the v3.50 strict research closure; `progress.md` records this round.
 - Concurrent v3.50 changes from subagents are recorded above and were not reverted.
 - Rollback: revert this commit after it is created, or before commit restore the listed research/runner/CLI/test/doc files from the previous index state and remove this appended progress entry.
+
+## 2026-06-17 - Task: v3.51 notification ranking contract and release boundary
+### What was done
+- Separated formal A/B ranking from C-tier observation ranking so high-scoring C watches no longer affect A/B rank, A-tier selection, B-tier ordering, or formal notification totals.
+- Routed realtime/CLI A-tier notification callbacks through the full candidate payload when available while preserving the legacy two-argument callback contract.
+- Bumped shared package/version metadata and visible version source to `3.51.0`.
+- Documented the v3.51 production boundary: experimental learning paths can emit diagnostics and suggestions only, not production automatic parameter tuning.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests\test_signal_quality.py tests\test_signal_scan_service.py tests\test_desktop_runtime.py tests\test_release_safety.py tests\test_scheduler_notifications.py` -> `60 passed`.
+- `git diff --check` -> passed; Git reported LF-to-CRLF working-copy normalization warnings only.
+### Notes
+- Modified files: `src/okx_signal_system/signal_quality/candidate.py` adds `watch_rank` for C-tier observation candidates; `src/okx_signal_system/signal_quality/selector.py` ranks formal candidates and observation candidates separately; `src/okx_signal_system/signal_service/scan.py` writes `rank/total_formal_candidates` for A/B and `watch_rank/total_observations` for C into health and payloads; `src/okx_signal_system/exchange/realtime.py` sends candidate-aware callbacks and keeps notification totals formal-only; `main.py` uses the candidate-aware A-tier dispatcher path when realtime supplies a candidate; `gui.py` and `src/okx_signal_system/scheduler.py` use formal-only totals for A/B notifications and B-tier summaries; `pyproject.toml`, `src/okx_signal_system/__init__.py`, and `src/okx_contract_signal_system.egg-info/PKG-INFO` set version `3.51.0`; `docs/RELEASE_SAFETY.md` and `docs/SYSTEM_ARCHITECTURE.md` document ranking and learning-production boundaries; `tests/test_signal_quality.py`, `tests/test_signal_scan_service.py`, `tests/test_desktop_runtime.py`, and `tests/test_release_safety.py` add focused regressions for ranking, payload, callback, version, and docs.
+- Concurrent working-tree changes in research, data quality, lifecycle, scheduler dedupe, and related tests were present from other agents and were not reverted.
+- Rollback: revert only the hunks listed above for ranking contract, callback payload, version metadata, docs, and focused tests, then remove this appended progress entry; avoid whole-file restore because several touched files also contain concurrent non-task changes.
+
+## 2026-06-17 - Task: v3.51 lifecycle durability and notification key consistency
+### What was done
+- Changed lifecycle retention so `SignalLifecycleStore(max_records=...)` only limits the in-memory view and does not physically delete SQLite lifecycle records, events, or outbox rows.
+- Enabled SQLite WAL, busy timeout, and NORMAL synchronous mode for lifecycle storage, and added compatible outbox lease columns for old databases.
+- Made outbox polling return only due rows, added atomic claim/lease handling for workers, and added retry backoff without clearing active leases on duplicate enqueue.
+- Expanded scheduler B-tier summary de-duplication keys with strategy version, parameter hash, and candidate identity hash.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m py_compile src\okx_signal_system\signal_quality\lifecycle.py src\okx_signal_system\notify\signal_dedupe.py src\okx_signal_system\scheduler.py tests\test_signal_lifecycle.py tests\test_scheduler_notifications.py` -> passed.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests\test_signal_lifecycle.py tests\test_scheduler_notifications.py tests\test_feishu_notify.py -q` -> `37 passed`.
+- `git diff --check` -> passed; Git reported LF-to-CRLF working-copy normalization warnings only.
+### Notes
+- Modified files: `src/okx_signal_system/signal_quality/lifecycle.py` preserves SQLite history under `max_records`, initializes SQLite durability pragmas, migrates lease columns, filters pending rows by `available_at`, and claims worker rows with leases/backoff; `src/okx_signal_system/notify/signal_dedupe.py` adds strategy/parameter/candidate dimensions to B-tier summary keys; `src/okx_signal_system/scheduler.py` passes current strategy params and candidates into B-tier summary keys and stores key metadata; `tests/test_signal_lifecycle.py` covers max-record durability, due-only pending rows, claim leases, and duplicate enqueue lease preservation; `tests/test_scheduler_notifications.py` covers B-tier summary key variation by version, params, and candidates; `docs/SYSTEM_ARCHITECTURE.md` documents the new lifecycle/outbox/key behavior; `progress.md` records this round.
+- Concurrent working-tree changes exist in unrelated files from other agents, including research, data quality, version metadata, release safety, GUI/main, realtime, and signal ranking files; this round did not modify or revert those areas.
+- Rollback: revert only the lifecycle/outbox/key hunks in the listed source, test, and docs files, then remove this appended progress entry; avoid whole-file restore while parallel-agent changes remain in the same working tree.
+
+## 2026-06-17 - Task: v3.51 data reliability closure
+### What was done
+- Tightened formal data quality audit so any unclosed historical row fails, while runtime cache audit can explicitly allow only one final open candle and exclude that tail row from formal-quality checks.
+- Added audit failures and report fields for NaN/Inf numeric values, timestamp boundary drift, irregular intervals and internal gaps, OHLC invalidity, symbol/timeframe mismatches, and invalid quote volume.
+- Extended closed-candle backfill status with internal gap count, maximum missing bars, continuous tail bars, minimum tail requirement, and required history bars; any internal gap or insufficient continuous tail now prevents `all_complete=true`.
+- Added focused data-layer regressions for all-open historical rows, runtime tail open handling, structural/value quality failures, 1/2/10/180/500-bar internal gaps, and insufficient continuous tail history.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests\test_data_layer.py -q` -> passed with expected integration skips.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests\test_data_layer.py tests\test_signal_scan_service.py tests\test_daily_learning_review.py -q` -> passed with expected integration skips.
+- `git diff --check -- src\okx_signal_system\data\quality.py src\okx_signal_system\data\closed_backfill.py tests\test_data_layer.py docs\SYSTEM_ARCHITECTURE.md` -> passed; Git reported LF-to-CRLF working-copy normalization warnings only.
+### Notes
+- Modified files: `src/okx_signal_system/data/quality.py` adds strict audit metrics, open-row policy, and runtime-tail compatibility option; `src/okx_signal_system/data/closed_backfill.py` adds closed-only status evaluation with internal-gap and continuous-tail gates; `tests/test_data_layer.py` adds the focused reliability regressions; `docs/SYSTEM_ARCHITECTURE.md` documents the data reliability closure; `progress.md` records this round.
+- This round did not modify `research.py`, `lifecycle.py`, notification files, or version metadata. Concurrent working-tree changes in unrelated files were left intact.
+- Rollback: revert only the data reliability hunks in the listed source, test, and docs files, then remove this appended progress entry; avoid whole-file restore because `docs/SYSTEM_ARCHITECTURE.md` and `progress.md` contain parallel-agent changes.
+
+## 2026-06-17 - Task: v3.51 combined hardening and final validation
+### What was done
+- Synchronized the strict research default version to `v3.51-strict` and added a release-safety regression so the CLI default cannot drift from the core research entrypoint again.
+- Documented the strict research warmup-window evaluation, canonical data manifest hashing, and one-time SQLite blind registry boundary in the architecture doc.
+- Completed the combined hardening pass across data reliability, strict research, lifecycle durability, ranking separation, notification context, and version consistency.
+### Testing
+- `py -3.12 -m pytest tests\test_release_safety.py::test_strict_research_default_version_matches_cli_release tests\test_strict_research.py tests\test_data_layer.py -q` -> passed with expected integration skips.
+- `python -m compileall -q src main.py gui.py tests` -> passed.
+- `py -3.12 -m pytest -q` -> passed with expected integration skips.
+- `npm.cmd run check` in `dashboard` -> lint and production build passed.
+- `git diff --check` -> passed; Git reported LF-to-CRLF working-copy normalization warnings only.
+### Notes
+- Modified files: `src/okx_signal_system/backtest/research.py` now defaults research artifacts to `v3.51-strict`; `tests/test_release_safety.py` locks the CLI/core research version match; `docs/SYSTEM_ARCHITECTURE.md` records the v3.51 strict research hardening; `progress.md` records this final validation round.
+- The earlier concurrent-agent changes in data reliability, lifecycle, notification ranking, and release safety remain intact and were validated together in the final full test run.
+- Rollback: revert the v3.51 research default/version hunk in `src/okx_signal_system/backtest/research.py`, the new release-safety regression in `tests/test_release_safety.py`, and the added v3.51 architecture note, then remove this appended progress entry.

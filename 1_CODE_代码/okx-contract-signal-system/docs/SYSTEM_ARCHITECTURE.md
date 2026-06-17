@@ -48,6 +48,12 @@ GUI、实时监控、调度器、报告任务和 TradingBrain 观察路径统一
 
 Near-breakout C-tier observation now uses ATR distance (`distance_to_breakout / ATR <= 0.3`) instead of a fixed percent gap, and scan health / observation payloads carry the ATR distance for review.
 Daily learning review is a candidate-discovery and sidecar-report path only. Its report always writes `promotion_eligible=false` and `promotion_allowed=false`; formal parameter promotion must pass the strict research pipeline and cannot be triggered by daily learning output.
+
+### v3.51 Formal Ranking and Experimental Learning Boundary
+
+Formal signal notifications and observation watches use separate ranking contracts. A/B formal candidates are ranked only against other formal push candidates and expose `rank` plus `total_formal_candidates`; C-tier watch observations are ranked only against other observations and expose `watch_rank` plus `total_observations`. C-tier scores do not change A/B rank, A-tier selection, B-tier demotion, or formal notification totals.
+
+Online learning, reinforcement learning, symbol rotation, and daily learning review are experimental sidecar paths. They may emit diagnostics or parameter suggestions for manual review, but they are not production automatic tuning features and must not promote parameters into runtime by themselves. Formal runtime parameter changes require the strict research acceptance flow and operator review.
 ### 生命周期持久化
 
 正式生命周期状态从 JSON 文件升级为 SQLite，默认写入 `outputs/signal_lifecycle.sqlite3`。`lifecycle_records` 保存每条信号的当前状态，`lifecycle_events` 保存 `TRIGGERED`、`CONFIRMED`、`INVALIDATED`、`EXPIRED` 等状态变化流水，`notification_outbox` 保存正式 A 级飞书推送的待发送、已发送和失败结果。旧的 `outputs/signal_lifecycle.json` 在首次打开 SQLite store 时会迁移到新表，迁移后运行期不再依赖 JSON 文件。
@@ -366,6 +372,7 @@ src/okx_signal_system/
 - Runtime configuration is the dependency-injection source for backtest, quality-label execution, GUI scan, realtime scan, risk sizing, and cost estimation defaults. Direct `RiskConfig()` / `CostConfig()` construction remains acceptable in tests and explicit experimental utilities only.
 - Lifecycle terminal checks reuse OHLC outcome rules and lifecycle outbox delivery can be consumed by `LifecycleOutboxWorker` through `NotificationDispatcher.send_lifecycle_event()`.
 - GUI, realtime monitor, and scheduler scan cycles now run the lifecycle outbox worker after each scan/publish pass. Failed outbox rows retry from `FAILED` state and move to `DEAD_LETTER` after the worker retry limit instead of retrying indefinitely.
+- Lifecycle SQLite keeps historical `lifecycle_records`, `lifecycle_events`, and `notification_outbox` rows even when `SignalLifecycleStore(max_records=...)` limits the in-memory view. Outbox polling only returns rows whose `available_at` is due, and workers atomically claim rows with a short lease before delivery. Scheduler B-tier summary de-duplication includes strategy version, parameter hash, and candidate identity hash.
 
 ## v3.50 Strict Research Closure
 
@@ -374,3 +381,16 @@ src/okx_signal_system/
 - Blind data is locked by default and is not calculated during normal research. Blind evaluation requires `--unlock-blind --blind-release-token`, and writes `blind_access_manifest.json` with dataset/config/parameter hashes, git commit, and access time.
 - Purged walk-forward validation is part of the formal acceptance checklist. Each fold uses train -> purge -> validation -> embargo, allows warm-up history for indicators, and evaluates only validation-start-or-later trades.
 - Cost stress now recomputes entry fee, exit fee, slippage, and funding from trade facts for baseline, 1.5x, and 2x scenarios instead of multiplying the stored total cost.
+
+## v3.51 Strict Research Hardening
+
+- Validation and blind evaluations run on frames that include the required indicator warmup history, then filter trade entries back to the validation or blind evaluation window. This keeps indicator state mature without allowing training-period trades into validation metrics.
+- Research data manifests now include per-symbol file SHA-256, canonical OHLCV/is_closed content SHA-256, rows, and timestamp bounds. The manifest hash changes when candle values change, even if file path, row count, and timestamp range stay unchanged.
+- Blind access is registered in SQLite under `outputs/research_registry/blind_registry.sqlite3` by default. The registry uses dataset content hash, research config hash, selected parameter hash, and git commit to build a one-time `registry_id`; a sealed blind run cannot be opened again with the same identity.
+- The strict research CLI and core function use the same default research version, `v3.51-strict`, so artifacts created from different entrypoints carry the same release identity.
+
+## v3.51 Data Reliability Closure
+
+- Formal historical data audit fails when any row is not closed. Runtime cache audit can allow one final open candle only when explicitly requested, and that tail row is excluded from formal-quality checks.
+- Data quality audit now reports and fails on NaN/Inf numeric values, timestamp boundary drift, irregular intervals and internal gaps, invalid OHLC ranges, symbol/timeframe mismatches, and invalid quote volume.
+- Closed-candle backfill status includes `internal_gap_count`, `max_gap_bars`, `continuous_tail_bars`, `minimum_continuous_tail`, and `required_history_bars`. A symbol with any internal gap or insufficient continuous tail history is not `passed`, so the cycle cannot report `all_complete=true`.

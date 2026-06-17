@@ -19,6 +19,8 @@ from okx_signal_system.signal_quality import LifecycleOutboxWorker, SignalLifecy
 from okx_signal_system.signal_service import SignalScanContext, SignalScanService
 from okx_signal_system.signal_runtime import (
     DEFAULT_MAX_SIGNAL_LAG_MINUTES,
+    parameter_hash,
+    strategy_version,
 )
 from okx_signal_system.strategy.trend_breakout import StrategyParams
 from okx_signal_system.timeframe import timeframe_spec
@@ -260,6 +262,8 @@ class SignalScheduler:
             candidates[0].candle_time,
             signal_timeframe=self.signal_timeframe,
             trend_timeframe=self.trend_timeframe,
+            params=self.params,
+            candidates=candidates,
         )
 
     def _mark_b_tier_summary_notified(self, key: str, candidates) -> None:
@@ -271,6 +275,8 @@ class SignalScheduler:
                 "candidate_count": len(candidates),
                 "signal_timeframe": self.signal_timeframe,
                 "trend_timeframe": self.trend_timeframe,
+                "strategy_version": strategy_version(),
+                "parameter_hash": parameter_hash(self.params),
             },
         )
 
@@ -288,12 +294,13 @@ class SignalScheduler:
             include_selection=True,
         )
 
+        total_formal_candidates = len(selection.tier_a) + len(selection.tier_b)
         if results:
             for r in results:
                 candidate = r.get("candidate")
                 if candidate is None or candidate.tier != "A":
                     continue
-                candidate.health_item["total_candidates"] = len(selection.ranked)
+                candidate.health_item["total_candidates"] = total_formal_candidates
                 self._notification_dispatcher.send_a_tier_signal(
                     candidate,
                     signal_timeframe=self.signal_timeframe,
@@ -308,7 +315,7 @@ class SignalScheduler:
                 try:
                     summary_sent = self._notification_dispatcher.send_b_tier_summary(
                         selection.tier_b,
-                        total_candidates=len(selection.ranked),
+                        total_candidates=total_formal_candidates,
                         signal_timeframe=self.signal_timeframe,
                         trend_timeframe=self.trend_timeframe,
                     )

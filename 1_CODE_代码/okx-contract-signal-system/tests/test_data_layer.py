@@ -6,13 +6,93 @@ from pathlib import Path
 import pytest
 
 from tests._integration import require_lightweight_history
-from okx_signal_system.data.closed_backfill import latest_closed_candle_start, seconds_until_next_closed_run
+from okx_signal_system.data.closed_backfill import (
+    ClosedCandleBackfillService,
+    latest_closed_candle_start,
+    seconds_until_next_closed_run,
+)
 from okx_signal_system.data.gap_handler import DataGap, DataGapHandler, summarize_sync_error
-from okx_signal_system.data.loader import closed_bars, file_symbol_to_inst_id, file_timeframe, load_symbol_file
+from okx_signal_system.data.loader import SymbolData, closed_bars, file_symbol_to_inst_id, file_timeframe, load_symbol_file
 from okx_signal_system.data.quality import audit_symbol
 from okx_signal_system.exchange.realtime import RealtimeDataStore
 from okx_signal_system.paths import find_lightweight_history
 from okx_signal_system.timeframe import bars_for_hours, default_trend_timeframe, timeframe_spec
+
+
+def _valid_15m_frame(rows: int = 8) -> pd.DataFrame:
+    ts = pd.date_range("2026-06-15T00:00:00Z", periods=rows, freq="15min", tz="UTC")
+    return pd.DataFrame(
+        {
+            "ts": ts,
+            "open": [100.0] * rows,
+            "high": [101.0] * rows,
+            "low": [99.0] * rows,
+            "close": [100.5] * rows,
+            "volume": [10.0] * rows,
+            "quote_volume": [1000.0] * rows,
+            "symbol": ["BTC-USDT-SWAP"] * rows,
+            "timeframe": ["15m"] * rows,
+            "is_closed": [True] * rows,
+        }
+    )
+
+
+def _symbol_data(frame: pd.DataFrame) -> SymbolData:
+    return SymbolData(
+        inst_id="BTC-USDT-SWAP",
+        source_path=Path("BTC_USDT_USDT_15m.parquet"),
+        frame=frame,
+    )
+
+
+def _closed_backfill_frame(timestamps: list[pd.Timestamp] | pd.DatetimeIndex) -> pd.DataFrame:
+    rows = len(timestamps)
+    return pd.DataFrame(
+        {
+            "ts": list(timestamps),
+            "open": [100.0] * rows,
+            "high": [101.0] * rows,
+            "low": [99.0] * rows,
+            "close": [100.5] * rows,
+            "volume": [10.0] * rows,
+            "quote_volume": [1000.0] * rows,
+            "symbol": ["BTC-USDT-SWAP"] * rows,
+            "timeframe": ["15m"] * rows,
+            "is_closed": [True] * rows,
+        }
+    )
+
+
+def _set_nan_close(frame: pd.DataFrame) -> None:
+    frame.loc[frame.index[1], "close"] = float("nan")
+
+
+def _set_inf_high(frame: pd.DataFrame) -> None:
+    frame.loc[frame.index[1], "high"] = float("inf")
+
+
+def _shift_one_timestamp_off_boundary(frame: pd.DataFrame) -> None:
+    frame.loc[frame.index[3], "ts"] = frame.loc[frame.index[3], "ts"] + pd.Timedelta(minutes=1)
+
+
+def _drop_internal_bar(frame: pd.DataFrame) -> None:
+    frame.drop(index=frame.index[3], inplace=True)
+
+
+def _break_ohlc(frame: pd.DataFrame) -> None:
+    frame.loc[frame.index[1], "high"] = 99.0
+
+
+def _change_symbol(frame: pd.DataFrame) -> None:
+    frame.loc[frame.index[1], "symbol"] = "ETH-USDT-SWAP"
+
+
+def _change_timeframe(frame: pd.DataFrame) -> None:
+    frame.loc[frame.index[1], "timeframe"] = "1h"
+
+
+def _break_quote_volume(frame: pd.DataFrame) -> None:
+    frame.loc[frame.index[1], "quote_volume"] = -1.0
 
 
 @pytest.mark.integration
@@ -108,6 +188,63 @@ def test_closed_bars_parses_string_closed_flags() -> None:
     result = closed_bars(frame)
 
     assert list(result["is_closed"]) == ["True", "1", "yes"]
+
+
+def test_quality_audit_fails_formal_history_when_any_row_is_open() -> None:
+    frame = _valid_15m_frame()
+    frame["is_closed"] = False
+
+    result = audit_symbol(_symbol_data(frame), expected_freq="15m")
+
+    assert result.status == "failed"
+    assert result.open_rows == len(frame)
+
+
+def test_quality_audit_allows_only_runtime_tail_open_row() -> None:
+    frame = _valid_15m_frame()
+    frame.loc[frame.index[-1], "is_closed"] = False
+
+    formal = audit_symbol(_symbol_data(frame), expected_freq="15m")
+    runtime = audit_symbol(_symbol_data(frame), expected_freq="15m", allow_runtime_open_tail=True)
+
+    assert formal.status == "failed"
+    assert runtime.status == "passed"
+    assert runtime.open_rows == 1
+    assert runtime.non_tail_open_rows == 0
+
+
+def test_quality_audit_rejects_non_tail_runtime_open_rows() -> None:
+    frame = _valid_15m_frame()
+    frame.loc[frame.index[2], "is_closed"] = False
+
+    result = audit_symbol(_symbol_data(frame), expected_freq="15m", allow_runtime_open_tail=True)
+
+    assert result.status == "failed"
+    assert result.open_rows == 1
+    assert result.non_tail_open_rows == 1
+
+
+@pytest.mark.parametrize(
+    ("mutate", "field"),
+    [
+        (_set_nan_close, "invalid_numeric_rows"),
+        (_set_inf_high, "invalid_numeric_rows"),
+        (_shift_one_timestamp_off_boundary, "timestamp_boundary_rows"),
+        (_drop_internal_bar, "internal_gap_count"),
+        (_break_ohlc, "invalid_ohlc_rows"),
+        (_change_symbol, "symbol_mismatch_rows"),
+        (_change_timeframe, "timeframe_mismatch_rows"),
+        (_break_quote_volume, "invalid_quote_volume_rows"),
+    ],
+)
+def test_quality_audit_rejects_structural_and_value_errors(mutate, field) -> None:
+    frame = _valid_15m_frame()
+    mutate(frame)
+
+    result = audit_symbol(_symbol_data(frame), expected_freq="15m")
+
+    assert result.status == "failed"
+    assert getattr(result, field) > 0
 
 
 def test_find_lightweight_history_uses_env_data_root(tmp_path, monkeypatch) -> None:
@@ -242,6 +379,78 @@ def test_closed_backfill_service_writes_runtime_cache_without_mutating_history(t
     assert len(runtime_frame) == 2
     assert hashlib.sha256(history_path.read_bytes()).hexdigest() == before_hash
     assert history_path.stat().st_mtime_ns == before_mtime
+
+
+@pytest.mark.parametrize("gap_bars", [1, 2, 10, 180, 500])
+def test_closed_backfill_service_blocks_all_complete_on_internal_gaps(tmp_path, monkeypatch, gap_bars) -> None:
+    expected = pd.Timestamp("2026-06-15T18:00:00Z")
+    full_range = pd.date_range(end=expected, periods=620, freq="15min", tz="UTC")
+    gap_start = len(full_range) - gap_bars - 20
+    kept = full_range.delete(range(gap_start, gap_start + gap_bars))
+    (_closed_backfill_frame(kept)).to_parquet(tmp_path / "BTC_USDT_USDT_15m.parquet", index=False)
+
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.latest_closed_candle_start",
+        lambda *args, **kwargs: expected.to_pydatetime(),
+    )
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.seconds_until_next_closed_run",
+        lambda *args, **kwargs: 60.0,
+    )
+    monkeypatch.setattr("okx_signal_system.data.closed_backfill.get_candles", lambda *args, **kwargs: [])
+
+    service = ClosedCandleBackfillService(
+        ["BTC-USDT-SWAP"],
+        timeframe="15m",
+        dataset="okx_15m_extended",
+        data_dir=tmp_path,
+        output_path=tmp_path / "status.json",
+        required_history_bars=100,
+        minimum_continuous_tail_bars=20,
+    )
+    status = service.run_once()
+    row = status.symbols[0]
+
+    assert not status.all_complete
+    assert row.status == "gapped"
+    assert row.internal_gap_count == 1
+    assert row.max_gap_bars == gap_bars
+    assert row.continuous_tail_bars >= 20
+
+
+def test_closed_backfill_service_blocks_all_complete_on_short_continuous_tail(tmp_path, monkeypatch) -> None:
+    expected = pd.Timestamp("2026-06-15T18:00:00Z")
+    timestamps = pd.date_range(end=expected, periods=20, freq="15min", tz="UTC")
+    (_closed_backfill_frame(timestamps)).to_parquet(tmp_path / "BTC_USDT_USDT_15m.parquet", index=False)
+
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.latest_closed_candle_start",
+        lambda *args, **kwargs: expected.to_pydatetime(),
+    )
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.seconds_until_next_closed_run",
+        lambda *args, **kwargs: 60.0,
+    )
+    monkeypatch.setattr("okx_signal_system.data.closed_backfill.get_candles", lambda *args, **kwargs: [])
+
+    service = ClosedCandleBackfillService(
+        ["BTC-USDT-SWAP"],
+        timeframe="15m",
+        dataset="okx_15m_extended",
+        data_dir=tmp_path,
+        output_path=tmp_path / "status.json",
+        required_history_bars=30,
+        minimum_continuous_tail_bars=30,
+    )
+    status = service.run_once()
+    row = status.symbols[0]
+
+    assert not status.all_complete
+    assert row.status == "insufficient_history"
+    assert row.internal_gap_count == 0
+    assert row.continuous_tail_bars == 20
+    assert row.minimum_continuous_tail == 30
+    assert row.required_history_bars == 30
 
 
 @pytest.mark.integration

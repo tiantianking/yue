@@ -374,11 +374,30 @@ class SignalScanService:
             price_history=candidate_history,
             min_correlation_samples=context.correlation_min_samples,
         )
+        total_formal_candidates = len(selection.tier_a) + len(selection.tier_b)
+        total_observations = len(selection.tier_c)
         for candidate in selection.ranked:
             candidate.health_item["tier"] = candidate.tier
-            candidate.health_item["rank"] = candidate.rank
             candidate.health_item["rank_score"] = candidate.rank_score
             candidate.health_item["correlation_group"] = candidate.correlation_group
+            candidate.health_item["total_formal_candidates"] = total_formal_candidates
+            candidate.health_item["total_observations"] = total_observations
+            if isinstance(candidate, ObservationCandidate):
+                candidate.health_item["watch_rank"] = candidate.watch_rank
+                candidate.health_item.pop("rank", None)
+                if isinstance(candidate.payload, dict):
+                    candidate.payload["tier"] = candidate.tier
+                    candidate.payload["watch_rank"] = candidate.watch_rank
+                    candidate.payload["total_observations"] = total_observations
+                continue
+            candidate.health_item["rank"] = candidate.rank
+            candidate.health_item["total_candidates"] = total_formal_candidates
+            if isinstance(candidate.payload, dict):
+                candidate.payload["tier"] = candidate.tier
+                candidate.payload["rank"] = candidate.rank
+                candidate.payload["total_candidates"] = total_formal_candidates
+                candidate.payload["total_formal_candidates"] = total_formal_candidates
+                candidate.payload["total_observations"] = total_observations
 
         if context.checked_bars is not None:
             context.checked_bars.update(completed_checked_bars)

@@ -5,6 +5,7 @@ import logging
 import math
 import hashlib
 import subprocess
+import sqlite3
 from dataclasses import replace
 from dataclasses import asdict
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ import pandas as pd
 from okx_signal_system.backtest.evaluation import evaluate_portfolio, evaluate_symbol
 from okx_signal_system.backtest.grid_search import parameter_grid, run_grid_search, select_best_params
 from okx_signal_system.backtest.runner import run_backtest, split_train_valid, summarize_trades, validate_backtest_result
+from okx_signal_system.config import project_paths
 from okx_signal_system.data.loader import SymbolData, load_all_symbols
 from okx_signal_system.risk.costs import CostConfig, estimate_costs
 from okx_signal_system.strategy.trend_breakout import StrategyParams
@@ -55,10 +57,19 @@ class ResearchValidationConfig:
 
 
 @dataclass(frozen=True)
+class EvaluationWindow:
+    frame_with_warmup: pd.DataFrame
+    trade_start: pd.Timestamp
+    trade_end: pd.Timestamp
+
+
+@dataclass(frozen=True)
 class ResearchSplit:
     train: pd.DataFrame
     validation: pd.DataFrame
     blind: pd.DataFrame
+    validation_window: EvaluationWindow
+    blind_window: EvaluationWindow
     purge_bars: int
     embargo_bars: int
     boundaries: dict[str, pd.Timestamp | None]
@@ -389,11 +400,31 @@ def common_calendar_split(
         blind = frame[(frame["ts"] >= boundaries["blind_start"]) & (frame["ts"] <= boundaries["blind_end"])].reset_index(drop=True)
         if train.empty or validation.empty or blind.empty:
             raise ValueError(f"STRICT_SPLIT_UNAVAILABLE: {symbol_data.inst_id} has empty train/validation/blind split")
+        validation_warmup_start = boundaries["validation_start"] - pd.Timedelta(minutes=timeframe_spec(signal_timeframe).minutes * warmup)
+        blind_warmup_start = boundaries["blind_start"] - pd.Timedelta(minutes=timeframe_spec(signal_timeframe).minutes * warmup)
+        validation_with_warmup = frame[
+            (frame["ts"] >= validation_warmup_start) & (frame["ts"] <= boundaries["validation_end"])
+        ].reset_index(drop=True)
+        blind_with_warmup = frame[
+            (frame["ts"] >= blind_warmup_start) & (frame["ts"] <= boundaries["blind_end"])
+        ].reset_index(drop=True)
+        if validation_with_warmup.empty or blind_with_warmup.empty:
+            raise ValueError(f"STRICT_SPLIT_UNAVAILABLE: {symbol_data.inst_id} has empty evaluation warmup window")
 
         split_by_symbol[symbol_data.inst_id] = ResearchSplit(
             train=train,
             validation=validation,
             blind=blind,
+            validation_window=EvaluationWindow(
+                frame_with_warmup=validation_with_warmup,
+                trade_start=boundaries["validation_start"],
+                trade_end=boundaries["validation_end"],
+            ),
+            blind_window=EvaluationWindow(
+                frame_with_warmup=blind_with_warmup,
+                trade_start=boundaries["blind_start"],
+                trade_end=boundaries["blind_end"],
+            ),
             purge_bars=config.purge_bars,
             embargo_bars=config.embargo_bars,
             boundaries=dict(boundaries),
@@ -679,11 +710,31 @@ def _calculate_param_score(row: pd.Series) -> float:
     return 0.6 * pf_normalized + 0.4 * win_normalized
 
 
-def _filter_trades_after_start(trades: pd.DataFrame, validation_start: pd.Timestamp) -> pd.DataFrame:
+def _filter_trades_to_window(trades: pd.DataFrame, trade_start: pd.Timestamp, trade_end: pd.Timestamp) -> pd.DataFrame:
     if trades.empty or "entry_time" not in trades.columns:
         return trades
     entry_time = pd.to_datetime(trades["entry_time"], utc=True, errors="coerce")
-    return trades[entry_time >= validation_start].reset_index(drop=True)
+    return trades[(entry_time >= trade_start) & (entry_time <= trade_end)].reset_index(drop=True)
+
+
+def _run_backtest_window(
+    window: EvaluationWindow,
+    *,
+    inst_id: str,
+    params: StrategyParams,
+    signal_timeframe: str,
+    trend_timeframe: str,
+    context: str,
+) -> pd.DataFrame:
+    trades = run_backtest(
+        window.frame_with_warmup,
+        inst_id=inst_id,
+        params=params,
+        signal_timeframe=signal_timeframe,
+        trend_timeframe=trend_timeframe,
+    )
+    trades = _filter_trades_to_window(trades, window.trade_start, window.trade_end)
+    return validate_backtest_result(trades, context=context)
 
 
 def run_walk_forward_validation(
@@ -748,7 +799,8 @@ def run_walk_forward_validation(
             trend_timeframe=trend_key,
         )
         if validation_start_ts is not None:
-            valid_trades = _filter_trades_after_start(valid_trades, validation_start_ts)
+            validation_end_ts = pd.Timestamp(frame.iloc[validation_end_idx - 1]["ts"]) if "ts" in frame.columns else validation_start_ts
+            valid_trades = _filter_trades_to_window(valid_trades, validation_start_ts, validation_end_ts)
         try:
             train_summary = summarize_trades(validate_backtest_result(train_trades, context=f"{inst_id} walk_forward train"))
             valid_summary = summarize_trades(validate_backtest_result(valid_trades, context=f"{inst_id} walk_forward validation"))
@@ -903,7 +955,58 @@ def _failed_research_artifacts(
     }
 
 
+def _file_sha256(path: Path) -> str:
+    if not path.exists() or not path.is_file():
+        return ""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _content_sha256(frame: pd.DataFrame) -> str:
+    cols = [col for col in ["ts", "open", "high", "low", "close", "volume", "is_closed"] if col in frame.columns]
+    canonical = frame[cols].copy()
+    if "ts" in canonical:
+        canonical["ts"] = pd.to_datetime(canonical["ts"], utc=True, errors="coerce").astype("string")
+    for col in ["open", "high", "low", "close", "volume"]:
+        if col in canonical:
+            canonical[col] = pd.to_numeric(canonical[col], errors="coerce").map(lambda value: format(float(value), ".12g") if pd.notna(value) else "")
+    if "is_closed" in canonical:
+        canonical["is_closed"] = canonical["is_closed"].astype("string")
+    payload = canonical.to_csv(index=False, lineterminator="\n").encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def build_data_manifest(dataset: str, symbols: list[SymbolData]) -> dict:
+    manifest = {
+        "dataset_version": dataset,
+        "symbols": {},
+    }
+    for symbol in sorted(symbols, key=lambda item: item.inst_id):
+        frame = symbol.frame
+        ts = pd.to_datetime(frame["ts"], utc=True, errors="coerce").dropna() if "ts" in frame else pd.Series(dtype="datetime64[ns, UTC]")
+        manifest["symbols"][symbol.inst_id] = {
+            "source_path": str(symbol.source_path),
+            "file_sha256": _file_sha256(symbol.source_path),
+            "content_sha256": _content_sha256(frame),
+            "rows": int(len(frame)),
+            "first_ts": str(ts.min()) if not ts.empty else "",
+            "last_ts": str(ts.max()) if not ts.empty else "",
+        }
+    manifest_hash = hashlib.sha256(
+        json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    manifest["manifest_hash"] = manifest_hash
+    return manifest
+
+
 def _data_hash(symbols: list[SymbolData]) -> str:
+    return build_data_manifest("research_dataset", symbols)["manifest_hash"]
+
+
+def _legacy_data_hash(symbols: list[SymbolData]) -> str:
     digest = hashlib.sha256()
     for symbol in sorted(symbols, key=lambda item: item.inst_id):
         frame = symbol.frame
@@ -938,6 +1041,101 @@ def _git_commit() -> str:
     return result.stdout.strip() or "unknown"
 
 
+def _default_blind_registry_path() -> Path:
+    return project_paths().output_dir / "research_registry" / "blind_registry.sqlite3"
+
+
+class BlindRegistry:
+    def __init__(self, path: str | Path | None = None) -> None:
+        self.path = Path(path) if path is not None else _default_blind_registry_path()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_schema()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.path, timeout=5.0, isolation_level=None)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        return conn
+
+    def _init_schema(self) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS blind_registry (
+                    registry_id TEXT PRIMARY KEY,
+                    dataset_content_hash TEXT NOT NULL,
+                    research_config_hash TEXT NOT NULL,
+                    parameter_hash TEXT NOT NULL,
+                    code_commit TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    opened_at TEXT NOT NULL,
+                    sealed_at TEXT,
+                    manifest_json TEXT NOT NULL,
+                    result_json TEXT
+                )
+                """
+            )
+
+    @staticmethod
+    def registry_id(
+        *,
+        dataset_content_hash: str,
+        research_config_hash: str,
+        parameter_hash: str,
+        code_commit: str,
+    ) -> str:
+        payload = "|".join([dataset_content_hash, research_config_hash, parameter_hash, code_commit])
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def open_once(self, manifest: dict) -> str:
+        registry_id = str(manifest["registry_id"])
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                existing = conn.execute(
+                    "SELECT status FROM blind_registry WHERE registry_id = ?",
+                    (registry_id,),
+                ).fetchone()
+                if existing is not None:
+                    raise RuntimeError(f"BLIND_ALREADY_OPENED:{registry_id}:{existing[0]}")
+                conn.execute(
+                    """
+                    INSERT INTO blind_registry (
+                        registry_id, dataset_content_hash, research_config_hash,
+                        parameter_hash, code_commit, status, opened_at, manifest_json
+                    ) VALUES (?, ?, ?, ?, ?, 'OPENED', ?, ?)
+                    """,
+                    (
+                        registry_id,
+                        str(manifest["dataset_hash"]),
+                        str(manifest["config_hash"]),
+                        str(manifest["params_hash"]),
+                        str(manifest["git_commit"]),
+                        now,
+                        json.dumps(manifest, ensure_ascii=False, sort_keys=True),
+                    ),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        return registry_id
+
+    def seal(self, registry_id: str, result: dict) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE blind_registry
+                SET status = 'SEALED', sealed_at = ?, result_json = ?
+                WHERE registry_id = ? AND status = 'OPENED'
+                """,
+                (now, json.dumps(result, ensure_ascii=False, sort_keys=True, default=str), registry_id),
+            )
+
+
 def _blind_access_manifest(
     *,
     dataset: str,
@@ -949,23 +1147,36 @@ def _blind_access_manifest(
     release_token: str,
     research_version: str,
 ) -> dict:
+    data_manifest = build_data_manifest(dataset, symbols)
     config_payload = {
         "signal_timeframe": signal_key,
         "trend_timeframe": trend_key,
         "validation_config": asdict(validation_config),
     }
     token_hash = hashlib.sha256(release_token.encode("utf-8")).hexdigest()
-    return {
+    config_hash = hashlib.sha256(json.dumps(config_payload, sort_keys=True).encode("utf-8")).hexdigest()
+    params_hash = _params_hash(selected)
+    git_commit = _git_commit()
+    registry_id = BlindRegistry.registry_id(
+        dataset_content_hash=str(data_manifest["manifest_hash"]),
+        research_config_hash=config_hash,
+        parameter_hash=params_hash,
+        code_commit=git_commit,
+    )
+    manifest = {
         "blind_status": "unlocked",
+        "registry_id": registry_id,
         "research_version": research_version,
         "dataset": dataset,
-        "dataset_hash": _data_hash(symbols),
-        "config_hash": hashlib.sha256(json.dumps(config_payload, sort_keys=True).encode("utf-8")).hexdigest(),
-        "params_hash": _params_hash(selected),
+        "dataset_hash": data_manifest["manifest_hash"],
+        "data_manifest": data_manifest,
+        "config_hash": config_hash,
+        "params_hash": params_hash,
         "release_token_hash": token_hash,
-        "git_commit": _git_commit(),
+        "git_commit": git_commit,
         "first_access_time_utc": datetime.now(timezone.utc).isoformat(),
     }
+    return manifest
 
 
 def run_dataset_research_artifacts(
@@ -979,7 +1190,9 @@ def run_dataset_research_artifacts(
     legacy_split: bool = False,
     unlock_blind: bool = False,
     blind_release_token: str | None = None,
-    research_version: str = "v3.50-strict",
+    blind_release_token_sha256: str | None = None,
+    blind_registry_path: str | Path | None = None,
+    research_version: str = "v3.51-strict",
 ) -> dict[str, pd.DataFrame | dict | StrategyParams]:
     symbols = load_all_symbols(dataset)
     if max_symbols is not None:
@@ -1023,6 +1236,17 @@ def run_dataset_research_artifacts(
                 reason="BLIND_RELEASE_TOKEN_REQUIRED",
                 split_status=split_status,
             )
+        token_hash = hashlib.sha256(blind_release_token.encode("utf-8")).hexdigest()
+        if blind_release_token_sha256 and token_hash != blind_release_token_sha256:
+            return _failed_research_artifacts(
+                dataset=dataset,
+                symbols=symbols,
+                signal_key=signal_key,
+                trend_key=trend_key,
+                shared_params=shared_params,
+                reason="BLIND_RELEASE_TOKEN_INVALID",
+                split_status=split_status,
+            )
         blind_lock_status = "unlocked"
 
     if shared_params:
@@ -1041,6 +1265,30 @@ def run_dataset_research_artifacts(
     else:
         train_grid_results = pd.DataFrame()
         selected = None
+
+    if unlock_blind and selected is not None and blind_release_token:
+        blind_manifest = _blind_access_manifest(
+            dataset=dataset,
+            symbols=symbols,
+            signal_key=signal_key,
+            trend_key=trend_key,
+            selected=selected,
+            validation_config=validation_config,
+            release_token=blind_release_token,
+            research_version=research_version,
+        )
+        try:
+            BlindRegistry(blind_registry_path).open_once(blind_manifest)
+        except RuntimeError as exc:
+            return _failed_research_artifacts(
+                dataset=dataset,
+                symbols=symbols,
+                signal_key=signal_key,
+                trend_key=trend_key,
+                shared_params=shared_params,
+                reason=str(exc),
+                split_status=split_status,
+            )
 
     rows: list[dict] = []
     validation_rows: list[dict] = []
@@ -1082,11 +1330,22 @@ def run_dataset_research_artifacts(
                 )
                 continue
             if splits and symbol_data.inst_id in splits:
-                train_frame = splits[symbol_data.inst_id].train
-                valid_frame = splits[symbol_data.inst_id].validation
-                blind_frame = splits[symbol_data.inst_id].blind
+                split = splits[symbol_data.inst_id]
+                train_frame = split.train
+                valid_window = split.validation_window
+                blind_window = split.blind_window
             else:
                 train_frame, valid_frame = split_train_valid(symbol_data.frame, valid_fraction=0.25)
+                valid_window = EvaluationWindow(
+                    frame_with_warmup=valid_frame,
+                    trade_start=pd.Timestamp(valid_frame["ts"].iloc[0]) if "ts" in valid_frame and not valid_frame.empty else pd.Timestamp.min.tz_localize("UTC"),
+                    trade_end=pd.Timestamp(valid_frame["ts"].iloc[-1]) if "ts" in valid_frame and not valid_frame.empty else pd.Timestamp.max.tz_localize("UTC"),
+                )
+                blind_window = EvaluationWindow(
+                    frame_with_warmup=pd.DataFrame(),
+                    trade_start=pd.Timestamp.min.tz_localize("UTC"),
+                    trade_end=pd.Timestamp.max.tz_localize("UTC"),
+                )
                 blind_frame = pd.DataFrame()
             try:
                 train_trades = validate_backtest_result(
@@ -1099,28 +1358,24 @@ def run_dataset_research_artifacts(
                     ),
                     context=f"{symbol_data.inst_id} train",
                 )
-                valid_trades = validate_backtest_result(
-                    run_backtest(
-                        valid_frame,
+                valid_trades = _run_backtest_window(
+                    valid_window,
+                    inst_id=symbol_data.inst_id,
+                    params=selected,
+                    signal_timeframe=signal_key,
+                    trend_timeframe=trend_key,
+                    context=f"{symbol_data.inst_id} validation",
+                )
+                blind_trades = (
+                    _run_backtest_window(
+                        blind_window,
                         inst_id=symbol_data.inst_id,
                         params=selected,
                         signal_timeframe=signal_key,
                         trend_timeframe=trend_key,
-                    ),
-                    context=f"{symbol_data.inst_id} validation",
-                )
-                blind_trades = (
-                    validate_backtest_result(
-                        run_backtest(
-                            blind_frame,
-                            inst_id=symbol_data.inst_id,
-                            params=selected,
-                            signal_timeframe=signal_key,
-                            trend_timeframe=trend_key,
-                        ),
                         context=f"{symbol_data.inst_id} blind",
                     )
-                    if unlock_blind and not blind_frame.empty
+                    if unlock_blind and not blind_window.frame_with_warmup.empty
                     else pd.DataFrame()
                 )
             except ValueError as exc:
@@ -1210,17 +1465,6 @@ def run_dataset_research_artifacts(
     except ValueError:
         blind_portfolio = summarize_trades(pd.DataFrame(), initial_equity=10000.0 * max(1, len(symbols)))
         blind_portfolio["status"] = "locked" if not unlock_blind else "failed_no_blind_backtest"
-    if unlock_blind and selected is not None and blind_release_token:
-        blind_manifest = _blind_access_manifest(
-            dataset=dataset,
-            symbols=symbols,
-            signal_key=signal_key,
-            trend_key=trend_key,
-            selected=selected,
-            validation_config=validation_config,
-            release_token=blind_release_token,
-            research_version=research_version,
-        )
     walk_forward_results: dict = {}
     if shared_params and selected is not None and splits:
         walk_rows = []
@@ -1289,6 +1533,15 @@ def run_dataset_research_artifacts(
     )
     valid_trades = pd.concat([frame for frame in valid_trades_by_symbol if not frame.empty], ignore_index=True) if any(not frame.empty for frame in valid_trades_by_symbol) else pd.DataFrame()
     blind_trades = pd.concat([frame for frame in blind_trades_by_symbol if not frame.empty], ignore_index=True) if any(not frame.empty for frame in blind_trades_by_symbol) else pd.DataFrame()
+    if blind_manifest:
+        BlindRegistry(blind_registry_path).seal(
+            str(blind_manifest["registry_id"]),
+            {
+                "blind_total_trades": int(len(blind_trades)),
+                "blind_portfolio_status": blind_portfolio.get("status", ""),
+                "blind_profit_factor": blind_portfolio.get("profit_factor", 0.0),
+            },
+        )
     leverage_risk = build_leverage_risk_table(valid_trades)
     cost_stress = replay_cost_stress(valid_trades, initial_equity=10000.0 * max(1, len(symbols)))
     checklist = build_acceptance_checklist(

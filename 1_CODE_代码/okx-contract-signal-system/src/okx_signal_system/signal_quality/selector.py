@@ -33,9 +33,29 @@ def assign_tiers(
 ) -> TieredSelection:
     observations = observation_candidates or []
     formal_candidates = [candidate for candidate in candidates if bool(candidate.health_item.get("would_push"))]
-    ranked = rank_candidates(formal_candidates + observations)
+    ranked_formal = rank_candidates(formal_candidates)
+    ranked_observations = [
+        replace(candidate, rank=None, watch_rank=idx + 1)
+        for idx, candidate in enumerate(
+            sorted(
+                observations,
+                key=lambda item: (
+                    -float(item.rank_score),
+                    -float(item.raw_score),
+                    item.inst_id,
+                ),
+            )
+        )
+    ]
     group_by_symbol = assign_correlation_groups(
-        ranked,
+        ranked_formal,
+        price_history,
+        threshold=high_correlation_threshold,
+        window_days=correlation_window_days,
+        min_samples=min_correlation_samples,
+    )
+    observation_group_by_symbol = assign_correlation_groups(
+        ranked_observations,
         price_history,
         threshold=high_correlation_threshold,
         window_days=correlation_window_days,
@@ -44,19 +64,20 @@ def assign_tiers(
     used_groups: set[str] = set()
     tier_a_count = 0
     tiered: list[CandidateLike] = []
-    for candidate in ranked:
+    for candidate in ranked_formal:
         key = f"{candidate.side}:{candidate.inst_id}"
         group = group_by_symbol.get(key, f"solo:{key}")
-        if isinstance(candidate, ObservationCandidate):
-            tiered.append(replace(candidate, tier="C", correlation_group=group))
-            continue
-
         tier = "B"
         if tier_a_count < max_tier_a and group not in used_groups:
             tier = "A"
             tier_a_count += 1
             used_groups.add(group)
         tiered.append(replace(candidate, tier=tier, correlation_group=group))
+
+    for candidate in ranked_observations:
+        key = f"{candidate.side}:{candidate.inst_id}"
+        group = observation_group_by_symbol.get(key, f"solo:{key}")
+        tiered.append(replace(candidate, tier="C", rank=None, correlation_group=group))
     return TieredSelection(
         ranked=tiered,
         tier_a=[item for item in tiered if item.tier == "A"],

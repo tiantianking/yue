@@ -262,6 +262,39 @@ def test_assign_tiers_keeps_non_formal_observation_in_c() -> None:
     assert selection.tier_c == [selection.ranked[1]]
 
 
+def test_assign_tiers_c_high_score_does_not_affect_formal_rank() -> None:
+    low_formal = _candidate("BTC-USDT-SWAP", 6.8)
+    high_formal = _candidate("ETH-USDT-SWAP", 8.1)
+    observation = ObservationCandidate(
+        inst_id="SOL-USDT-SWAP",
+        side="long",
+        candle_time=pd.Timestamp("2026-01-01T00:00:00Z"),
+        close=100.0,
+        breakout_level=100.4,
+        breakout_gap_pct=0.004,
+        payload={"observation": {"type": "near_breakout"}},
+        health_item={"symbol": "SOL-USDT-SWAP", "would_push": False, "observation": True},
+        rank_score=99.0,
+        raw_score=99.0,
+    )
+
+    selection = assign_tiers(
+        [low_formal, high_formal],
+        observation_candidates=[observation],
+        max_tier_a=1,
+    )
+
+    assert [item.inst_id for item in selection.ranked] == [
+        "ETH-USDT-SWAP",
+        "BTC-USDT-SWAP",
+        "SOL-USDT-SWAP",
+    ]
+    assert [item.tier for item in selection.ranked] == ["A", "B", "C"]
+    assert [item.rank for item in selection.tier_a + selection.tier_b] == [1, 2]
+    assert selection.tier_c[0].rank is None
+    assert selection.tier_c[0].watch_rank == 1
+
+
 def test_assign_tiers_drops_non_push_formal_candidates_from_ranked_tiers() -> None:
     formal = _candidate("BTC-USDT-SWAP", 9.0)
     non_push = replace(

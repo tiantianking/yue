@@ -233,6 +233,28 @@ def test_lifecycle_record_signal_is_idempotent_and_persistence_is_stable(tmp_pat
     assert second_payload == first_payload
 
 
+def test_lifecycle_max_records_does_not_delete_sqlite_history(tmp_path) -> None:
+    path = tmp_path / "lifecycle.sqlite3"
+    store = SignalLifecycleStore(path, max_records=5)
+
+    for idx in range(10):
+        store.record_signal(
+            _signal(ts=f"2026-01-01T0{idx}:00:00Z", entry_ref=100.0 + idx),
+            signal_id=f"sig-{idx}",
+        )
+
+    assert len(store.records) == 5
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM lifecycle_records").fetchone()[0] == 10
+        assert conn.execute("SELECT COUNT(*) FROM lifecycle_events").fetchone()[0] == 10
+        assert conn.execute("SELECT COUNT(*) FROM notification_outbox").fetchone()[0] == 10
+
+    reloaded = SignalLifecycleStore(path, max_records=5)
+    assert len(reloaded.records) == 5
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM lifecycle_records").fetchone()[0] == 10
+
+
 def test_lifecycle_sqlite_schema_records_events_and_outbox(tmp_path) -> None:
     path = tmp_path / "lifecycle.sqlite3"
     store = SignalLifecycleStore(path)
@@ -301,11 +323,72 @@ def test_lifecycle_outbox_worker_marks_sent_and_failed(tmp_path) -> None:
     result = LifecycleOutboxWorker(store, DummyDispatcher()).run_once()
 
     assert result == {"sent": 1, "failed": 1}
-    pending = {item["outbox_id"]: item for item in store.pending_notifications()}
-    assert "outbox-ok" not in pending
-    assert pending["outbox-fail"]["status"] == "FAILED"
-    assert pending["outbox-fail"]["last_error"] == "send_lifecycle_event_returned_false"
-    assert pending["outbox-fail"]["attempt_count"] == 1
+    assert store.pending_notifications() == []
+    with sqlite3.connect(path) as conn:
+        row = conn.execute(
+            "SELECT status, attempt_count, last_error, locked_until FROM notification_outbox WHERE outbox_id = ?",
+            ("outbox-fail",),
+        ).fetchone()
+    assert row == ("FAILED", 1, "send_lifecycle_event_returned_false", None)
+
+
+def test_lifecycle_pending_notifications_only_returns_due_items(tmp_path) -> None:
+    path = tmp_path / "lifecycle.sqlite3"
+    store = SignalLifecycleStore(path)
+    store.enqueue_notification("outbox-due", signal_id=None, event_type="TARGET_REACHED")
+    store.enqueue_notification("outbox-future", signal_id=None, event_type="STOP_REACHED")
+
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "UPDATE notification_outbox SET available_at = ? WHERE outbox_id = ?",
+            ("2099-01-01T00:00:00+00:00", "outbox-future"),
+        )
+
+    assert [item["outbox_id"] for item in store.pending_notifications()] == ["outbox-due"]
+
+
+def test_lifecycle_claim_pending_notifications_leases_items(tmp_path) -> None:
+    path = tmp_path / "lifecycle.sqlite3"
+    store = SignalLifecycleStore(path)
+    store.enqueue_notification("outbox-claim", signal_id=None, event_type="TARGET_REACHED")
+
+    claimed = store.claim_pending_notifications(limit=10)
+
+    assert [item["outbox_id"] for item in claimed] == ["outbox-claim"]
+    assert store.claim_pending_notifications(limit=10) == []
+    assert store.pending_notifications() == []
+    with sqlite3.connect(path) as conn:
+        row = conn.execute(
+            "SELECT status, claimed_at, locked_until FROM notification_outbox WHERE outbox_id = ?",
+            ("outbox-claim",),
+        ).fetchone()
+    assert row[0] == "IN_PROGRESS"
+    assert row[1]
+    assert row[2]
+
+
+def test_lifecycle_enqueue_does_not_release_claimed_outbox_item(tmp_path) -> None:
+    path = tmp_path / "lifecycle.sqlite3"
+    store = SignalLifecycleStore(path)
+    store.enqueue_notification("outbox-claim", signal_id=None, event_type="TARGET_REACHED")
+    store.claim_pending_notifications(limit=10)
+
+    with sqlite3.connect(path) as conn:
+        before = conn.execute(
+            "SELECT status, available_at, claimed_at, locked_until FROM notification_outbox WHERE outbox_id = ?",
+            ("outbox-claim",),
+        ).fetchone()
+
+    store.enqueue_notification("outbox-claim", signal_id=None, event_type="TARGET_REACHED", payload={"retry": True})
+
+    with sqlite3.connect(path) as conn:
+        after = conn.execute(
+            "SELECT status, available_at, claimed_at, locked_until FROM notification_outbox WHERE outbox_id = ?",
+            ("outbox-claim",),
+        ).fetchone()
+
+    assert after == before
+    assert store.pending_notifications() == []
 
 
 def test_lifecycle_outbox_worker_dead_letters_after_max_attempts(tmp_path) -> None:

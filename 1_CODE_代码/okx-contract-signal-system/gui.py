@@ -1258,6 +1258,7 @@ class OKXSignalGUI:
                 )))
 
             selection = scan_result.selection
+            total_formal_candidates = len(selection.tier_a) + len(selection.tier_b)
             for candidate in selection.tier_a:
                 signal = candidate.signal
                 decision = candidate.decision
@@ -1279,7 +1280,7 @@ class OKXSignalGUI:
                         trend_timeframe=self.api.trend_timeframe.key,
                         tier=candidate.tier,
                         rank=candidate.rank,
-                        total_candidates=len(selection.ranked),
+                        total_candidates=total_formal_candidates,
                         lifecycle_status=(candidate.payload.get("lifecycle") or {}).get("status"),
                         invalidation_price=candidate.invalidation_price,
                         quality_model=(
@@ -1290,7 +1291,7 @@ class OKXSignalGUI:
                     )
                     if sent:
                         self._mark_signal_notified(candidate.notify_key, signal, score=float(candidate.raw_score))
-                        self.message_queue.put(('log', (f"📤 A级飞书推送已发送：排名 {candidate.rank}/{len(selection.ranked)}，评分{candidate.raw_score:.1f}", "INFO")))
+                        self.message_queue.put(('log', (f"📤 A级飞书推送已发送：排名 {candidate.rank}/{total_formal_candidates}，评分{candidate.raw_score:.1f}", "INFO")))
                     else:
                         self.message_queue.put(('log', ("A级飞书推送未送达：飞书返回失败，稍后会重试", "WARNING")))
                 except Exception as e:
@@ -1305,7 +1306,7 @@ class OKXSignalGUI:
                     try:
                         summary_sent = self._notification_dispatcher().send_b_tier_summary(
                             selection.tier_b,
-                            total_candidates=len(selection.ranked),
+                            total_candidates=total_formal_candidates,
                             signal_timeframe=self.api.timeframe.key if self.api else None,
                             trend_timeframe=self.api.trend_timeframe.key if self.api else None,
                         )

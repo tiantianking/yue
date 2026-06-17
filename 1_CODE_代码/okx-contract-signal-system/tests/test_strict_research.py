@@ -5,8 +5,10 @@ from tests._integration import require_lightweight_history
 from okx_signal_system.backtest.evaluation import evaluate_symbol
 from okx_signal_system.backtest.grid_search import parameter_grid, run_grid_search, select_best_params
 from okx_signal_system.backtest.research import (
+    BlindRegistry,
     NoValidParameterSetError,
     ResearchValidationConfig,
+    build_data_manifest,
     build_acceptance_checklist,
     common_calendar_split,
     replay_cost_stress,
@@ -116,6 +118,27 @@ def test_common_calendar_split_keeps_boundaries_when_symbol_has_missing_bars(tmp
     assert btc["blind_start"] == eth["blind_start"]
 
 
+def test_common_calendar_split_evaluation_windows_include_warmup_history(tmp_path) -> None:
+    config = ResearchValidationConfig(
+        train_fraction=0.50,
+        validation_fraction=0.25,
+        purge_bars=2,
+        embargo_bars=1,
+    )
+    params = [StrategyParams(fast_ema=2, slow_ema=3, breakout_window=4, max_hold_bars=5)]
+    symbols = [
+        SymbolData("BTC-USDT-SWAP", tmp_path / "btc.parquet", _research_frame(90)),
+        SymbolData("ETH-USDT-SWAP", tmp_path / "eth.parquet", _research_frame(90)),
+    ]
+
+    split = common_calendar_split(symbols, params_grid=params, signal_timeframe="15m", config=config)["BTC-USDT-SWAP"]
+
+    assert split.validation_window.trade_start == split.boundaries["validation_start"]
+    assert split.validation_window.trade_end == split.boundaries["validation_end"]
+    assert split.validation_window.frame_with_warmup["ts"].min() < split.validation["ts"].min()
+    assert split.blind_window.frame_with_warmup["ts"].min() < split.blind["ts"].min()
+
+
 def test_common_calendar_split_fails_when_strict_windows_are_empty(tmp_path) -> None:
     config = ResearchValidationConfig(
         train_fraction=0.60,
@@ -135,6 +158,33 @@ def test_common_calendar_split_fails_when_strict_windows_are_empty(tmp_path) -> 
             signal_timeframe="15m",
             config=config,
         )
+
+
+def test_data_manifest_hash_changes_when_ohlcv_content_changes(tmp_path) -> None:
+    base = _research_frame(20)
+    changed = base.copy()
+    changed.loc[5, "close"] = 123.45
+    first = build_data_manifest("unit", [SymbolData("BTC-USDT-SWAP", tmp_path / "btc.parquet", base)])
+    second = build_data_manifest("unit", [SymbolData("BTC-USDT-SWAP", tmp_path / "btc.parquet", changed)])
+
+    assert first["symbols"]["BTC-USDT-SWAP"]["content_sha256"] != second["symbols"]["BTC-USDT-SWAP"]["content_sha256"]
+    assert first["manifest_hash"] != second["manifest_hash"]
+
+
+def test_blind_registry_allows_one_open_then_rejects_same_research_id(tmp_path) -> None:
+    registry = BlindRegistry(tmp_path / "blind_registry.sqlite3")
+    manifest = {
+        "registry_id": "research-1",
+        "dataset_hash": "dataset",
+        "config_hash": "config",
+        "params_hash": "params",
+        "git_commit": "commit",
+    }
+
+    assert registry.open_once(manifest) == "research-1"
+    registry.seal("research-1", {"blind_total_trades": 1})
+    with pytest.raises(RuntimeError, match="BLIND_ALREADY_OPENED"):
+        registry.open_once(manifest)
 
 
 def test_shared_param_selection_rejects_infinite_profit_factor() -> None:

@@ -52,6 +52,7 @@ class ObservationCandidate:
     breakout_distance_atr: float | None = None
     tier: str | None = None
     rank: int | None = None
+    watch_rank: int | None = None
     correlation_group: str | None = None
 
     @property

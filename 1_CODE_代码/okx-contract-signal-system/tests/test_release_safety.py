@@ -76,6 +76,7 @@ def test_release_version_sources_stay_consistent() -> None:
     gui_text = _read("gui.py")
     start_text = _read("start.bat")
 
+    assert package_version == "3.51.0"
     assert pyproject["project"]["version"] == package_version
     assert f"Version: {package_version}" in pkg_info
     assert "from okx_signal_system import __version__ as _PACKAGE_VERSION" in main_text
@@ -88,6 +89,16 @@ def test_release_version_sources_stay_consistent() -> None:
 
     for text in [main_text, gui_text, start_text]:
         assert not re.search(r"v\d+\.\d+(?:\.\d+)?", text)
+
+
+def test_strict_research_default_version_matches_cli_release() -> None:
+    from okx_signal_system.backtest import research
+
+    cli_text = _read("src/okx_signal_system/backtest/research_cli.py")
+    default_version = research.run_dataset_research_artifacts.__kwdefaults__["research_version"]
+
+    assert default_version == "v3.51-strict"
+    assert f'parser.add_argument("--research-version", default="{default_version}")' in cli_text
 
 
 def test_env_example_is_signal_only_and_has_no_private_okx_keys() -> None:
@@ -289,6 +300,20 @@ def test_release_docs_do_not_advertise_live_order_defaults() -> None:
     forbidden.extend(PRIVATE_OKX_TOKENS)
     for token in forbidden:
         assert token not in docs
+
+
+def test_release_docs_mark_learning_paths_experimental_not_production_tuning() -> None:
+    docs = "\n".join(
+        [
+            _read("docs/RELEASE_SAFETY.md"),
+            _read("docs/SYSTEM_ARCHITECTURE.md"),
+        ]
+    )
+
+    assert "experimental sidecar paths" in docs
+    assert "not production automatic tuning features" in docs
+    assert "must not promote parameters into runtime by themselves" in docs
+    assert "strict research acceptance flow and operator review" in docs
 
 
 def test_release_facing_text_is_signal_only() -> None:

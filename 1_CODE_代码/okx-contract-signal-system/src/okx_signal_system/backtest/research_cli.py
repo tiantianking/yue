@@ -26,7 +26,9 @@ def main() -> None:
     parser.add_argument("--legacy-split", action="store_true", help="allow non-formal per-symbol fallback split")
     parser.add_argument("--unlock-blind", action="store_true", help="run blind-set evaluation and write an access manifest")
     parser.add_argument("--blind-release-token", default=None)
-    parser.add_argument("--research-version", default="v3.50-strict")
+    parser.add_argument("--blind-release-token-sha256", default=None)
+    parser.add_argument("--blind-registry-path", default=None)
+    parser.add_argument("--research-version", default="v3.51-strict")
     args = parser.parse_args()
     params_grid = None if args.full_grid else smoke_grid()
     artifacts = run_dataset_research_artifacts(
@@ -39,6 +41,8 @@ def main() -> None:
         legacy_split=args.legacy_split,
         unlock_blind=args.unlock_blind,
         blind_release_token=args.blind_release_token,
+        blind_release_token_sha256=args.blind_release_token_sha256,
+        blind_registry_path=args.blind_registry_path,
         research_version=args.research_version,
     )
     write_research_artifacts(artifacts, project_paths().output_dir)

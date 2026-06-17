@@ -5,6 +5,7 @@ OKX 合约信号系统 - 实时行情信号模块
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -1196,11 +1197,30 @@ class LiveSignalMonitor:
         self,
         selection: TieredSelection,
     ) -> None:
+        total_formal_candidates = len(selection.tier_a) + len(selection.tier_b)
+        total_observations = len(selection.tier_c)
         for candidate in selection.ranked:
             candidate.health_item["tier"] = candidate.tier
-            candidate.health_item["rank"] = candidate.rank
             candidate.health_item["rank_score"] = candidate.rank_score
             candidate.health_item["correlation_group"] = candidate.correlation_group
+            candidate.health_item["total_formal_candidates"] = total_formal_candidates
+            candidate.health_item["total_observations"] = total_observations
+            if candidate.tier == "C":
+                candidate.health_item["watch_rank"] = getattr(candidate, "watch_rank", None)
+                candidate.health_item.pop("rank", None)
+                if isinstance(candidate.payload, dict):
+                    candidate.payload["tier"] = candidate.tier
+                    candidate.payload["watch_rank"] = getattr(candidate, "watch_rank", None)
+                    candidate.payload["total_observations"] = total_observations
+            else:
+                candidate.health_item["rank"] = candidate.rank
+                candidate.health_item["total_candidates"] = total_formal_candidates
+                if isinstance(candidate.payload, dict):
+                    candidate.payload["tier"] = candidate.tier
+                    candidate.payload["rank"] = candidate.rank
+                    candidate.payload["total_candidates"] = total_formal_candidates
+                    candidate.payload["total_formal_candidates"] = total_formal_candidates
+                    candidate.payload["total_observations"] = total_observations
         for candidate in selection.tier_a:
             if self._signal_notification_store.has(candidate.notify_key):
                 self._last_ready_signal = candidate.payload
@@ -1225,7 +1245,7 @@ class LiveSignalMonitor:
             signal_recorded = False
             if self.signal_callback:
                 try:
-                    callback_result = self.signal_callback(signal, decision)
+                    callback_result = self._call_signal_callback(self.signal_callback, signal, decision, candidate)
                     signal_recorded = callback_result is not False
                     if signal_recorded:
                         self._lifecycle_store.mark_notification_sent(candidate.notify_key)
@@ -1238,7 +1258,7 @@ class LiveSignalMonitor:
                     signal_recorded = False
             else:
                 try:
-                    candidate.health_item["total_candidates"] = len(selection.ranked)
+                    candidate.health_item["total_candidates"] = total_formal_candidates
                     signal_recorded = self._notification_dispatcher.send_a_tier_signal(
                         candidate,
                         signal_timeframe=self.api.timeframe.key,
@@ -1267,7 +1287,7 @@ class LiveSignalMonitor:
                 try:
                     summary_sent = self._notification_dispatcher.send_b_tier_summary(
                         selection.tier_b,
-                        total_candidates=len(selection.ranked),
+                        total_candidates=total_formal_candidates,
                         signal_timeframe=self.api.timeframe.key,
                         trend_timeframe=self.api.trend_timeframe.key,
                     )
@@ -1279,6 +1299,25 @@ class LiveSignalMonitor:
                     log.info("B-tier summary sent: %s candidates", len(selection.tier_b))
                 elif summary_key:
                     log.warning("B-tier summary was not delivered; will retry next scan")
+
+    @staticmethod
+    def _call_signal_callback(callback, signal, decision, candidate):
+        try:
+            signature = inspect.signature(callback)
+        except (TypeError, ValueError):
+            return callback(signal, decision)
+
+        params = list(signature.parameters.values())
+        if any(param.kind == inspect.Parameter.VAR_POSITIONAL for param in params):
+            return callback(signal, decision, candidate)
+        positional = [
+            param
+            for param in params
+            if param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        ]
+        if len(positional) >= 3:
+            return callback(signal, decision, candidate)
+        return callback(signal, decision)
 
     async def _monitor_loop(self):
         """监控循环 — 信号生成 + 风控 + 环境自适应 + 持仓超时"""

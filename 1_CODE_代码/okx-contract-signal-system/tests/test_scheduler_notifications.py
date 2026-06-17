@@ -4,6 +4,7 @@ from okx_signal_system.risk.model import Ledger, RiskDecision
 from okx_signal_system.signal_quality import SignalCandidate, TieredSelection
 from okx_signal_system.strategy.trend_breakout import StrategyParams, TradeSignal
 from okx_signal_system import scheduler
+from okx_signal_system.notify import signal_dedupe
 
 
 class _SummaryStore:
@@ -127,3 +128,45 @@ def test_scheduler_sends_b_tier_summary_from_scan_selection(monkeypatch) -> None
     assert tier_a.health_item["total_candidates"] == 2
     assert store.marked[0][0].startswith("b_tier_summary|")
     assert store.marked[0][1]["candidate_count"] == 1
+    assert store.marked[0][1]["strategy_version"]
+    assert store.marked[0][1]["parameter_hash"]
+
+
+def test_b_tier_summary_key_changes_with_version_params_and_candidates(monkeypatch) -> None:
+    candidate = _candidate("ETH-USDT-SWAP", 7.5, tier="B", rank=2)
+    changed_candidate = _candidate("SOL-USDT-SWAP", 7.5, tier="B", rank=2)
+
+    monkeypatch.setattr(signal_dedupe, "strategy_version", lambda: "v-test-1")
+    base_key = signal_dedupe.b_tier_summary_key(
+        candidate.candle_time,
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+        params=StrategyParams(),
+        candidates=[candidate],
+    )
+    params_key = signal_dedupe.b_tier_summary_key(
+        candidate.candle_time,
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+        params=StrategyParams(fast_ema=121),
+        candidates=[candidate],
+    )
+    candidates_key = signal_dedupe.b_tier_summary_key(
+        candidate.candle_time,
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+        params=StrategyParams(),
+        candidates=[changed_candidate],
+    )
+    monkeypatch.setattr(signal_dedupe, "strategy_version", lambda: "v-test-2")
+    version_key = signal_dedupe.b_tier_summary_key(
+        candidate.candle_time,
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+        params=StrategyParams(),
+        candidates=[candidate],
+    )
+
+    assert base_key != params_key
+    assert base_key != candidates_key
+    assert base_key != version_key

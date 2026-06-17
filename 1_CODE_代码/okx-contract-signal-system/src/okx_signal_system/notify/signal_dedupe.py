@@ -1,6 +1,7 @@
 """Persistent de-duplication for signal notifications."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -55,16 +56,45 @@ def b_tier_summary_key(
     *,
     signal_timeframe: str | None = None,
     trend_timeframe: str | None = None,
+    params: Any | None = None,
+    candidates: list[Any] | tuple[Any, ...] | None = None,
 ) -> str:
     """Build a separate key for one B-tier summary on one K-line."""
+    strategy_version_value = strategy_version()
+    parameter_hash_value = parameter_hash(params) if params is not None else ""
+    candidate_hash = _candidate_ids_hash(candidates or ())
     return "|".join(
         [
             "b_tier_summary",
             _timestamp_text(candle_time),
             signal_timeframe or "",
             trend_timeframe or "",
+            strategy_version_value,
+            parameter_hash_value,
+            candidate_hash,
         ]
     )
+
+
+def _candidate_ids_hash(candidates: list[Any] | tuple[Any, ...]) -> str:
+    ids: list[str] = []
+    for candidate in candidates:
+        notify_key = getattr(candidate, "notify_key", None)
+        if notify_key:
+            ids.append(str(notify_key))
+            continue
+        signal = getattr(candidate, "signal", None)
+        ids.append(
+            "|".join(
+                [
+                    str(getattr(candidate, "inst_id", getattr(signal, "inst_id", ""))),
+                    str(getattr(candidate, "side", getattr(signal, "side", ""))),
+                    _timestamp_text(getattr(candidate, "candle_time", getattr(signal, "ts", ""))),
+                ]
+            )
+        )
+    payload = json.dumps(sorted(ids), ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
 
 class SignalNotificationStore:

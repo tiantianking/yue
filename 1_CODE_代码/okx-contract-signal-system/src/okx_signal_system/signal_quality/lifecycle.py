@@ -4,7 +4,7 @@ import json
 import sqlite3
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -25,6 +25,9 @@ LifecycleStatus = Literal[
 
 _OUTCOME_SIMULATOR = SignalOutcomeSimulator()
 DEFAULT_LIFECYCLE_OUTBOX_MAX_ATTEMPTS = 3
+DEFAULT_LIFECYCLE_OUTBOX_LEASE_SECONDS = 300
+DEFAULT_LIFECYCLE_OUTBOX_RETRY_DELAY_SECONDS = 60
+MAX_LIFECYCLE_OUTBOX_RETRY_DELAY_SECONDS = 3600
 
 
 @dataclass
@@ -57,6 +60,10 @@ class SignalLifecycleRecord:
 
 def _now_text() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _future_text(seconds: int | float) -> str:
+    return (datetime.now(timezone.utc) + timedelta(seconds=float(seconds))).isoformat()
 
 
 def _timestamp_text(value: Any) -> str:
@@ -133,6 +140,9 @@ class SignalLifecycleStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA busy_timeout = 5000")
+        conn.execute("PRAGMA synchronous = NORMAL")
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute(
             """
@@ -190,6 +200,8 @@ class SignalLifecycleStore:
                 event_type TEXT NOT NULL,
                 status TEXT NOT NULL,
                 available_at TEXT NOT NULL,
+                locked_until TEXT,
+                claimed_at TEXT,
                 attempt_count INTEGER NOT NULL DEFAULT 0,
                 sent_at TEXT,
                 last_error TEXT,
@@ -201,6 +213,7 @@ class SignalLifecycleStore:
             """
         )
         self._ensure_lifecycle_record_columns(conn)
+        self._ensure_notification_outbox_columns(conn)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_lifecycle_records_symbol_status ON lifecycle_records(inst_id, status)"
         )
@@ -225,6 +238,17 @@ class SignalLifecycleStore:
             if name not in existing:
                 conn.execute(f"ALTER TABLE lifecycle_records ADD COLUMN {name} {column_type}")
 
+    @staticmethod
+    def _ensure_notification_outbox_columns(conn: sqlite3.Connection) -> None:
+        existing = {str(row["name"]) for row in conn.execute("PRAGMA table_info(notification_outbox)").fetchall()}
+        columns = {
+            "locked_until": "TEXT",
+            "claimed_at": "TEXT",
+        }
+        for name, column_type in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE notification_outbox ADD COLUMN {name} {column_type}")
+
     def _load(self) -> None:
         with self._connect() as conn:
             self._migrate_legacy_json(conn)
@@ -235,8 +259,13 @@ class SignalLifecycleStore:
                 ORDER BY created_at, signal_time, signal_id
                 """
             ).fetchall()
-        self.records = [self._record_from_row(row) for row in rows]
+        self.records = self._limit_records([self._record_from_row(row) for row in rows])
         self._by_id = {item.signal_id: item for item in self.records}
+
+    def _limit_records(self, records: list[SignalLifecycleRecord]) -> list[SignalLifecycleRecord]:
+        if self.max_records <= 0:
+            return []
+        return records[-self.max_records :]
 
     def _migrate_legacy_json(self, conn: sqlite3.Connection) -> None:
         if not self.legacy_path.exists():
@@ -322,18 +351,11 @@ class SignalLifecycleStore:
         )
 
     def _save(self) -> None:
-        self.records = self.records[-self.max_records :]
+        self.records = self._limit_records(self.records)
         self._by_id = {item.signal_id: item for item in self.records}
-        keep_ids = [item.signal_id for item in self.records]
         with self._connect() as conn:
             for record in self.records:
                 self._upsert_record(conn, record)
-            if keep_ids:
-                placeholders = ",".join("?" for _ in keep_ids)
-                conn.execute(
-                    f"DELETE FROM lifecycle_records WHERE signal_id NOT IN ({placeholders})",
-                    keep_ids,
-                )
 
     @staticmethod
     def _upsert_record(conn: sqlite3.Connection, record: SignalLifecycleRecord) -> None:
@@ -436,19 +458,31 @@ class SignalLifecycleStore:
             """
             INSERT INTO notification_outbox (
                 outbox_id, signal_id, channel, event_type, status, available_at,
-                attempt_count, sent_at, last_error, payload_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, 'PENDING', ?, 0, NULL, NULL, ?, ?, ?)
+                locked_until, claimed_at, attempt_count, sent_at, last_error,
+                payload_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, 'PENDING', ?, NULL, NULL, 0, NULL, NULL, ?, ?, ?)
             ON CONFLICT(outbox_id) DO UPDATE SET
                 signal_id = excluded.signal_id,
                 channel = excluded.channel,
                 event_type = excluded.event_type,
                 status = CASE
-                    WHEN notification_outbox.status IN ('SENT', 'DEAD_LETTER') THEN notification_outbox.status
+                    WHEN notification_outbox.status IN ('SENT', 'DEAD_LETTER', 'IN_PROGRESS') THEN notification_outbox.status
                     ELSE 'PENDING'
                 END,
-                available_at = excluded.available_at,
+                available_at = CASE
+                    WHEN notification_outbox.status IN ('SENT', 'DEAD_LETTER', 'IN_PROGRESS') THEN notification_outbox.available_at
+                    ELSE excluded.available_at
+                END,
+                locked_until = CASE
+                    WHEN notification_outbox.status IN ('SENT', 'DEAD_LETTER', 'IN_PROGRESS') THEN notification_outbox.locked_until
+                    ELSE NULL
+                END,
+                claimed_at = CASE
+                    WHEN notification_outbox.status IN ('SENT', 'DEAD_LETTER', 'IN_PROGRESS') THEN notification_outbox.claimed_at
+                    ELSE NULL
+                END,
                 last_error = CASE
-                    WHEN notification_outbox.status IN ('SENT', 'DEAD_LETTER') THEN notification_outbox.last_error
+                    WHEN notification_outbox.status IN ('SENT', 'DEAD_LETTER', 'IN_PROGRESS') THEN notification_outbox.last_error
                     ELSE NULL
                 END,
                 payload_json = excluded.payload_json,
@@ -489,6 +523,9 @@ class SignalLifecycleStore:
         existing = self._by_id.get(sid)
         if existing is not None:
             return existing
+        persisted = self._load_record(sid)
+        if persisted is not None:
+            return persisted
         now = _now_text()
         signal_time = _timestamp_text(getattr(signal, "ts"))
         target_price = take_profit if take_profit is not None else getattr(signal, "take_profit", None)
@@ -508,12 +545,22 @@ class SignalLifecycleStore:
             last_event_at=signal_time,
         )
         self.records.append(record)
-        self.records = self.records[-self.max_records :]
+        self.records = self._limit_records(self.records)
         self._by_id = {item.signal_id: item for item in self.records}
         with self._connect() as conn:
             self._upsert_record(conn, record)
             self._insert_lifecycle_event(conn, record, event_type="TRIGGERED", event_at=signal_time)
         return record
+
+    def _load_record(self, signal_id: str) -> SignalLifecycleRecord | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM lifecycle_records WHERE signal_id = ?",
+                (signal_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._record_from_row(row)
 
     def update_symbol(self, inst_id: str, frame: pd.DataFrame) -> int:
         df = self._closed_frame(frame)
@@ -555,19 +602,31 @@ class SignalLifecycleStore:
                 """
                 INSERT INTO notification_outbox (
                     outbox_id, signal_id, channel, event_type, status, available_at,
-                    attempt_count, sent_at, last_error, payload_json, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, 'PENDING', ?, 0, NULL, NULL, ?, ?, ?)
+                    locked_until, claimed_at, attempt_count, sent_at, last_error,
+                    payload_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, 'PENDING', ?, NULL, NULL, 0, NULL, NULL, ?, ?, ?)
                 ON CONFLICT(outbox_id) DO UPDATE SET
                     signal_id = excluded.signal_id,
                     channel = excluded.channel,
                     event_type = excluded.event_type,
                     status = CASE
-                        WHEN notification_outbox.status IN ('SENT', 'DEAD_LETTER') THEN notification_outbox.status
+                        WHEN notification_outbox.status IN ('SENT', 'DEAD_LETTER', 'IN_PROGRESS') THEN notification_outbox.status
                         ELSE 'PENDING'
                     END,
-                    available_at = excluded.available_at,
+                    available_at = CASE
+                        WHEN notification_outbox.status IN ('SENT', 'DEAD_LETTER', 'IN_PROGRESS') THEN notification_outbox.available_at
+                        ELSE excluded.available_at
+                    END,
+                    locked_until = CASE
+                        WHEN notification_outbox.status IN ('SENT', 'DEAD_LETTER', 'IN_PROGRESS') THEN notification_outbox.locked_until
+                        ELSE NULL
+                    END,
+                    claimed_at = CASE
+                        WHEN notification_outbox.status IN ('SENT', 'DEAD_LETTER', 'IN_PROGRESS') THEN notification_outbox.claimed_at
+                        ELSE NULL
+                    END,
                     last_error = CASE
-                        WHEN notification_outbox.status IN ('SENT', 'DEAD_LETTER') THEN notification_outbox.last_error
+                        WHEN notification_outbox.status IN ('SENT', 'DEAD_LETTER', 'IN_PROGRESS') THEN notification_outbox.last_error
                         ELSE NULL
                     END,
                     payload_json = excluded.payload_json,
@@ -594,6 +653,7 @@ class SignalLifecycleStore:
                 SET status = 'SENT',
                     sent_at = ?,
                     last_error = NULL,
+                    locked_until = NULL,
                     attempt_count = attempt_count + CASE WHEN status != 'SENT' THEN 1 ELSE 0 END,
                     updated_at = ?
                 WHERE outbox_id = ?
@@ -604,16 +664,27 @@ class SignalLifecycleStore:
     def mark_notification_failed(self, outbox_id: str, error: str) -> None:
         now = _now_text()
         with self._connect() as conn:
+            row = conn.execute(
+                "SELECT attempt_count FROM notification_outbox WHERE outbox_id = ?",
+                (outbox_id,),
+            ).fetchone()
+            attempt_count = int(row["attempt_count"]) if row is not None else 0
+            retry_delay = min(
+                DEFAULT_LIFECYCLE_OUTBOX_RETRY_DELAY_SECONDS * (2**attempt_count),
+                MAX_LIFECYCLE_OUTBOX_RETRY_DELAY_SECONDS,
+            )
             conn.execute(
                 """
                 UPDATE notification_outbox
                 SET status = 'FAILED',
                     last_error = ?,
+                    available_at = ?,
+                    locked_until = NULL,
                     attempt_count = attempt_count + 1,
                     updated_at = ?
                 WHERE outbox_id = ?
                 """,
-                (error[:1000], now, outbox_id),
+                (error[:1000], _future_text(retry_delay), now, outbox_id),
             )
 
     def mark_notification_dead_letter(self, outbox_id: str, error: str) -> None:
@@ -624,6 +695,7 @@ class SignalLifecycleStore:
                 UPDATE notification_outbox
                 SET status = 'DEAD_LETTER',
                     last_error = ?,
+                    locked_until = NULL,
                     attempt_count = attempt_count + 1,
                     updated_at = ?
                 WHERE outbox_id = ?
@@ -632,18 +704,73 @@ class SignalLifecycleStore:
             )
 
     def pending_notifications(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        now = _now_text()
         with self._connect() as conn:
             rows = conn.execute(
                 """
                 SELECT *
                 FROM notification_outbox
                 WHERE status IN ('PENDING', 'FAILED')
+                  AND available_at <= ?
+                  AND (locked_until IS NULL OR locked_until <= ?)
                 ORDER BY available_at, created_at
                 LIMIT ?
                 """,
-                (int(limit),),
+                (now, now, int(limit)),
             ).fetchall()
         return [self._outbox_row(row) for row in rows]
+
+    def claim_pending_notifications(
+        self,
+        *,
+        limit: int = 100,
+        lease_seconds: int = DEFAULT_LIFECYCLE_OUTBOX_LEASE_SECONDS,
+    ) -> list[dict[str, Any]]:
+        now = _now_text()
+        locked_until = _future_text(lease_seconds)
+        with self._connect() as conn:
+            conn.commit()
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                """
+                SELECT outbox_id
+                FROM notification_outbox
+                WHERE (
+                    status IN ('PENDING', 'FAILED')
+                    OR (status = 'IN_PROGRESS' AND locked_until IS NOT NULL AND locked_until <= ?)
+                )
+                  AND available_at <= ?
+                  AND (locked_until IS NULL OR locked_until <= ?)
+                ORDER BY available_at, created_at
+                LIMIT ?
+                """,
+                (now, now, now, int(limit)),
+            ).fetchall()
+            outbox_ids = [str(row["outbox_id"]) for row in rows]
+            if not outbox_ids:
+                return []
+            placeholders = ",".join("?" for _ in outbox_ids)
+            conn.execute(
+                f"""
+                UPDATE notification_outbox
+                SET status = 'IN_PROGRESS',
+                    claimed_at = ?,
+                    locked_until = ?,
+                    updated_at = ?
+                WHERE outbox_id IN ({placeholders})
+                """,
+                [now, locked_until, now, *outbox_ids],
+            )
+            claimed = conn.execute(
+                f"""
+                SELECT *
+                FROM notification_outbox
+                WHERE outbox_id IN ({placeholders})
+                ORDER BY available_at, created_at
+                """,
+                outbox_ids,
+            ).fetchall()
+        return [self._outbox_row(row) for row in claimed]
 
     def outbox_summary(self) -> dict[str, Any]:
         with self._connect() as conn:
@@ -658,6 +785,7 @@ class SignalLifecycleStore:
             "pending": counts.get("pending", 0),
             "sent": counts.get("sent", 0),
             "failed": counts.get("failed", 0),
+            "in_progress": counts.get("in_progress", 0),
             "dead_letter": counts.get("dead_letter", 0),
             "updated_at": latest_updated,
         }
@@ -676,6 +804,8 @@ class SignalLifecycleStore:
             "event_type": row["event_type"],
             "status": row["status"],
             "available_at": row["available_at"],
+            "locked_until": row["locked_until"],
+            "claimed_at": row["claimed_at"],
             "attempt_count": row["attempt_count"],
             "sent_at": row["sent_at"],
             "last_error": row["last_error"],
@@ -909,7 +1039,7 @@ class LifecycleOutboxWorker:
 
     def run_once(self, *, limit: int = 100) -> dict[str, int]:
         summary = {"sent": 0, "failed": 0}
-        for item in self.store.pending_notifications(limit=limit):
+        for item in self.store.claim_pending_notifications(limit=limit):
             outbox_id = str(item["outbox_id"])
             try:
                 sent = bool(self.dispatcher.send_lifecycle_event(item))
