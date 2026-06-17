@@ -1,5 +1,6 @@
 import pytest
 import pandas as pd
+import hashlib
 
 from tests._integration import require_lightweight_history
 from okx_signal_system.backtest import research as research_module
@@ -137,8 +138,32 @@ def test_common_calendar_split_evaluation_windows_include_warmup_history(tmp_pat
 
     assert split.validation_window.trade_start == split.boundaries["validation_start"]
     assert split.validation_window.trade_end == split.boundaries["validation_end"]
+    assert split.validation_window.outcome_end == split.boundaries["validation_outcome_end"]
     assert split.validation_window.frame_with_warmup["ts"].min() < split.validation["ts"].min()
     assert split.blind_window.frame_with_warmup["ts"].min() < split.blind["ts"].min()
+    assert split.validation_window.outcome_end < split.blind_window.trade_start
+    assert split.blind_window.trade_end < split.blind_window.outcome_end
+    assert split.blind_window.frame_with_warmup["ts"].max() >= split.blind_window.outcome_end
+
+
+def test_common_calendar_split_keeps_outcome_tail_out_of_next_trade_window(tmp_path) -> None:
+    config = ResearchValidationConfig(
+        train_fraction=0.50,
+        validation_fraction=0.25,
+        purge_bars=2,
+        embargo_bars=1,
+    )
+    params = [StrategyParams(fast_ema=2, slow_ema=3, breakout_window=4, max_hold_bars=8)]
+    symbols = [
+        SymbolData("BTC-USDT-SWAP", tmp_path / "btc.parquet", _research_frame(140)),
+        SymbolData("ETH-USDT-SWAP", tmp_path / "eth.parquet", _research_frame(140)),
+    ]
+
+    split = common_calendar_split(symbols, params_grid=params, signal_timeframe="15m", config=config)["BTC-USDT-SWAP"]
+
+    assert split.train_window.outcome_end < split.validation_window.trade_start
+    assert split.validation_window.outcome_end < split.blind_window.trade_start
+    assert split.boundaries["blind_outcome_end"] <= split.boundaries["common_end"]
 
 
 def test_common_calendar_split_fails_when_strict_windows_are_empty(tmp_path) -> None:
@@ -263,7 +288,65 @@ def test_unlock_blind_requires_expected_token_hash(monkeypatch, tmp_path) -> Non
     )
 
     assert artifacts["research_metadata"]["promotion_eligible"] is False
-    assert artifacts["research_metadata"]["fail_reasons"] == "BLIND_RELEASE_TOKEN_SHA256_REQUIRED"
+    assert artifacts["research_metadata"]["fail_reasons"] == "NO_VALID_PARAMETER_SET"
+
+
+def test_self_authorized_blind_hash_cannot_pass_precommit_gate() -> None:
+    checklist = build_acceptance_checklist(
+        train_grid_results=pd.DataFrame(
+            [{"finite_profit_factor": True, "stable_neighbor_count": 3, "stable_neighbor_ratio": 0.5, "passed_train_gate": True, "symbols_tested": 1}]
+        ),
+        selected=StrategyParams(),
+        selected_params_available=True,
+        validation_results=pd.DataFrame([{"symbol": "BTC-USDT-SWAP"}]),
+        portfolio_results=pd.DataFrame(
+            [{"valid_total_trades": 100, "valid_profit_factor": 1.2, "valid_total_return": 0.2, "valid_max_drawdown": 0.1, "profitable_symbol_ratio": 1.0, "pass_fail": "passed"}]
+        ),
+        leverage_risk=pd.DataFrame([{"near_liq_flag": False}]),
+        cost_stress=pd.DataFrame(
+            [
+                {"scenario": "baseline", "recompute_source": "trade_fact_recompute", "profit_factor": 1.2, "net_r": 1.0, "max_drawdown": 0.1, "total_trades": 100},
+                {"scenario": "stress_1_5x", "recompute_source": "trade_fact_recompute", "profit_factor": 1.1, "net_r": 0.1, "max_drawdown": 0.2, "total_trades": 100},
+                {"scenario": "stress_2x", "recompute_source": "trade_fact_recompute", "profit_factor": 0.9, "net_r": -0.5, "max_drawdown": 0.25, "total_trades": 100},
+            ]
+        ),
+        walk_forward_results={"window_count": 2, "valid_pf_pass_ratio": 0.5, "valid_pf_median": 1.1, "purge_bars": 2, "embargo_bars": 1},
+        shared_params=True,
+        split_status="strict",
+        blind_lock_status="sealed_pass",
+        blind_evaluation={"passed": True, "profit_factor": 1.2, "total_return": 0.1, "total_trades": 30},
+        blind_commitment_verified=False,
+        expected_parameter_combinations=1,
+        completed_parameter_combinations=1,
+        expected_parameter_cells=1,
+        completed_parameter_cells=1,
+        required_symbol_count=1,
+    ).set_index("check")
+
+    assert bool(checklist.loc["blind_precommit_registry_verified", "passed"]) is False
+    assert bool(checklist.loc["blind_final_sealed_pass", "passed"]) is False
+
+
+def test_blind_registry_precommit_must_exist_before_open(tmp_path) -> None:
+    registry = BlindRegistry(tmp_path / "blind_registry.sqlite3")
+    manifest = {
+        "registry_id": "research-1",
+        "dataset_hash": "dataset",
+        "config_hash": "config",
+        "params_hash": "params",
+        "git_commit": "commit",
+        "release_token_hash": hashlib.sha256(b"release").hexdigest(),
+    }
+
+    with pytest.raises(RuntimeError, match="BLIND_PRECOMMIT_REQUIRED"):
+        registry.open_precommitted(manifest)
+
+    assert registry.precommit(manifest) == "research-1"
+    loaded = registry.load_precommit("research-1")
+    assert loaded is not None
+    assert loaded["release_token_hash"] == hashlib.sha256(b"release").hexdigest()
+    assert registry.open_precommitted({**manifest, "blind_status": "unlocked"}) == "research-1"
+    assert registry.load_precommit("research-1") is None
 
 
 def test_shared_param_selection_rejects_infinite_profit_factor() -> None:
@@ -438,10 +521,143 @@ def test_acceptance_checklist_requires_real_blind_lock_and_walk_forward() -> Non
         shared_params=True,
         split_status="strict",
         blind_lock_status="unlocked",
+        blind_commitment_verified=False,
+        expected_parameter_combinations=1,
+        completed_parameter_combinations=1,
+        expected_parameter_cells=1,
+        completed_parameter_cells=1,
+        required_symbol_count=1,
     )
 
     blind_check = checklist.set_index("check").loc["blind_final_sealed_pass"]
     assert bool(blind_check["passed"]) is False
+
+
+def test_acceptance_checklist_rejects_failed_validation_portfolio() -> None:
+    train_grid = pd.DataFrame(
+        [{"finite_profit_factor": True, "stable_neighbor_count": 3, "stable_neighbor_ratio": 0.5, "passed_train_gate": True, "symbols_tested": 2}]
+    )
+    checklist = build_acceptance_checklist(
+        train_grid_results=train_grid,
+        selected=StrategyParams(),
+        selected_params_available=True,
+        validation_results=pd.DataFrame([{"symbol": "BTC-USDT-SWAP"}]),
+        portfolio_results=pd.DataFrame(
+            [
+                {
+                    "valid_total_trades": 100,
+                    "valid_profit_factor": 0.5,
+                    "valid_total_return": -0.2,
+                    "valid_max_drawdown": 0.5,
+                    "profitable_symbol_ratio": 0.8,
+                    "pass_fail": "failed",
+                }
+            ]
+        ),
+        leverage_risk=pd.DataFrame([{"near_liq_flag": False}]),
+        cost_stress=pd.DataFrame(
+            [
+                {"scenario": "baseline", "recompute_source": "trade_fact_recompute", "profit_factor": 1.2, "net_r": 1.0, "max_drawdown": 0.1, "total_trades": 100},
+                {"scenario": "stress_1_5x", "recompute_source": "trade_fact_recompute", "profit_factor": 1.1, "net_r": 0.1, "max_drawdown": 0.2, "total_trades": 100},
+                {"scenario": "stress_2x", "recompute_source": "trade_fact_recompute", "profit_factor": 0.9, "net_r": -0.5, "max_drawdown": 0.25, "total_trades": 100},
+            ]
+        ),
+        walk_forward_results={"window_count": 2, "valid_pf_pass_ratio": 0.5, "valid_pf_median": 1.1, "purge_bars": 2, "embargo_bars": 1},
+        shared_params=True,
+        split_status="strict",
+        blind_lock_status="sealed_pass",
+        blind_evaluation={"passed": True, "profit_factor": 1.2, "total_return": 0.1, "total_trades": 30},
+        blind_commitment_verified=True,
+        expected_parameter_combinations=1,
+        completed_parameter_combinations=1,
+        expected_parameter_cells=2,
+        completed_parameter_cells=2,
+        required_symbol_count=2,
+    ).set_index("check")
+
+    assert bool(checklist.loc["validation_portfolio_passed", "passed"]) is False
+
+
+def test_acceptance_checklist_rejects_losing_stress_scenario() -> None:
+    train_grid = pd.DataFrame(
+        [{"finite_profit_factor": True, "stable_neighbor_count": 3, "stable_neighbor_ratio": 0.5, "passed_train_gate": True, "symbols_tested": 2}]
+    )
+    checklist = build_acceptance_checklist(
+        train_grid_results=train_grid,
+        selected=StrategyParams(),
+        selected_params_available=True,
+        validation_results=pd.DataFrame([{"symbol": "BTC-USDT-SWAP"}]),
+        portfolio_results=pd.DataFrame(
+            [
+                {
+                    "valid_total_trades": 100,
+                    "valid_profit_factor": 1.2,
+                    "valid_total_return": 0.2,
+                    "valid_max_drawdown": 0.1,
+                    "profitable_symbol_ratio": 0.8,
+                    "pass_fail": "passed",
+                }
+            ]
+        ),
+        leverage_risk=pd.DataFrame([{"near_liq_flag": False}]),
+        cost_stress=pd.DataFrame(
+            [
+                {"scenario": "baseline", "recompute_source": "trade_fact_recompute", "profit_factor": 1.2, "net_r": 1.0, "max_drawdown": 0.1, "total_trades": 100},
+                {"scenario": "stress_1_5x", "recompute_source": "trade_fact_recompute", "profit_factor": 0.8, "net_r": -0.3, "max_drawdown": 0.2, "total_trades": 100},
+                {"scenario": "stress_2x", "recompute_source": "trade_fact_recompute", "profit_factor": 0.3, "net_r": -5.0, "max_drawdown": 0.6, "total_trades": 100},
+            ]
+        ),
+        walk_forward_results={"window_count": 2, "valid_pf_pass_ratio": 0.5, "valid_pf_median": 1.1, "purge_bars": 2, "embargo_bars": 1},
+        shared_params=True,
+        split_status="strict",
+        blind_lock_status="sealed_pass",
+        blind_evaluation={"passed": True, "profit_factor": 1.2, "total_return": 0.1, "total_trades": 30},
+        blind_commitment_verified=True,
+        expected_parameter_combinations=1,
+        completed_parameter_combinations=1,
+        expected_parameter_cells=2,
+        completed_parameter_cells=2,
+        required_symbol_count=2,
+    ).set_index("check")
+
+    assert bool(checklist.loc["cost_stress_metrics_passed", "passed"]) is False
+
+
+def test_acceptance_checklist_requires_parameter_symbol_cell_coverage() -> None:
+    train_grid = pd.DataFrame(
+        [{"finite_profit_factor": True, "stable_neighbor_count": 3, "stable_neighbor_ratio": 0.5, "passed_train_gate": True, "symbols_tested": 1}]
+    )
+    checklist = build_acceptance_checklist(
+        train_grid_results=train_grid,
+        selected=StrategyParams(),
+        selected_params_available=True,
+        validation_results=pd.DataFrame([{"symbol": "BTC-USDT-SWAP"}]),
+        portfolio_results=pd.DataFrame(
+            [{"valid_total_trades": 100, "valid_profit_factor": 1.2, "valid_total_return": 0.2, "valid_max_drawdown": 0.1, "profitable_symbol_ratio": 0.8, "pass_fail": "passed"}]
+        ),
+        leverage_risk=pd.DataFrame([{"near_liq_flag": False}]),
+        cost_stress=pd.DataFrame(
+            [
+                {"scenario": "baseline", "recompute_source": "trade_fact_recompute", "profit_factor": 1.2, "net_r": 1.0, "max_drawdown": 0.1, "total_trades": 100},
+                {"scenario": "stress_1_5x", "recompute_source": "trade_fact_recompute", "profit_factor": 1.1, "net_r": 0.1, "max_drawdown": 0.2, "total_trades": 100},
+                {"scenario": "stress_2x", "recompute_source": "trade_fact_recompute", "profit_factor": 0.9, "net_r": -0.5, "max_drawdown": 0.25, "total_trades": 100},
+            ]
+        ),
+        walk_forward_results={"window_count": 2, "valid_pf_pass_ratio": 0.5, "valid_pf_median": 1.1, "purge_bars": 2, "embargo_bars": 1},
+        shared_params=True,
+        split_status="strict",
+        blind_lock_status="sealed_pass",
+        blind_evaluation={"passed": True, "profit_factor": 1.2, "total_return": 0.1, "total_trades": 30},
+        blind_commitment_verified=True,
+        expected_parameter_combinations=1,
+        completed_parameter_combinations=1,
+        expected_parameter_cells=2,
+        completed_parameter_cells=1,
+        required_symbol_count=2,
+    ).set_index("check")
+
+    assert bool(checklist.loc["formal_parameter_grid_complete", "passed"]) is False
+    assert bool(checklist.loc["selected_parameter_symbol_coverage", "passed"]) is False
 
 
 def test_acceptance_checklist_rejects_hand_written_blind_pass_without_metrics() -> None:
@@ -469,6 +685,9 @@ def test_acceptance_checklist_rejects_hand_written_blind_pass_without_metrics() 
         blind_evaluation={"passed": False, "profit_factor": 0.5, "total_return": -0.2, "total_trades": 30},
         expected_parameter_combinations=1,
         completed_parameter_combinations=1,
+        expected_parameter_cells=1,
+        completed_parameter_cells=1,
+        required_symbol_count=1,
     ).set_index("check")
 
     assert bool(checklist.loc["blind_final_sealed_pass", "passed"]) is False
@@ -514,6 +733,9 @@ def test_acceptance_checklist_rejects_non_formal_smoke_grid() -> None:
         research_mode="NON_FORMAL_SMOKE",
         expected_parameter_combinations=216,
         completed_parameter_combinations=1,
+        expected_parameter_cells=216,
+        completed_parameter_cells=1,
+        required_symbol_count=1,
     ).set_index("check")
 
     assert bool(checklist.loc["formal_research_mode", "passed"]) is False

@@ -1271,34 +1271,7 @@ class OKXSignalGUI:
                     event_type="A_TIER_SIGNAL",
                     payload=candidate.payload,
                 )
-                try:
-                    sent = self._notification_dispatcher().send_signal(
-                        signal,
-                        decision,
-                        notify_key=candidate.notify_key,
-                        signal_timeframe=self.api.timeframe.key,
-                        trend_timeframe=self.api.trend_timeframe.key,
-                        tier=candidate.tier,
-                        rank=candidate.rank,
-                        total_candidates=total_formal_candidates,
-                        lifecycle_status=(candidate.payload.get("lifecycle") or {}).get("status"),
-                        invalidation_price=candidate.invalidation_price,
-                        quality_model=(
-                            candidate.payload.get("quality_model")
-                            or candidate.health_item.get("quality_model")
-                        ),
-                        reason=",".join(signal.reason_codes),
-                    )
-                    if sent:
-                        self._signal_lifecycle_store().mark_notification_sent(candidate.notify_key)
-                        self._mark_signal_notified(candidate.notify_key, signal, score=float(candidate.raw_score))
-                        self.message_queue.put(('log', (f"📤 A级飞书推送已发送：排名 {candidate.rank}/{total_formal_candidates}，评分{candidate.raw_score:.1f}", "INFO")))
-                    else:
-                        self._signal_lifecycle_store().mark_notification_failed(candidate.notify_key, "send_signal_observation_returned_false")
-                        self.message_queue.put(('log', ("A级飞书推送未送达：飞书返回失败，稍后会重试", "WARNING")))
-                except Exception as e:
-                    self._signal_lifecycle_store().mark_notification_failed(candidate.notify_key, str(e))
-                    self.message_queue.put(('log', (f"A级飞书推送失败: {e}", "WARNING")))
+                self.message_queue.put(('log', (f"A-tier signal queued to notification outbox: rank {candidate.rank}/{total_formal_candidates}, score {candidate.raw_score:.1f}", "INFO")))
             if selection.tier_b:
                 self.message_queue.put(('log', (f"B级候选已保留到体检/面板：{len(selection.tier_b)} 个", "INFO")))
             if selection.tier_b:

@@ -4,6 +4,7 @@ import json
 import sqlite3
 
 import pandas as pd
+import pytest
 
 from okx_signal_system.signal_quality.labeler import label_signal
 from okx_signal_system.signal_quality.lifecycle import LifecycleOutboxWorker, SignalLifecycleStore, lifecycle_payload
@@ -68,7 +69,7 @@ def test_lifecycle_target_reached_after_confirmation(tmp_path) -> None:
     summary = store.summary()
     assert summary["triggered"] == 0
     assert summary["target_reached"] == 1
-    assert summary["active"] == 0
+    assert summary["active"] == 1
     assert summary["terminal"] == 1
     assert summary["latest_event_type"] == "TARGET_REACHED"
     assert summary["latest_event_at"] == "2026-01-01T00:30:00+00:00"
@@ -139,6 +140,8 @@ def test_lifecycle_result_matches_labeler_when_tp_hits_before_confirmation(tmp_p
     record = store.get("sig-preconfirm-tp")
     assert record.status == "TARGET_REACHED"
     assert record.confirmed_at is None
+    assert record.setup_state == "TRIGGERED"
+    assert record.outcome_state == "TARGET_REACHED"
     assert record.target_reached_at == pd.Timestamp(expected.exit_time).isoformat()
 
 
@@ -223,6 +226,8 @@ def test_lifecycle_timeout_result_after_confirmation(tmp_path) -> None:
     assert store.update_symbol("BTC-USDT-SWAP", frame) == 1
     record = store.get("sig-timeout-result")
     assert record.status == "TIMEOUT_RESULT"
+    assert record.setup_state == "CONFIRMED"
+    assert record.outcome_state == "TIMEOUT_RESULT"
     assert record.timeout_result_at == "2026-01-01T00:30:00+00:00"
     payload = lifecycle_payload(record)
     assert payload["lifecycle_event"] == {
@@ -253,6 +258,84 @@ def test_lifecycle_does_not_timeout_result_on_incomplete_tail(tmp_path) -> None:
     assert store.summary()["timeout_result"] == 0
 
 
+@pytest.mark.parametrize(
+    ("signal_kwargs", "rows", "expected_state", "expected_attr"),
+    [
+        (
+            {"entry_ref": 100.0, "stop_loss": 95.0, "take_profit": 110.0, "max_hold_bars": 3},
+            [
+                {"ts": pd.Timestamp("2026-01-01T00:15:00Z"), "open": 100.0, "high": 100.5, "low": 96.0, "close": 94.0, "is_closed": True},
+                {"ts": pd.Timestamp("2026-01-01T00:30:00Z"), "open": 94.0, "high": 111.0, "low": 95.5, "close": 109.0, "is_closed": True},
+            ],
+            "TARGET_REACHED",
+            "target_reached_at",
+        ),
+        (
+            {"entry_ref": 100.0, "stop_loss": 92.0, "take_profit": 120.0, "max_hold_bars": 3},
+            [
+                {"ts": pd.Timestamp("2026-01-01T00:15:00Z"), "open": 100.0, "high": 100.5, "low": 96.0, "close": 94.0, "is_closed": True},
+                {"ts": pd.Timestamp("2026-01-01T00:30:00Z"), "open": 94.0, "high": 95.0, "low": 91.0, "close": 93.0, "is_closed": True},
+            ],
+            "STOP_REACHED",
+            "stop_reached_at",
+        ),
+        (
+            {"entry_ref": 100.0, "stop_loss": 92.0, "take_profit": 120.0, "max_hold_bars": 2},
+            [
+                {"ts": pd.Timestamp("2026-01-01T00:15:00Z"), "open": 100.0, "high": 100.5, "low": 96.0, "close": 94.0, "is_closed": True},
+                {"ts": pd.Timestamp("2026-01-01T00:30:00Z"), "open": 94.0, "high": 96.0, "low": 93.0, "close": 95.0, "is_closed": True},
+            ],
+            "TIMEOUT_RESULT",
+            "timeout_result_at",
+        ),
+        (
+            {"entry_ref": 100.0, "stop_loss": 92.0, "take_profit": None, "max_hold_bars": 2},
+            [
+                {"ts": pd.Timestamp("2026-01-01T00:15:00Z"), "open": 100.0, "high": 100.5, "low": 96.0, "close": 94.0, "is_closed": True},
+                {"ts": pd.Timestamp("2026-01-01T00:30:00Z"), "open": 94.0, "high": 96.0, "low": 93.0, "close": 95.0, "is_closed": True},
+            ],
+            "CENSORED",
+            None,
+        ),
+    ],
+)
+def test_lifecycle_outcome_advances_after_setup_invalidated(
+    tmp_path,
+    signal_kwargs,
+    rows,
+    expected_state,
+    expected_attr,
+) -> None:
+    store = SignalLifecycleStore(tmp_path / "lifecycle.sqlite3")
+    signal = _signal(**signal_kwargs)
+    store.record_signal(signal, signal_id=f"sig-invalidated-{expected_state}", invalidation_price=97.0)
+
+    assert store.update_symbol("BTC-USDT-SWAP", _frame([rows[0]])) == 1
+    record = store.get(f"sig-invalidated-{expected_state}")
+    assert record.setup_state == "INVALIDATED"
+    assert record.outcome_state == "PENDING_ENTRY"
+    assert record.status == "INVALIDATED"
+
+    assert store.update_symbol("BTC-USDT-SWAP", _frame(rows)) == 1
+    record = store.get(f"sig-invalidated-{expected_state}")
+    payload = lifecycle_payload(record)
+
+    assert record.setup_state == "INVALIDATED"
+    assert record.outcome_state == expected_state
+    assert record.status == expected_state
+    assert payload["setup_state"] == "INVALIDATED"
+    assert payload["outcome_state"] == expected_state
+    if expected_attr is not None:
+        assert getattr(record, expected_attr) == "2026-01-01T00:30:00+00:00"
+
+    with sqlite3.connect(tmp_path / "lifecycle.sqlite3") as conn:
+        row = conn.execute(
+            "SELECT setup_state, outcome_state, status FROM lifecycle_records WHERE signal_id = ?",
+            (f"sig-invalidated-{expected_state}",),
+        ).fetchone()
+    assert row == ("INVALIDATED", expected_state, expected_state)
+
+
 def test_lifecycle_persists_records(tmp_path) -> None:
     path = tmp_path / "lifecycle.json"
     store = SignalLifecycleStore(path)
@@ -261,6 +344,9 @@ def test_lifecycle_persists_records(tmp_path) -> None:
     record = reloaded.get("sig-4")
     assert record is not None
     assert record.invalidation_price == 105.0
+    assert record.analysis_stop_loss == 105.0
+    assert record.setup_state == "TRIGGERED"
+    assert record.outcome_state == "PENDING_ENTRY"
     assert record.status == "TRIGGERED"
     assert lifecycle_payload(record)["lifecycle_event"] == {
         "type": "TRIGGERED",
@@ -268,6 +354,121 @@ def test_lifecycle_persists_records(tmp_path) -> None:
     }
     json.dumps(lifecycle_payload(record))
     json.dumps(reloaded.summary())
+
+
+def test_lifecycle_payload_uses_persisted_setup_and_outcome_state(tmp_path) -> None:
+    path = tmp_path / "lifecycle.sqlite3"
+    store = SignalLifecycleStore(path)
+    store.record_signal(_signal(), signal_id="sig-persisted-states")
+
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            UPDATE lifecycle_records
+            SET setup_state = 'INVALIDATED',
+                outcome_state = 'ACTIVE',
+                status = 'INVALIDATED',
+                confirmed_at = NULL,
+                invalidated_at = NULL,
+                expired_at = NULL,
+                target_reached_at = NULL,
+                stop_reached_at = NULL,
+                timeout_result_at = NULL
+            WHERE signal_id = ?
+            """,
+            ("sig-persisted-states",),
+        )
+
+    reloaded = SignalLifecycleStore(path)
+    record = reloaded.get("sig-persisted-states")
+    payload = lifecycle_payload(record)
+
+    assert record.setup_state == "INVALIDATED"
+    assert record.outcome_state == "ACTIVE"
+    assert payload["setup_state"] == "INVALIDATED"
+    assert payload["outcome_state"] == "ACTIVE"
+
+
+def test_lifecycle_persists_dual_states_and_distinct_analysis_stop(tmp_path) -> None:
+    path = tmp_path / "lifecycle.sqlite3"
+    store = SignalLifecycleStore(path)
+    signal = _signal(stop_loss=95.0, take_profit=115.0)
+    store.record_signal(signal, signal_id="sig-distinct-stop", invalidation_price=97.0)
+
+    with sqlite3.connect(path) as conn:
+        row = conn.execute(
+            """
+            SELECT setup_state, outcome_state, status, invalidation_price, analysis_stop_loss, take_profit
+            FROM lifecycle_records
+            WHERE signal_id = ?
+            """,
+            ("sig-distinct-stop",),
+        ).fetchone()
+
+    assert row == ("TRIGGERED", "PENDING_ENTRY", "TRIGGERED", 97.0, 95.0, 115.0)
+    record = SignalLifecycleStore(path).get("sig-distinct-stop")
+    payload = lifecycle_payload(record)
+    assert payload["invalidation_price"] == 97.0
+    assert payload["analysis_stop_loss"] == 95.0
+    assert payload["stop_loss"] == 95.0
+
+
+def test_lifecycle_migrates_old_sqlite_status_to_dual_states(tmp_path) -> None:
+    path = tmp_path / "legacy.sqlite3"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE lifecycle_records (
+                signal_id TEXT PRIMARY KEY,
+                inst_id TEXT NOT NULL,
+                side TEXT NOT NULL,
+                signal_time TEXT NOT NULL,
+                entry_ref REAL NOT NULL,
+                invalidation_price REAL NOT NULL,
+                take_profit REAL,
+                max_hold_bars INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                bars_seen INTEGER NOT NULL DEFAULT 0,
+                last_closed_time TEXT,
+                last_close REAL,
+                confirmed_at TEXT,
+                invalidated_at TEXT,
+                expired_at TEXT,
+                target_reached_at TEXT,
+                stop_reached_at TEXT,
+                timeout_result_at TEXT,
+                last_event_type TEXT NOT NULL,
+                last_event_at TEXT NOT NULL,
+                signal_timeframe TEXT,
+                trend_timeframe TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO lifecycle_records (
+                signal_id, inst_id, side, signal_time, entry_ref, invalidation_price,
+                take_profit, max_hold_bars, status, bars_seen, target_reached_at,
+                last_event_type, last_event_at, created_at, updated_at
+            ) VALUES (
+                'legacy-target', 'BTC-USDT-SWAP', 'long', '2026-01-01T00:00:00+00:00',
+                100.0, 95.0, 115.0, 3, 'TARGET_REACHED', 2,
+                '2026-01-01T00:30:00+00:00', 'TARGET_REACHED',
+                '2026-01-01T00:30:00+00:00', '2026-01-01T00:00:00+00:00',
+                '2026-01-01T00:30:00+00:00'
+            )
+            """
+        )
+
+    store = SignalLifecycleStore(path)
+    record = store.get("legacy-target")
+
+    assert record.setup_state == "TRIGGERED"
+    assert record.outcome_state == "TARGET_REACHED"
+    assert record.status == "TARGET_REACHED"
+    assert record.analysis_stop_loss == 95.0
 
 
 def test_lifecycle_record_signal_is_idempotent_and_persistence_is_stable(tmp_path) -> None:

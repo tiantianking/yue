@@ -1242,42 +1242,12 @@ class LiveSignalMonitor:
                 candidate.rank,
                 candidate.rank_score,
             )
-            signal_recorded = False
             if self.signal_callback:
                 try:
-                    callback_result = self._call_signal_callback(self.signal_callback, signal, decision, candidate)
-                    signal_recorded = callback_result is not False
-                    if signal_recorded:
-                        self._lifecycle_store.mark_notification_sent(candidate.notify_key)
-                        self._shadow_ledger.record_signal(signal, decision)
-                    else:
-                        self._lifecycle_store.mark_notification_failed(candidate.notify_key, "signal_callback_returned_false")
+                    self._call_signal_callback(self.signal_callback, signal, decision, candidate)
                 except Exception as cb_err:
                     log.error("Signal callback error: %s", cb_err)
-                    self._lifecycle_store.mark_notification_failed(candidate.notify_key, str(cb_err))
-                    signal_recorded = False
-            else:
-                try:
-                    candidate.health_item["total_candidates"] = total_formal_candidates
-                    signal_recorded = self._notification_dispatcher.send_a_tier_signal(
-                        candidate,
-                        signal_timeframe=self.api.timeframe.key,
-                        trend_timeframe=self.api.trend_timeframe.key,
-                    )
-                    if signal_recorded:
-                        self._lifecycle_store.mark_notification_sent(candidate.notify_key)
-                        self._shadow_ledger.record_signal(signal, decision)
-                        log.info("Feishu A-tier push sent: %s %s", candidate.inst_id, candidate.side)
-                    else:
-                        self._lifecycle_store.mark_notification_failed(candidate.notify_key, "send_signal_observation_returned_false")
-                except Exception as feishu_err:
-                    log.error("Feishu push failed: %s", feishu_err)
-                    self._lifecycle_store.mark_notification_failed(candidate.notify_key, str(feishu_err))
-                    signal_recorded = False
-            if signal_recorded:
-                self._mark_signal_notified(candidate.notify_key, signal, score=float(candidate.payload["signal"].get("signal_score") or 0.0))
-            else:
-                log.warning("Signal alert was not delivered; will retry next scan: %s %s", candidate.inst_id, candidate.side)
+            self._shadow_ledger.record_signal(signal, decision)
         if selection.tier_b:
             log.info("B-tier candidates retained for summary: %s", len(selection.tier_b))
             summary_key = self._b_tier_summary_key(selection.tier_b)

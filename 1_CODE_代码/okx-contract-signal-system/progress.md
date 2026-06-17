@@ -560,3 +560,21 @@
 ### Notes
 - Modified files: `src/okx_signal_system/backtest/research.py` adds canonical content identity, blind portfolio acceptance, outcome-tail split windows, grid hash metadata, and `v3.53-strict`; `src/okx_signal_system/backtest/runner.py` uses shared `CostConfig` and complete timeout windows; `src/okx_signal_system/signal_quality/outcome.py` suppresses incomplete tail timeouts; `src/okx_signal_system/data/loader.py`, `src/okx_signal_system/data/quality.py`, and `src/okx_signal_system/data/gap_handler.py` enforce formal closed-candle data and fail closed on gap detection errors; `src/okx_signal_system/notify/dispatcher.py`, `src/okx_signal_system/scheduler.py`, `gui.py`, and `src/okx_signal_system/signal_quality/lifecycle.py` align direct-send outbox ownership; dashboard config files add full check coverage; tests add regressions for the audit counterexamples; release metadata and docs are synchronized to v3.53.
 - Rollback: revert only the v3.53 hunks in the listed source, dashboard, test, version, and docs files, then remove this appended progress entry.
+
+## 2026-06-17 - Task: v3.54 v3.53 counterexample audit closure
+### What was done
+- Rebuilt strict research periods around explicit warmup, trade, and outcome windows so validation outcome tails cannot overlap blind trade windows and blind trades retain full outcome tails.
+- Added parameter-by-symbol cell coverage and selected-parameter symbol coverage gates, plus fail-closed validation portfolio and cost-stress metric checks.
+- Added a two-phase blind registry flow: precommit stores token hash before blind access, unlock reads the stored hash, and same-command token+hash is self-authorized compatibility evidence that cannot pass promotion.
+- Persisted separate lifecycle `setup_state` and `outcome_state` fields with migration support, and separated analysis stop from setup invalidation in payloads.
+- Routed formal A-tier notifications through `notification_outbox` and the worker path instead of direct Feishu sends from GUI, realtime, scheduler, or main runtime.
+- Fixed dashboard history path resolution for explicit Windows drive paths, UNC paths, POSIX paths, dataset paths, and lightweight-history roots.
+- Bumped shared package/version metadata and strict research artifact identity to `3.54.0` / `v3.54-strict`.
+### Testing
+- `py -3.12 -m pytest -q tests/test_strict_research.py tests/test_backtest_signal_only.py` -> passed with expected integration skips.
+- `py -3.12 -m pytest -q tests/test_signal_lifecycle.py tests/test_lifecycle_outbox_runtime.py tests/test_scheduler_notifications.py tests/test_desktop_runtime.py tests/test_feishu_notify.py` -> passed.
+- `npm.cmd run check` in `dashboard` -> lint, typecheck, 9 Node tests, and production build passed; Node reported experimental Type Stripping warnings only.
+- Full validation pending before commit and release zip.
+### Notes
+- Modified files include strict research/grid search and CLI, lifecycle store/tests, A-tier notification runtime paths/tests, dashboard runtime path tests, version metadata, release docs, and this progress entry.
+- Rollback: revert only the v3.54 hunks in the listed source, dashboard, test, version, and docs files, then remove this appended progress entry.

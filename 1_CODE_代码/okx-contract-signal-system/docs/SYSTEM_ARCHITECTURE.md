@@ -387,7 +387,7 @@ src/okx_signal_system/
 - Validation and blind evaluations run on frames that include the required indicator warmup history, then filter trade entries back to the validation or blind evaluation window. This keeps indicator state mature without allowing training-period trades into validation metrics.
 - Research data manifests now include per-symbol file SHA-256, canonical OHLCV/is_closed content SHA-256, rows, and timestamp bounds. The manifest hash changes when candle values change, even if file path, row count, and timestamp range stay unchanged.
 - Blind access is registered in SQLite under `outputs/research_registry/blind_registry.sqlite3` by default. The registry uses dataset content hash, research config hash, selected parameter hash, and git commit to build a one-time `registry_id`; a sealed blind run cannot be opened again with the same identity.
-- The strict research CLI and core function use the same default research version, currently `v3.53-strict`, so artifacts created from different entrypoints carry the same release identity.
+- The strict research CLI and core function use the same default research version, currently `v3.54-strict`, so artifacts created from different entrypoints carry the same release identity.
 
 ## v3.51 Data Reliability Closure
 
@@ -418,3 +418,13 @@ src/okx_signal_system/
 - Gap detection fails closed. Local read failures return `GAP_DETECTION_FAILED` through sync results instead of being treated as no gap, and minor gaps are backfilled instead of skipped.
 - Dashboard `npm run check` now runs lint, production typecheck, isolated test typecheck, Node tests, and production build. Test files are excluded from the app build `tsconfig` and compiled through `tsconfig.test.json`.
 - Notification delivery ownership is explicit: GUI, realtime monitor, and scheduler direct-send callers mark lifecycle outbox rows sent or failed, while `NotificationDispatcher` only sends. Sent rows no longer increment `attempt_count`, and failed marking is idempotent for already terminal rows.
+
+## v3.54 Counterexample Closure
+
+- Strict research periods are explicit warmup/trade/outcome windows. Training, validation, rolling stability, and blind windows all keep outcome tails outside the next trade window, and blind trade entries end early enough to retain a full maximum hold observation tail.
+- Formal parameter coverage uses parameter-by-symbol cell coverage, not only unique parameter count. Selected shared parameters must cover every required symbol, and failed or missing symbol cells remain visible instead of being silently counted as complete.
+- Promotion acceptance is fail-closed through validation portfolio, stress metrics, blind precommit, and blind portfolio checks. A failed validation portfolio, losing cost-stress scenario, missing grid cells, or self-authorized blind token blocks final promotion even when artifact rows exist.
+- Blind release is two-phase. `--precommit-blind --blind-release-token-sha256` writes a persistent PRECOMMITTED registry entry; `--unlock-blind --blind-release-token` can open only against that stored hash. Same-invocation token plus hash is marked self-authorized and cannot satisfy the final blind precommit gate.
+- Lifecycle records persist separate `setup_state` and `outcome_state` fields. Setup invalidation/expiration no longer stops independent research outcome tracking, and analysis stop/target fields are distinct from setup invalidation.
+- A-tier Feishu notifications now enter `notification_outbox` and are delivered by the outbox worker. GUI, realtime monitor, scheduler, and main runtime no longer direct-send or mark sent/failed for formal A-tier messages.
+- Dashboard runtime path resolution chooses win32 or posix path semantics from the configured value, so explicit Windows drive paths and UNC paths do not get POSIX suffix duplication under Linux/CI.

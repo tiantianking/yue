@@ -104,7 +104,7 @@ def test_live_monitor_loop_consumes_lifecycle_outbox_after_scan(monkeypatch) -> 
     assert calls == ["run_once"]
 
 
-def test_a_tier_success_marks_triggered_outbox_sent(monkeypatch, tmp_path) -> None:
+def test_a_tier_outbox_worker_sends_and_marks_sent_once(monkeypatch, tmp_path) -> None:
     from okx_signal_system.notify import dispatcher
     from okx_signal_system.signal_quality import LifecycleOutboxWorker, SignalLifecycleStore
 
@@ -142,18 +142,12 @@ def test_a_tier_success_marks_triggered_outbox_sent(monkeypatch, tmp_path) -> No
     assert record is not None
 
     sent_signals: list[dict] = []
-    lifecycle_events: list[dict] = []
-
     def fake_send_signal_observation(**kwargs) -> bool:
         sent_signals.append(kwargs)
         return True
 
-    class LifecycleDispatcher:
-        def send_lifecycle_event(self, event) -> bool:
-            lifecycle_events.append(event)
-            return True
-
     monkeypatch.setattr(dispatcher, "send_signal_observation", fake_send_signal_observation)
+    monkeypatch.setattr(dispatcher, "send_text", lambda _text: True)
 
     candidate = type(
         "Candidate",
@@ -170,18 +164,48 @@ def test_a_tier_success_marks_triggered_outbox_sent(monkeypatch, tmp_path) -> No
         },
     )()
 
-    assert dispatcher.NotificationDispatcher(store).send_a_tier_signal(
-        candidate,
-        signal_timeframe="15m",
-        trend_timeframe="1h",
+    store.enqueue_notification(
+        notify_key,
+        signal_id=notify_key,
+        event_type="A_TIER_SIGNAL",
+        payload={
+            **candidate.payload,
+            "signal": {
+                "inst_id": signal.inst_id,
+                "side": signal.side,
+                "entry_ref": signal.entry_ref,
+                "stop_loss": signal.stop_loss,
+                "take_profit": signal.take_profit,
+                "reason_codes": signal.reason_codes,
+                "signal_score": signal.signal_score,
+                "risk_reward_ratio": signal.risk_reward_ratio,
+                "ts": signal.ts.isoformat(),
+            },
+            "risk": {
+                "signal_score": decision.signal_score,
+                "risk_reward_ratio": decision.risk_reward_ratio,
+            },
+            "signal_timeframe": "15m",
+            "trend_timeframe": "1h",
+            "tier": "A",
+            "rank": 1,
+            "total_candidates": 1,
+        },
     )
-    store.mark_notification_sent(notify_key)
 
-    summary = LifecycleOutboxWorker(store, LifecycleDispatcher()).run_once()
+    pending = [item for item in store.pending_notifications() if item["outbox_id"] == notify_key][0]
+    assert pending["status"] == "PENDING"
+    assert pending["sent_at"] is None
+
+    worker = LifecycleOutboxWorker(store, dispatcher.NotificationDispatcher(store))
+    summary = worker.run_once()
+    second_summary = worker.run_once()
 
     assert len(sent_signals) == 1
-    assert summary == {"sent": 0, "failed": 0}
-    assert lifecycle_events == []
+    assert sent_signals[0]["inst_id"] == "BTC-USDT-SWAP"
+    assert sent_signals[0]["tier"] == "A"
+    assert summary == {"sent": 2, "failed": 0}
+    assert second_summary == {"sent": 0, "failed": 0}
     assert store.pending_notifications() == []
 
 

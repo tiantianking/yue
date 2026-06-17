@@ -61,6 +61,7 @@ class EvaluationWindow:
     frame_with_warmup: pd.DataFrame
     trade_start: pd.Timestamp
     trade_end: pd.Timestamp
+    outcome_end: pd.Timestamp
 
 
 @dataclass(frozen=True)
@@ -68,10 +69,13 @@ class ResearchSplit:
     train: pd.DataFrame
     validation: pd.DataFrame
     blind: pd.DataFrame
+    train_window: EvaluationWindow
     validation_window: EvaluationWindow
     blind_window: EvaluationWindow
     purge_bars: int
     embargo_bars: int
+    warmup_bars: int
+    outcome_tail_bars: int
     boundaries: dict[str, pd.Timestamp | None]
 
 
@@ -347,29 +351,48 @@ def _global_split_boundaries(
     common_start: pd.Timestamp,
     common_end: pd.Timestamp,
     warmup: int,
+    outcome_tail: int,
     signal_timeframe: str,
     config: ResearchValidationConfig,
 ) -> dict[str, pd.Timestamp]:
     spec = timeframe_spec(signal_timeframe)
     axis = pd.date_range(common_start, common_end, freq=spec.pandas_freq, tz="UTC")
-    if len(axis) <= warmup + config.purge_bars * 2 + config.embargo_bars * 2 + 10:
+    reserve = outcome_tail * 3 + config.purge_bars + config.embargo_bars
+    if len(axis) <= warmup + reserve + 10:
         raise ValueError("STRICT_SPLIT_UNAVAILABLE: insufficient common calendar axis")
     usable_axis = axis[warmup:]
-    train_cut = int(len(usable_axis) * config.train_fraction)
-    valid_cut = int(len(usable_axis) * (config.train_fraction + config.validation_fraction))
-    valid_start_idx = train_cut + config.purge_bars
-    blind_start_idx = valid_cut + config.embargo_bars
-    if train_cut <= 0 or valid_start_idx >= valid_cut or blind_start_idx >= len(usable_axis):
+    trade_capacity = len(usable_axis) - reserve
+    train_len = int(trade_capacity * config.train_fraction)
+    validation_len = int(trade_capacity * config.validation_fraction)
+    blind_len = trade_capacity - train_len - validation_len
+    if train_len <= 0 or validation_len <= 0 or blind_len <= 0:
         raise ValueError("STRICT_SPLIT_UNAVAILABLE: empty strict split window")
+
+    train_start_idx = 0
+    train_end_idx = train_start_idx + train_len - 1
+    train_outcome_end_idx = train_end_idx + outcome_tail
+    validation_start_idx = train_outcome_end_idx + config.purge_bars + 1
+    validation_end_idx = validation_start_idx + validation_len - 1
+    validation_outcome_end_idx = validation_end_idx + outcome_tail
+    blind_start_idx = validation_outcome_end_idx + config.embargo_bars + 1
+    blind_end_idx = blind_start_idx + blind_len - 1
+    blind_outcome_end_idx = blind_end_idx + outcome_tail
+    if blind_outcome_end_idx >= len(usable_axis):
+        raise ValueError("STRICT_SPLIT_UNAVAILABLE: outcome tail exceeds common calendar axis")
+    if not train_outcome_end_idx < validation_start_idx or not validation_outcome_end_idx < blind_start_idx:
+        raise ValueError("STRICT_SPLIT_UNAVAILABLE: evaluation periods overlap")
     return {
         "common_start": common_start,
         "common_end": common_end,
-        "train_start": pd.Timestamp(usable_axis[0]),
-        "train_end": pd.Timestamp(usable_axis[train_cut - 1]),
-        "validation_start": pd.Timestamp(usable_axis[valid_start_idx]),
-        "validation_end": pd.Timestamp(usable_axis[valid_cut - 1]),
+        "train_start": pd.Timestamp(usable_axis[train_start_idx]),
+        "train_end": pd.Timestamp(usable_axis[train_end_idx]),
+        "train_outcome_end": pd.Timestamp(usable_axis[train_outcome_end_idx]),
+        "validation_start": pd.Timestamp(usable_axis[validation_start_idx]),
+        "validation_end": pd.Timestamp(usable_axis[validation_end_idx]),
+        "validation_outcome_end": pd.Timestamp(usable_axis[validation_outcome_end_idx]),
         "blind_start": pd.Timestamp(usable_axis[blind_start_idx]),
-        "blind_end": pd.Timestamp(usable_axis[-1]),
+        "blind_end": pd.Timestamp(usable_axis[blind_end_idx]),
+        "blind_outcome_end": pd.Timestamp(usable_axis[blind_outcome_end_idx]),
     }
 
 
@@ -395,6 +418,7 @@ def common_calendar_split(
         common_start=common_start,
         common_end=common_end,
         warmup=warmup,
+        outcome_tail=outcome_tail,
         signal_timeframe=signal_timeframe,
         config=config,
     )
@@ -408,35 +432,47 @@ def common_calendar_split(
         blind = frame[(frame["ts"] >= boundaries["blind_start"]) & (frame["ts"] <= boundaries["blind_end"])].reset_index(drop=True)
         if train.empty or validation.empty or blind.empty:
             raise ValueError(f"STRICT_SPLIT_UNAVAILABLE: {symbol_data.inst_id} has empty train/validation/blind split")
+        train_warmup_start = boundaries["train_start"] - pd.Timedelta(minutes=timeframe_spec(signal_timeframe).minutes * warmup)
         validation_warmup_start = boundaries["validation_start"] - pd.Timedelta(minutes=timeframe_spec(signal_timeframe).minutes * warmup)
         blind_warmup_start = boundaries["blind_start"] - pd.Timedelta(minutes=timeframe_spec(signal_timeframe).minutes * warmup)
-        validation_tail_end = boundaries["validation_end"] + pd.Timedelta(minutes=timeframe_spec(signal_timeframe).minutes * outcome_tail)
-        blind_tail_end = boundaries["blind_end"] + pd.Timedelta(minutes=timeframe_spec(signal_timeframe).minutes * outcome_tail)
+        train_with_warmup = frame[
+            (frame["ts"] >= train_warmup_start) & (frame["ts"] <= boundaries["train_outcome_end"])
+        ].reset_index(drop=True)
         validation_with_warmup = frame[
-            (frame["ts"] >= validation_warmup_start) & (frame["ts"] <= validation_tail_end)
+            (frame["ts"] >= validation_warmup_start) & (frame["ts"] <= boundaries["validation_outcome_end"])
         ].reset_index(drop=True)
         blind_with_warmup = frame[
-            (frame["ts"] >= blind_warmup_start) & (frame["ts"] <= blind_tail_end)
+            (frame["ts"] >= blind_warmup_start) & (frame["ts"] <= boundaries["blind_outcome_end"])
         ].reset_index(drop=True)
-        if validation_with_warmup.empty or blind_with_warmup.empty:
+        if train_with_warmup.empty or validation_with_warmup.empty or blind_with_warmup.empty:
             raise ValueError(f"STRICT_SPLIT_UNAVAILABLE: {symbol_data.inst_id} has empty evaluation warmup window")
 
         split_by_symbol[symbol_data.inst_id] = ResearchSplit(
             train=train,
             validation=validation,
             blind=blind,
+            train_window=EvaluationWindow(
+                frame_with_warmup=train_with_warmup,
+                trade_start=boundaries["train_start"],
+                trade_end=boundaries["train_end"],
+                outcome_end=boundaries["train_outcome_end"],
+            ),
             validation_window=EvaluationWindow(
                 frame_with_warmup=validation_with_warmup,
                 trade_start=boundaries["validation_start"],
                 trade_end=boundaries["validation_end"],
+                outcome_end=boundaries["validation_outcome_end"],
             ),
             blind_window=EvaluationWindow(
                 frame_with_warmup=blind_with_warmup,
                 trade_start=boundaries["blind_start"],
                 trade_end=boundaries["blind_end"],
+                outcome_end=boundaries["blind_outcome_end"],
             ),
             purge_bars=config.purge_bars,
             embargo_bars=config.embargo_bars,
+            warmup_bars=warmup,
+            outcome_tail_bars=outcome_tail,
             boundaries=dict(boundaries),
         )
     return split_by_symbol
@@ -573,7 +609,9 @@ def run_shared_train_grid(
     grid = params_grid or parameter_grid(signal_key)
     all_rows: list[dict] = []
     for symbol_data in symbols:
-        train_frame = splits[symbol_data.inst_id].train if splits and symbol_data.inst_id in splits else split_train_valid(symbol_data.frame, valid_fraction=0.25)[0]
+        split = splits.get(symbol_data.inst_id) if splits else None
+        train_window = split.train_window if split is not None else None
+        train_frame = train_window.frame_with_warmup if train_window is not None else split_train_valid(symbol_data.frame, valid_fraction=0.25)[0]
         symbol_grid = run_grid_search(
             train_frame,
             inst_id=symbol_data.inst_id,
@@ -581,11 +619,17 @@ def run_shared_train_grid(
             signal_timeframe=signal_key,
             trend_timeframe=trend_key,
             min_vote_approval_rate=min_vote_approval_rate,
+            trade_start=train_window.trade_start if train_window is not None else None,
+            trade_end=train_window.trade_end if train_window is not None else None,
         )
         symbol_grid.insert(0, "symbol", symbol_data.inst_id)
+        symbol_grid["cell_status"] = "PASSED"
         all_rows.extend(symbol_grid.to_dict("records"))
     symbol_results = pd.DataFrame(all_rows)
     if symbol_results.empty:
+        symbol_results.attrs["expected_parameter_cells"] = len(grid) * len(symbols)
+        symbol_results.attrs["completed_parameter_cells"] = 0
+        symbol_results.attrs["required_symbol_count"] = len(symbols)
         return symbol_results
 
     grouped = symbol_results.groupby(PARAM_COLS, dropna=False)
@@ -644,6 +688,9 @@ def run_shared_train_grid(
         & (agg["stable_neighbor_count"] >= validation_config.min_neighbor_count)
         & (agg["stable_neighbor_ratio"] >= validation_config.min_neighbor_ratio)
     )
+    agg.attrs["expected_parameter_cells"] = len(grid) * len(symbols)
+    agg.attrs["completed_parameter_cells"] = int(len(symbol_results))
+    agg.attrs["required_symbol_count"] = len(symbols)
     return agg
 
 
@@ -658,7 +705,7 @@ def select_shared_params(train_grid_results: pd.DataFrame) -> StrategyParams:
     4. 鏈€缁堢敤楠岃瘉娈垫暟鎹獙璇佺ǔ瀹氭€?
     """
     if train_grid_results.empty:
-        raise ValueError("shared train grid is empty")
+        raise NoValidParameterSetError("NO_VALID_PARAMETER_SET")
     candidates = train_grid_results[train_grid_results["passed_train_gate"]].copy()
     if candidates.empty:
         raise NoValidParameterSetError("NO_VALID_PARAMETER_SET")
@@ -764,23 +811,25 @@ def run_walk_forward_validation(
     signal_key, trend_key = _resolve_timeframes(frame, signal_timeframe, trend_timeframe)
     grid = params_grid or [params]
     warmup = _max_warmup_bars(grid, signal_key)
+    outcome_tail = _max_outcome_tail_bars(grid, signal_key)
     train_window = train_window or max(warmup * 2, 2048)
     valid_window = valid_window or max(warmup, 768)
     step = step or valid_window
     purge_bars = max(0, int(purge_bars))
     embargo_bars = max(0, int(embargo_bars))
-    if len(frame) < train_window + purge_bars + valid_window:
+    if len(frame) < train_window + purge_bars + valid_window + outcome_tail:
         log.warning(f"{inst_id} data is insufficient for walk-forward validation")
         return {}
 
     results: list[dict] = []
     cursor = 0
-    while cursor + train_window + purge_bars + valid_window <= len(frame):
+    while cursor + train_window + purge_bars + valid_window + outcome_tail <= len(frame):
         train_frame = frame.iloc[cursor : cursor + train_window].reset_index(drop=True)
         validation_start_idx = cursor + train_window + purge_bars
         validation_end_idx = validation_start_idx + valid_window
+        validation_outcome_end_idx = validation_end_idx + outcome_tail
         warmup_start_idx = max(0, validation_start_idx - warmup)
-        valid_frame = frame.iloc[warmup_start_idx:validation_end_idx].reset_index(drop=True)
+        valid_frame = frame.iloc[warmup_start_idx:validation_outcome_end_idx].reset_index(drop=True)
         validation_start_ts = pd.Timestamp(frame.iloc[validation_start_idx]["ts"]) if "ts" in frame.columns else None
         fold_grid = run_grid_search(
             train_frame,
@@ -825,6 +874,7 @@ def run_walk_forward_validation(
                 "purge_bars": purge_bars,
                 "validation_start_ts": str(validation_start_ts) if validation_start_ts is not None else "",
                 "validation_end_ts": str(frame.iloc[validation_end_idx - 1]["ts"]) if "ts" in frame.columns else "",
+                "validation_outcome_end_ts": str(frame.iloc[validation_outcome_end_idx - 1]["ts"]) if "ts" in frame.columns else "",
                 "embargo_bars": embargo_bars,
                 "selected_params": asdict(frozen_params),
                 "train_summary": train_summary,
@@ -852,6 +902,8 @@ def run_walk_forward_validation(
         "valid_pf_pass_ratio": float(sum(pass_flags) / len(pass_flags)) if pass_flags else 0.0,
         "purge_bars": purge_bars,
         "embargo_bars": embargo_bars,
+        "outcome_tail_bars": outcome_tail,
+        "validation_mode": "rolling_parameter_stability",
         "valid_return_mean": float(np.mean(valid_returns)),
         "valid_return_std": float(np.std(valid_returns)),
         "valid_win_rate_mean": float(np.mean(valid_win_rates)),
@@ -1163,6 +1215,83 @@ class BlindRegistry:
                 raise
         return registry_id
 
+    def precommit(self, manifest: dict) -> str:
+        registry_id = str(manifest["registry_id"])
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                existing = conn.execute(
+                    "SELECT status FROM blind_registry WHERE registry_id = ?",
+                    (registry_id,),
+                ).fetchone()
+                if existing is not None:
+                    raise RuntimeError(f"BLIND_ALREADY_PRECOMMITTED:{registry_id}:{existing[0]}")
+                conn.execute(
+                    """
+                    INSERT INTO blind_registry (
+                        registry_id, dataset_content_hash, research_config_hash,
+                        parameter_hash, code_commit, status, opened_at, manifest_json
+                    ) VALUES (?, ?, ?, ?, ?, 'PRECOMMITTED', ?, ?)
+                    """,
+                    (
+                        registry_id,
+                        str(manifest["dataset_hash"]),
+                        str(manifest["config_hash"]),
+                        str(manifest["params_hash"]),
+                        str(manifest["git_commit"]),
+                        now,
+                        json.dumps(manifest, ensure_ascii=False, sort_keys=True),
+                    ),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        return registry_id
+
+    def load_precommit(self, registry_id: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT status, manifest_json FROM blind_registry WHERE registry_id = ?",
+                (registry_id,),
+            ).fetchone()
+        if row is None or str(row[0]) != "PRECOMMITTED":
+            return None
+        try:
+            manifest = json.loads(str(row[1]))
+        except json.JSONDecodeError:
+            return None
+        return manifest if isinstance(manifest, dict) else None
+
+    def open_precommitted(self, manifest: dict) -> str:
+        registry_id = str(manifest["registry_id"])
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT status FROM blind_registry WHERE registry_id = ?",
+                    (registry_id,),
+                ).fetchone()
+                if row is None:
+                    raise RuntimeError(f"BLIND_PRECOMMIT_REQUIRED:{registry_id}")
+                if str(row[0]) != "PRECOMMITTED":
+                    raise RuntimeError(f"BLIND_ALREADY_OPENED:{registry_id}:{row[0]}")
+                conn.execute(
+                    """
+                    UPDATE blind_registry
+                    SET status = 'OPENED', opened_at = ?, manifest_json = ?
+                    WHERE registry_id = ? AND status = 'PRECOMMITTED'
+                    """,
+                    (now, json.dumps(manifest, ensure_ascii=False, sort_keys=True), registry_id),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        return registry_id
+
     def seal(self, registry_id: str, result: dict) -> None:
         now = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
@@ -1176,7 +1305,7 @@ class BlindRegistry:
             )
 
 
-def _blind_access_manifest(
+def _blind_manifest_base(
     *,
     dataset: str,
     symbols: list[SymbolData],
@@ -1184,7 +1313,6 @@ def _blind_access_manifest(
     trend_key: str,
     selected: StrategyParams,
     validation_config: ResearchValidationConfig,
-    release_token: str,
     research_version: str,
     blind_timerange: dict[str, str] | None = None,
 ) -> dict:
@@ -1195,7 +1323,6 @@ def _blind_access_manifest(
         "trend_timeframe": trend_key,
         "validation_config": asdict(validation_config),
     }
-    token_hash = hashlib.sha256(release_token.encode("utf-8")).hexdigest()
     config_hash = hashlib.sha256(json.dumps(config_payload, sort_keys=True).encode("utf-8")).hexdigest()
     params_hash = _params_hash(selected)
     git_commit = _git_commit()
@@ -1207,8 +1334,7 @@ def _blind_access_manifest(
         blind_start=str(blind_timerange.get("blind_start", "")),
         blind_end=str(blind_timerange.get("blind_end", "")),
     )
-    manifest = {
-        "blind_status": "unlocked",
+    return {
         "registry_id": registry_id,
         "research_version": research_version,
         "dataset": dataset,
@@ -1216,12 +1342,79 @@ def _blind_access_manifest(
         "data_manifest": data_manifest,
         "config_hash": config_hash,
         "params_hash": params_hash,
-        "release_token_hash": token_hash,
         "git_commit": git_commit,
         "blind_timerange": blind_timerange,
         "registry_scope": "strict_research|dataset_identity|blind_timerange|trend_breakout",
-        "first_access_time_utc": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def _pre_blind_manifest(
+    *,
+    dataset: str,
+    symbols: list[SymbolData],
+    signal_key: str,
+    trend_key: str,
+    selected: StrategyParams,
+    validation_config: ResearchValidationConfig,
+    release_token_sha256: str,
+    research_version: str,
+    blind_timerange: dict[str, str] | None = None,
+) -> dict:
+    manifest = _blind_manifest_base(
+        dataset=dataset,
+        symbols=symbols,
+        signal_key=signal_key,
+        trend_key=trend_key,
+        selected=selected,
+        validation_config=validation_config,
+        research_version=research_version,
+        blind_timerange=blind_timerange,
+    )
+    manifest.update(
+        {
+            "blind_status": "precommitted",
+            "release_token_hash": release_token_sha256,
+            "commitment_source": "precommitted_registry",
+            "promotion_eligible_commitment": True,
+            "precommitted_at_utc": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    return manifest
+
+
+def _blind_access_manifest(
+    *,
+    dataset: str,
+    symbols: list[SymbolData],
+    signal_key: str,
+    trend_key: str,
+    selected: StrategyParams,
+    validation_config: ResearchValidationConfig,
+    release_token_hash: str,
+    research_version: str,
+    blind_timerange: dict[str, str] | None = None,
+    commitment_source: str = "precommitted_registry",
+    promotion_eligible_commitment: bool = True,
+) -> dict:
+    manifest = _blind_manifest_base(
+        dataset=dataset,
+        symbols=symbols,
+        signal_key=signal_key,
+        trend_key=trend_key,
+        selected=selected,
+        validation_config=validation_config,
+        research_version=research_version,
+        blind_timerange=blind_timerange,
+    )
+    manifest.update(
+        {
+            "blind_status": "unlocked",
+            "release_token_hash": release_token_hash,
+            "commitment_source": commitment_source,
+            "promotion_eligible_commitment": bool(promotion_eligible_commitment),
+            "first_access_time_utc": datetime.now(timezone.utc).isoformat(),
+        }
+    )
     return manifest
 
 
@@ -1242,6 +1435,30 @@ def _completed_parameter_combinations(train_grid_results: pd.DataFrame) -> int:
     if not cols:
         return int(len(train_grid_results))
     return int(train_grid_results[cols].drop_duplicates().shape[0])
+
+
+def _expected_parameter_cells(params_grid: list[StrategyParams], symbol_count: int) -> int:
+    return int(len(params_grid) * max(1, symbol_count))
+
+
+def _completed_parameter_cells(train_grid_results: pd.DataFrame) -> int:
+    if train_grid_results.empty:
+        return int(train_grid_results.attrs.get("completed_parameter_cells", 0))
+    if "symbols_tested" in train_grid_results.columns:
+        return int(pd.to_numeric(train_grid_results["symbols_tested"], errors="coerce").fillna(0).sum())
+    return int(train_grid_results.attrs.get("completed_parameter_cells", _completed_parameter_combinations(train_grid_results)))
+
+
+def _selected_parameter_symbol_coverage(train_grid_results: pd.DataFrame, selected: StrategyParams | None, required_symbol_count: int) -> float:
+    if selected is None or train_grid_results.empty or required_symbol_count <= 0:
+        return 0.0
+    row = train_grid_results
+    for col, value in asdict(selected).items():
+        if col in row.columns:
+            row = row[row[col].astype(float) == float(value)]
+    if row.empty or "symbols_tested" not in row.columns:
+        return 0.0
+    return float(pd.to_numeric(row["symbols_tested"], errors="coerce").fillna(0).max() / required_symbol_count)
 
 
 def _parameter_grid_hash(params_grid: list[StrategyParams]) -> str:
@@ -1308,11 +1525,12 @@ def run_dataset_research_artifacts(
     signal_timeframe: str | None = None,
     trend_timeframe: str | None = None,
     legacy_split: bool = False,
+    precommit_blind: bool = False,
     unlock_blind: bool = False,
     blind_release_token: str | None = None,
     blind_release_token_sha256: str | None = None,
     blind_registry_path: str | Path | None = None,
-    research_version: str = "v3.53-strict",
+    research_version: str = "v3.54-strict",
     research_mode: str = "FORMAL",
 ) -> dict[str, pd.DataFrame | dict | StrategyParams]:
     symbols = load_all_symbols(dataset)
@@ -1348,8 +1566,45 @@ def run_dataset_research_artifacts(
         splits = {}
         split_status = "legacy_non_formal"
 
+    if precommit_blind and unlock_blind:
+        return _failed_research_artifacts(
+            dataset=dataset,
+            symbols=symbols,
+            signal_key=signal_key,
+            trend_key=trend_key,
+            shared_params=shared_params,
+            reason="BLIND_PRECOMMIT_AND_UNLOCK_MUTUALLY_EXCLUSIVE",
+            split_status=split_status,
+            research_mode=research_mode,
+        )
+    if precommit_blind and blind_release_token:
+        return _failed_research_artifacts(
+            dataset=dataset,
+            symbols=symbols,
+            signal_key=signal_key,
+            trend_key=trend_key,
+            shared_params=shared_params,
+            reason="BLIND_PRECOMMIT_TOKEN_MUST_NOT_BE_PROVIDED",
+            split_status=split_status,
+            research_mode=research_mode,
+        )
+    if precommit_blind and not blind_release_token_sha256:
+        return _failed_research_artifacts(
+            dataset=dataset,
+            symbols=symbols,
+            signal_key=signal_key,
+            trend_key=trend_key,
+            shared_params=shared_params,
+            reason="BLIND_RELEASE_TOKEN_SHA256_REQUIRED",
+            split_status=split_status,
+            research_mode=research_mode,
+        )
+
     blind_lock_status = "BLIND_LOCKED"
     blind_manifest: dict | None = None
+    blind_commitment_verified = False
+    blind_expected_token_hash: str | None = None
+    blind_commitment_source = "none"
     if unlock_blind:
         if not blind_release_token:
             return _failed_research_artifacts(
@@ -1359,29 +1614,6 @@ def run_dataset_research_artifacts(
                 trend_key=trend_key,
                 shared_params=shared_params,
                 reason="BLIND_RELEASE_TOKEN_REQUIRED",
-                split_status=split_status,
-                research_mode=research_mode,
-            )
-        if not blind_release_token_sha256:
-            return _failed_research_artifacts(
-                dataset=dataset,
-                symbols=symbols,
-                signal_key=signal_key,
-                trend_key=trend_key,
-                shared_params=shared_params,
-                reason="BLIND_RELEASE_TOKEN_SHA256_REQUIRED",
-                split_status=split_status,
-                research_mode=research_mode,
-            )
-        token_hash = hashlib.sha256(blind_release_token.encode("utf-8")).hexdigest()
-        if token_hash != blind_release_token_sha256:
-            return _failed_research_artifacts(
-                dataset=dataset,
-                symbols=symbols,
-                signal_key=signal_key,
-                trend_key=trend_key,
-                shared_params=shared_params,
-                reason="BLIND_RELEASE_TOKEN_INVALID",
                 split_status=split_status,
                 research_mode=research_mode,
             )
@@ -1404,7 +1636,155 @@ def run_dataset_research_artifacts(
         train_grid_results = pd.DataFrame()
         selected = None
 
+    if unlock_blind and selected is None:
+        return _failed_research_artifacts(
+            dataset=dataset,
+            symbols=symbols,
+            signal_key=signal_key,
+            trend_key=trend_key,
+            shared_params=shared_params,
+            reason="NO_VALID_PARAMETER_SET",
+            split_status=split_status,
+            research_mode=research_mode,
+        )
+
+    if precommit_blind and selected is None:
+        return _failed_research_artifacts(
+            dataset=dataset,
+            symbols=symbols,
+            signal_key=signal_key,
+            trend_key=trend_key,
+            shared_params=shared_params,
+            reason="NO_VALID_PARAMETER_SET",
+            split_status=split_status,
+            research_mode=research_mode,
+        )
+    if precommit_blind and selected is not None and blind_release_token_sha256:
+        pre_manifest = _pre_blind_manifest(
+            dataset=dataset,
+            symbols=symbols,
+            signal_key=signal_key,
+            trend_key=trend_key,
+            selected=selected,
+            validation_config=validation_config,
+            release_token_sha256=blind_release_token_sha256,
+            research_version=research_version,
+            blind_timerange=_blind_timerange_from_splits(splits),
+        )
+        try:
+            BlindRegistry(blind_registry_path).precommit(pre_manifest)
+        except RuntimeError as exc:
+            return _failed_research_artifacts(
+                dataset=dataset,
+                symbols=symbols,
+                signal_key=signal_key,
+                trend_key=trend_key,
+                shared_params=shared_params,
+                reason=str(exc),
+                split_status=split_status,
+                research_mode=research_mode,
+            )
+        checklist = build_acceptance_checklist(
+            train_grid_results=train_grid_results,
+            selected=selected,
+            selected_params_available=True,
+            validation_results=pd.DataFrame(),
+            portfolio_results=pd.DataFrame(),
+            leverage_risk=pd.DataFrame(),
+            cost_stress=pd.DataFrame(),
+            walk_forward_results={},
+            shared_params=shared_params,
+            signal_timeframe=signal_key,
+            split_status=split_status,
+            blind_lock_status="BLIND_LOCKED",
+            blind_evaluation={"passed": False, "status": "BLIND_LOCKED", "reasons": ["PRECOMMITTED_ONLY"]},
+            research_mode=research_mode,
+            expected_parameter_combinations=expected_grid_size,
+            completed_parameter_combinations=_completed_parameter_combinations(train_grid_results),
+            expected_parameter_cells=_expected_parameter_cells(expected_grid, len(symbols)),
+            completed_parameter_cells=_completed_parameter_cells(train_grid_results),
+            required_symbol_count=len(symbols),
+            blind_commitment_verified=False,
+        )
+        return {
+            "train_grid_results": train_grid_results,
+            "selected_params": selected,
+            "validation_results": pd.DataFrame(),
+            "single_symbol_results": pd.DataFrame(),
+            "portfolio_results": pd.DataFrame(),
+            "leverage_risk": pd.DataFrame(),
+            "cost_stress": pd.DataFrame(),
+            "walk_forward_results": {},
+            "acceptance_checklist": checklist,
+            "sample_trades": pd.DataFrame(),
+            "blind_trades": pd.DataFrame(),
+            "blind_access_manifest": pre_manifest,
+            "research_metadata": {
+                "dataset": dataset,
+                "research_mode": research_mode,
+                "split_status": split_status,
+                "blind_lock_status": "BLIND_LOCKED",
+                "precommit_blind": True,
+                "promotion_eligible": False,
+                "parameter_grid_hash": expected_grid_hash,
+            },
+        }
+
     if unlock_blind and selected is not None and blind_release_token:
+        token_hash = hashlib.sha256(blind_release_token.encode("utf-8")).hexdigest()
+        candidate_manifest = _blind_manifest_base(
+            dataset=dataset,
+            symbols=symbols,
+            signal_key=signal_key,
+            trend_key=trend_key,
+            selected=selected,
+            validation_config=validation_config,
+            research_version=research_version,
+            blind_timerange=_blind_timerange_from_splits(splits),
+        )
+        registry = BlindRegistry(blind_registry_path)
+        pre_manifest = registry.load_precommit(str(candidate_manifest["registry_id"]))
+        if pre_manifest is not None:
+            blind_expected_token_hash = str(pre_manifest.get("release_token_hash", ""))
+            blind_commitment_source = "precommitted_registry"
+            blind_commitment_verified = token_hash == blind_expected_token_hash
+            if not blind_commitment_verified:
+                return _failed_research_artifacts(
+                    dataset=dataset,
+                    symbols=symbols,
+                    signal_key=signal_key,
+                    trend_key=trend_key,
+                    shared_params=shared_params,
+                    reason="BLIND_RELEASE_TOKEN_INVALID",
+                    split_status=split_status,
+                    research_mode=research_mode,
+                )
+        elif blind_release_token_sha256:
+            blind_expected_token_hash = str(blind_release_token_sha256)
+            blind_commitment_source = "self_provided_cli_hash"
+            blind_commitment_verified = False
+            if token_hash != blind_expected_token_hash:
+                return _failed_research_artifacts(
+                    dataset=dataset,
+                    symbols=symbols,
+                    signal_key=signal_key,
+                    trend_key=trend_key,
+                    shared_params=shared_params,
+                    reason="BLIND_RELEASE_TOKEN_INVALID",
+                    split_status=split_status,
+                    research_mode=research_mode,
+                )
+        else:
+            return _failed_research_artifacts(
+                dataset=dataset,
+                symbols=symbols,
+                signal_key=signal_key,
+                trend_key=trend_key,
+                shared_params=shared_params,
+                reason="BLIND_PRECOMMIT_REQUIRED",
+                split_status=split_status,
+                research_mode=research_mode,
+            )
         blind_manifest = _blind_access_manifest(
             dataset=dataset,
             symbols=symbols,
@@ -1412,12 +1792,17 @@ def run_dataset_research_artifacts(
             trend_key=trend_key,
             selected=selected,
             validation_config=validation_config,
-            release_token=blind_release_token,
+            release_token_hash=token_hash,
             research_version=research_version,
             blind_timerange=_blind_timerange_from_splits(splits),
+            commitment_source=blind_commitment_source,
+            promotion_eligible_commitment=blind_commitment_verified,
         )
         try:
-            BlindRegistry(blind_registry_path).open_once(blind_manifest)
+            if blind_commitment_verified:
+                registry.open_precommitted(blind_manifest)
+            else:
+                BlindRegistry(blind_registry_path).open_once(blind_manifest)
         except RuntimeError as exc:
             return _failed_research_artifacts(
                 dataset=dataset,
@@ -1471,31 +1856,37 @@ def run_dataset_research_artifacts(
                 continue
             if splits and symbol_data.inst_id in splits:
                 split = splits[symbol_data.inst_id]
-                train_frame = split.train
+                train_window = split.train_window
                 valid_window = split.validation_window
                 blind_window = split.blind_window
             else:
                 train_frame, valid_frame = split_train_valid(symbol_data.frame, valid_fraction=0.25)
+                train_window = EvaluationWindow(
+                    frame_with_warmup=train_frame,
+                    trade_start=pd.Timestamp(train_frame["ts"].iloc[0]) if "ts" in train_frame and not train_frame.empty else pd.Timestamp.min.tz_localize("UTC"),
+                    trade_end=pd.Timestamp(train_frame["ts"].iloc[-1]) if "ts" in train_frame and not train_frame.empty else pd.Timestamp.max.tz_localize("UTC"),
+                    outcome_end=pd.Timestamp(train_frame["ts"].iloc[-1]) if "ts" in train_frame and not train_frame.empty else pd.Timestamp.max.tz_localize("UTC"),
+                )
                 valid_window = EvaluationWindow(
                     frame_with_warmup=valid_frame,
                     trade_start=pd.Timestamp(valid_frame["ts"].iloc[0]) if "ts" in valid_frame and not valid_frame.empty else pd.Timestamp.min.tz_localize("UTC"),
                     trade_end=pd.Timestamp(valid_frame["ts"].iloc[-1]) if "ts" in valid_frame and not valid_frame.empty else pd.Timestamp.max.tz_localize("UTC"),
+                    outcome_end=pd.Timestamp(valid_frame["ts"].iloc[-1]) if "ts" in valid_frame and not valid_frame.empty else pd.Timestamp.max.tz_localize("UTC"),
                 )
                 blind_window = EvaluationWindow(
                     frame_with_warmup=pd.DataFrame(),
                     trade_start=pd.Timestamp.min.tz_localize("UTC"),
                     trade_end=pd.Timestamp.max.tz_localize("UTC"),
+                    outcome_end=pd.Timestamp.max.tz_localize("UTC"),
                 )
                 blind_frame = pd.DataFrame()
             try:
-                train_trades = validate_backtest_result(
-                    run_backtest(
-                        train_frame,
-                        inst_id=symbol_data.inst_id,
-                        params=selected,
-                        signal_timeframe=signal_key,
-                        trend_timeframe=trend_key,
-                    ),
+                train_trades = _run_backtest_window(
+                    train_window,
+                    inst_id=symbol_data.inst_id,
+                    params=selected,
+                    signal_timeframe=signal_key,
+                    trend_timeframe=trend_key,
                     context=f"{symbol_data.inst_id} train",
                 )
                 valid_trades = _run_backtest_window(
@@ -1614,14 +2005,20 @@ def run_dataset_research_artifacts(
     if blind_manifest:
         blind_evaluation = evaluate_blind_portfolio(blind_trades, blind_portfolio, symbol_count=len(symbols))
         blind_lock_status = str(blind_evaluation["status"])
-    walk_forward_results: dict = {}
+    rolling_stability_results: dict = {}
     if shared_params and selected is not None and splits:
         walk_rows = []
         for symbol_data in symbols:
             split = splits.get(symbol_data.inst_id)
             if split is None:
                 continue
-            wf_frame = pd.concat([split.train, split.validation], ignore_index=True).sort_values("ts").reset_index(drop=True)
+            wf_frame = pd.concat(
+                [
+                    split.train_window.frame_with_warmup,
+                    split.validation_window.frame_with_warmup,
+                ],
+                ignore_index=True,
+            ).drop_duplicates(subset=["ts"]).sort_values("ts").reset_index(drop=True)
             result = run_walk_forward_validation(
                 wf_frame,
                 inst_id=symbol_data.inst_id,
@@ -1638,7 +2035,7 @@ def run_dataset_research_artifacts(
             walk_table = pd.DataFrame(walk_rows)
             finite_pf = pd.to_numeric(walk_table["valid_pf_median"], errors="coerce").dropna()
             pass_ratio = pd.to_numeric(walk_table["valid_pf_pass_ratio"], errors="coerce").dropna()
-            walk_forward_results = {
+            rolling_stability_results = {
                 "symbol_results": walk_rows,
                 "symbol_count": int(len(walk_rows)),
                 "window_count": int(pd.to_numeric(walk_table["window_count"], errors="coerce").fillna(0).sum()),
@@ -1646,6 +2043,8 @@ def run_dataset_research_artifacts(
                 "valid_pf_pass_ratio": float(pass_ratio.mean()) if not pass_ratio.empty else 0.0,
                 "purge_bars": validation_config.purge_bars,
                 "embargo_bars": validation_config.embargo_bars,
+                "outcome_tail_bars": _max_outcome_tail_bars([selected], signal_key),
+                "validation_mode": "rolling_parameter_stability",
             }
     profitable_ratio = float((single_results["valid_total_return"] > 0).mean()) if not single_results.empty else 0.0
     hit27_ratio = float((single_results["valid_hit_27pct_stop"] > 0).mean()) if not single_results.empty else 0.0
@@ -1701,7 +2100,7 @@ def run_dataset_research_artifacts(
         portfolio_results=portfolio_results,
         leverage_risk=leverage_risk,
         cost_stress=cost_stress,
-        walk_forward_results=walk_forward_results,
+        walk_forward_results=rolling_stability_results,
         shared_params=shared_params,
         signal_timeframe=signal_key,
         split_status=split_status,
@@ -1710,6 +2109,10 @@ def run_dataset_research_artifacts(
         research_mode=research_mode,
         expected_parameter_combinations=expected_grid_size,
         completed_parameter_combinations=_completed_parameter_combinations(train_grid_results),
+        expected_parameter_cells=_expected_parameter_cells(expected_grid, len(symbols)),
+        completed_parameter_cells=_completed_parameter_cells(train_grid_results),
+        required_symbol_count=len(symbols),
+        blind_commitment_verified=blind_commitment_verified,
     )
     promotion_eligible = bool(
         research_mode == "FORMAL"
@@ -1724,7 +2127,8 @@ def run_dataset_research_artifacts(
         "portfolio_results": portfolio_results,
         "leverage_risk": leverage_risk,
         "cost_stress": cost_stress,
-        "walk_forward_results": walk_forward_results,
+        "walk_forward_results": rolling_stability_results,
+        "rolling_stability_results": rolling_stability_results,
         "acceptance_checklist": checklist,
         "sample_trades": valid_trades,
         "blind_trades": blind_trades,
@@ -1737,7 +2141,10 @@ def run_dataset_research_artifacts(
             "blind_evaluation": blind_evaluation,
             "expected_parameter_combinations": expected_grid_size,
             "completed_parameter_combinations": _completed_parameter_combinations(train_grid_results),
+            "expected_parameter_cells": _expected_parameter_cells(expected_grid, len(symbols)),
+            "completed_parameter_cells": _completed_parameter_cells(train_grid_results),
             "parameter_grid_hash": expected_grid_hash,
+            "blind_commitment_verified": blind_commitment_verified,
             "promotion_eligible": promotion_eligible,
         },
     }
@@ -1793,6 +2200,10 @@ def build_acceptance_checklist(
     research_mode: str = "FORMAL",
     expected_parameter_combinations: int | None = None,
     completed_parameter_combinations: int | None = None,
+    expected_parameter_cells: int | None = None,
+    completed_parameter_cells: int | None = None,
+    required_symbol_count: int | None = None,
+    blind_commitment_verified: bool = False,
 ) -> pd.DataFrame:
     portfolio = portfolio_results.iloc[0].to_dict() if not portfolio_results.empty else {}
     blind_evaluation = blind_evaluation or {}
@@ -1811,8 +2222,59 @@ def build_acceptance_checklist(
         else _completed_parameter_combinations(train_grid_results)
     )
     grid_coverage_ratio = float(completed_grid_size / expected_grid_size) if expected_grid_size else 0.0
+    required_symbol_count = int(required_symbol_count or train_grid_results.attrs.get("required_symbol_count", 0) or 0)
+    expected_cell_count = int(
+        expected_parameter_cells
+        if expected_parameter_cells is not None
+        else train_grid_results.attrs.get("expected_parameter_cells", expected_grid_size * max(1, required_symbol_count))
+    )
+    completed_cell_count = int(
+        completed_parameter_cells
+        if completed_parameter_cells is not None
+        else _completed_parameter_cells(train_grid_results)
+    )
+    cell_coverage_ratio = float(completed_cell_count / expected_cell_count) if expected_cell_count else 0.0
+    selected_symbol_coverage = _selected_parameter_symbol_coverage(
+        train_grid_results,
+        selected if selected_params_available else None,
+        required_symbol_count,
+    )
     stress_scenarios = set(cost_stress["scenario"].astype(str)) if cost_stress is not None and not cost_stress.empty else set()
     stress_sources = set(cost_stress["recompute_source"].astype(str)) if cost_stress is not None and "recompute_source" in cost_stress else set()
+    stress_table = cost_stress if cost_stress is not None else pd.DataFrame()
+    stress_by_name = stress_table.set_index("scenario") if "scenario" in stress_table else pd.DataFrame()
+    def _stress_metric(scenario: str, key: str, default: float) -> float:
+        if stress_by_name.empty or scenario not in stress_by_name.index or key not in stress_by_name:
+            return default
+        try:
+            return float(stress_by_name.loc[scenario, key])
+        except (TypeError, ValueError):
+            return default
+    baseline_stress_pass = bool(
+        _stress_metric("baseline", "profit_factor", 0.0) >= 1.05
+        and _stress_metric("baseline", "net_r", -1.0) > 0.0
+        and _stress_metric("baseline", "max_drawdown", 1.0) <= 0.25
+        and _stress_metric("baseline", "total_trades", 0.0) >= 80
+    )
+    stress_15_pass = bool(
+        _stress_metric("stress_1_5x", "profit_factor", 0.0) >= 1.0
+        and _stress_metric("stress_1_5x", "net_r", -1.0) >= 0.0
+        and _stress_metric("stress_1_5x", "max_drawdown", 1.0) <= 0.30
+    )
+    stress_20_pass = bool(
+        _stress_metric("stress_2x", "max_drawdown", 1.0) <= 0.35
+        and _stress_metric("stress_2x", "net_r", -999.0) >= -2.0
+    )
+    validation_portfolio_pass = bool(
+        str(portfolio.get("pass_fail", "failed")) == "passed"
+        and str(portfolio.get("valid_status", "passed")) == "passed"
+        and _finite_number(portfolio.get("valid_profit_factor", 0.0))
+        and float(portfolio.get("valid_profit_factor", 0.0) or 0.0) >= 1.05
+        and float(portfolio.get("valid_total_return", 0.0) or 0.0) > 0.0
+        and float(portfolio.get("valid_max_drawdown", 1.0) or 0.0) <= 0.25
+        and int(portfolio.get("valid_total_trades", 0) or 0) >= 80
+        and float(portfolio.get("profitable_symbol_ratio", 0.0) or 0.0) >= 0.55
+    )
     stable_gate = bool(
         not train_grid_results.empty
         and "finite_profit_factor" in train_grid_results
@@ -1834,11 +2296,31 @@ def build_acceptance_checklist(
         ("strict_common_calendar_split", split_status == "strict", split_status),
         (
             "formal_parameter_grid_complete",
-            (not shared_params) or (research_mode == "FORMAL" and completed_grid_size >= expected_grid_size),
-            f"completed {completed_grid_size}/{expected_grid_size} ({grid_coverage_ratio:.2%})",
+            (not shared_params) or (research_mode == "FORMAL" and completed_grid_size >= expected_grid_size and cell_coverage_ratio >= 0.95),
+            f"params {completed_grid_size}/{expected_grid_size} ({grid_coverage_ratio:.2%}); cells {completed_cell_count}/{expected_cell_count} ({cell_coverage_ratio:.2%})",
+        ),
+        (
+            "selected_parameter_symbol_coverage",
+            (not shared_params) or (selected_symbol_coverage >= 1.0),
+            f"{selected_symbol_coverage:.2%} across {required_symbol_count} symbols",
         ),
         ("shared_params_selected", shared_params and selected_params_available, json.dumps(asdict(selected), ensure_ascii=False)),
         ("validation_once_after_freeze", shared_params and not validation_results.empty, "validation uses frozen params"),
+        (
+            "validation_portfolio_passed",
+            validation_portfolio_pass,
+            json.dumps(
+                {
+                    "pass_fail": portfolio.get("pass_fail"),
+                    "valid_pf": portfolio.get("valid_profit_factor"),
+                    "valid_return": portfolio.get("valid_total_return"),
+                    "valid_drawdown": portfolio.get("valid_max_drawdown"),
+                    "valid_trades": portfolio.get("valid_total_trades"),
+                    "profitable_symbol_ratio": portfolio.get("profitable_symbol_ratio"),
+                },
+                ensure_ascii=False,
+            ),
+        ),
         (
             "finite_pf_and_neighbor_stability_gate",
             stable_gate,
@@ -1861,11 +2343,12 @@ def build_acceptance_checklist(
         ("pre_blind_locked", normalized_blind_status in {"BLIND_LOCKED", "BLIND_SEALED_PASS", "BLIND_SEALED_FAIL"}, normalized_blind_status),
         (
             "blind_final_sealed_pass",
-            blind_pass,
+            blind_pass and blind_commitment_verified,
             json.dumps(
                 {
                     "status": normalized_blind_status,
                     "passed": bool(blind_evaluation.get("passed", False)),
+                    "precommit_verified": bool(blind_commitment_verified),
                     "reasons": blind_evaluation.get("reasons", []),
                     "pf": blind_evaluation.get("profit_factor"),
                     "return": blind_evaluation.get("total_return"),
@@ -1874,12 +2357,25 @@ def build_acceptance_checklist(
                 ensure_ascii=False,
             ),
         ),
+        ("blind_precommit_registry_verified", blind_commitment_verified, str(bool(blind_commitment_verified))),
         (
             "cost_stress_replay_three_scenarios",
             {"baseline", "stress_1_5x", "stress_2x"}.issubset(stress_scenarios)
             and bool(stress_sources)
             and "legacy_cost_fallback" not in stress_sources,
             ",".join(sorted(stress_scenarios)),
+        ),
+        (
+            "cost_stress_metrics_passed",
+            baseline_stress_pass and stress_15_pass and stress_20_pass,
+            json.dumps(
+                {
+                    "baseline": {"pf": _stress_metric("baseline", "profit_factor", 0.0), "net_r": _stress_metric("baseline", "net_r", 0.0), "dd": _stress_metric("baseline", "max_drawdown", 0.0)},
+                    "stress_1_5x": {"pf": _stress_metric("stress_1_5x", "profit_factor", 0.0), "net_r": _stress_metric("stress_1_5x", "net_r", 0.0), "dd": _stress_metric("stress_1_5x", "max_drawdown", 0.0)},
+                    "stress_2x": {"net_r": _stress_metric("stress_2x", "net_r", 0.0), "dd": _stress_metric("stress_2x", "max_drawdown", 0.0)},
+                },
+                ensure_ascii=False,
+            ),
         ),
         ("portfolio_valid_trades_ge_80", portfolio.get("valid_total_trades", 0) >= 80, str(portfolio.get("valid_total_trades", 0))),
         ("near_liq_zero", near_liq_count == 0, str(near_liq_count)),

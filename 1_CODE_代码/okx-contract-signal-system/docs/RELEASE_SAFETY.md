@@ -40,3 +40,10 @@ v3.53 release boundary:
 - Formal data must carry closed-candle evidence through `is_closed`; only explicitly declared runtime cache compatibility may synthesize that field.
 - The dashboard release check is `npm run check`, which must include lint, typecheck, tests, and build before packaging.
 - Lifecycle notification state must be updated by the runtime caller that attempted delivery. Dispatch helpers must not double-count attempts or silently convert failed direct sends into sent outbox state.
+
+v3.54 release boundary:
+- Package metadata, launcher display, GUI display, and strict research artifact defaults are synchronized to `3.54.0` / `v3.54-strict`.
+- Strict research cannot promote unless validation outcome windows end before blind trade windows, blind trades have full outcome tails, parameter-symbol coverage is complete for the selected parameters, validation portfolio metrics pass, cost-stress metrics pass, and the blind token hash was precommitted in the registry before unlock.
+- Same-command blind token plus hash is treated as self-authorized compatibility evidence only and must not satisfy final promotion checks.
+- Formal A-tier notifications are delivered through `notification_outbox` and the worker path. Runtime entrypoints submit events; they do not directly send Feishu or mark delivery status.
+- Lifecycle storage must preserve separate setup and outcome state fields for auditability and old SQLite stores must migrate forward without losing existing status.

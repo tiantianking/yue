@@ -301,22 +301,13 @@ class SignalScheduler:
                 if candidate is None or candidate.tier != "A":
                     continue
                 candidate.health_item["total_candidates"] = total_formal_candidates
-                try:
-                    sent = self._notification_dispatcher.send_a_tier_signal(
-                        candidate,
-                        signal_timeframe=self.signal_timeframe,
-                        trend_timeframe=self.trend_timeframe,
-                    )
-                    if sent:
-                        self._lifecycle_store.mark_notification_sent(candidate.notify_key)
-                    else:
-                        self._lifecycle_store.mark_notification_failed(
-                            candidate.notify_key,
-                            "send_signal_observation_returned_false",
-                        )
-                except Exception as exc:
-                    self._lifecycle_store.mark_notification_failed(candidate.notify_key, str(exc))
-                    log.error("scheduler A-tier signal push failed: %s", exc)
+                self._lifecycle_store.enqueue_notification(
+                    candidate.notify_key,
+                    signal_id=(candidate.payload.get("lifecycle") or {}).get("signal_id"),
+                    event_type="A_TIER_SIGNAL",
+                    payload=candidate.payload,
+                )
+                log.info("scheduler queued A-tier signal notification: %s", candidate.notify_key)
 
         if selection.tier_b:
             summary_key = self._b_tier_summary_key(selection.tier_b)

@@ -71,6 +71,8 @@ def run_grid_search(
     signal_timeframe: str = "15m",
     trend_timeframe: str | None = None,
     min_vote_approval_rate: float = DEFAULT_MIN_VOTE_APPROVAL_RATE,
+    trade_start: pd.Timestamp | None = None,
+    trade_end: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
     rows = []
     feature_cache: dict[tuple[int, int, int, int], pd.DataFrame] = {}
@@ -87,15 +89,20 @@ def run_grid_search(
                 trend_timeframe=trend_timeframe,
             )
         try:
-            trades = validate_backtest_result(
-                run_backtest_from_features(
-                    feature_cache[feature_key],
-                    inst_id=inst_id,
-                    params=params,
-                    min_vote_approval_rate=min_vote_approval_rate,
-                ),
-                context="grid_search",
+            raw_trades = run_backtest_from_features(
+                feature_cache[feature_key],
+                inst_id=inst_id,
+                params=params,
+                min_vote_approval_rate=min_vote_approval_rate,
             )
+            if (trade_start is not None or trade_end is not None) and "entry_time" in raw_trades.columns:
+                entry_time = pd.to_datetime(raw_trades["entry_time"], utc=True, errors="coerce")
+                if trade_start is not None:
+                    raw_trades = raw_trades[entry_time >= pd.Timestamp(trade_start)]
+                    entry_time = pd.to_datetime(raw_trades["entry_time"], utc=True, errors="coerce")
+                if trade_end is not None:
+                    raw_trades = raw_trades[entry_time <= pd.Timestamp(trade_end)]
+            trades = validate_backtest_result(raw_trades, context="grid_search")
         except ValueError:
             continue
         summary = summarize_trades(trades)

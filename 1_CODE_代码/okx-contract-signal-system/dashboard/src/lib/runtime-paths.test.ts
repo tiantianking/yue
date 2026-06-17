@@ -80,3 +80,75 @@ test("historyDir keeps explicit dashboard overrides aligned with Python data-roo
     },
   );
 });
+
+test("historyDir resolves Windows drive data roots with win32 path rules", () => {
+  withEnv(
+    {
+      OKX_HISTORY_DIR: undefined,
+      OKX_HISTORY_BASE: "D:\\data",
+    },
+    () => {
+      assert.equal(historyDir("15m"), "D:\\data\\lightweight_history\\okx_15m_extended");
+    },
+  );
+});
+
+test("historyDir resolves UNC data roots with win32 path rules", () => {
+  withEnv(
+    {
+      OKX_HISTORY_DIR: undefined,
+      OKX_HISTORY_BASE: "\\\\nas\\share\\data",
+    },
+    () => {
+      assert.equal(historyDir("15m"), "\\\\nas\\share\\data\\lightweight_history\\okx_15m_extended");
+    },
+  );
+});
+
+test("historyDir resolves POSIX data roots with posix path rules", () => {
+  withEnv(
+    {
+      OKX_HISTORY_DIR: undefined,
+      OKX_HISTORY_BASE: "/mnt/data",
+    },
+    () => {
+      assert.equal(historyDir("15m"), "/mnt/data/lightweight_history/okx_15m_extended");
+    },
+  );
+});
+
+test("historyDir does not append when root already points at dataset", () => {
+  withEnv(
+    {
+      OKX_HISTORY_DIR: undefined,
+      OKX_HISTORY_BASE: "/mnt/data/lightweight_history/okx_15m_extended",
+    },
+    () => {
+      assert.equal(historyDir("15m"), "/mnt/data/lightweight_history/okx_15m_extended");
+    },
+  );
+});
+
+test("historyDir appends only dataset when root already points at lightweight_history", () => {
+  withEnv(
+    {
+      OKX_HISTORY_DIR: undefined,
+      OKX_HISTORY_BASE: "/mnt/data/lightweight_history",
+    },
+    () => {
+      assert.equal(historyDir("15m"), "/mnt/data/lightweight_history/okx_15m_extended");
+    },
+  );
+});
+
+test("historyDir appends lightweight_history and dataset for root data directories", () => {
+  withEnv(
+    {
+      OKX_HISTORY_DIR: undefined,
+      OKX_HISTORY_BASE: "/mnt/data",
+    },
+    () => {
+      assert.equal(historyDir("5m"), "/mnt/data/lightweight_history/okx_5m_extended");
+    },
+  );
+});

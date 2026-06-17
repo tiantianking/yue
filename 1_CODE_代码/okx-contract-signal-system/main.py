@@ -326,41 +326,14 @@ async def start_realtime_monitor() -> object | None:
 async def signal_detection_loop(api, symbols: list[str], feishu_enabled: bool) -> None:
     """信号检测循环"""
     from okx_signal_system.exchange.realtime import LiveSignalMonitor
-    from okx_signal_system.notify import NotificationDispatcher
     from okx_signal_system.config import project_paths
     from okx_signal_system.data.closed_backfill import ClosedCandleBackfillService
 
-    dispatcher = NotificationDispatcher()
 
-    # 构建信号回调：信号通过风控后自动推飞书
+    # A-tier notifications are queued by LiveSignalMonitor and sent by the lifecycle outbox worker.
     def on_signal(signal, decision, candidate=None):
-        """信号回调：推送到飞书"""
-        try:
-            if not feishu_enabled:
-                return False
-            if candidate is not None:
-                sent = dispatcher.send_a_tier_signal(
-                    candidate,
-                    signal_timeframe=api.timeframe.key,
-                    trend_timeframe=api.trend_timeframe.key,
-                )
-            else:
-                sent = dispatcher.send_signal(
-                    signal,
-                    decision,
-                    signal_timeframe=api.timeframe.key,
-                    trend_timeframe=api.trend_timeframe.key,
-                    reason=", ".join(signal.reason_codes) if signal.reason_codes else "",
-                )
-            if sent:
-                logger.info("Feishu signal push sent: %s %s", signal.inst_id, signal.side)
-            else:
-                logger.warning("Feishu signal push failed: %s %s", signal.inst_id, signal.side)
-            return sent
-        except Exception as e:
-            logger.error(f"飞书推送失败: {e}")
-
-            return False
+        logger.info("A-tier signal queued for outbox dispatch: %s %s", signal.inst_id, signal.side)
+        return True
 
     closed_service = ClosedCandleBackfillService(
         symbols,

@@ -19,6 +19,14 @@ class _SummaryStore:
         return True
 
 
+class _LifecycleStore:
+    def __init__(self):
+        self.enqueued = []
+
+    def enqueue_notification(self, key, **metadata) -> None:
+        self.enqueued.append((key, metadata))
+
+
 class _Dispatcher:
     def __init__(self):
         self.b_summaries = []
@@ -42,7 +50,14 @@ class _Dispatcher:
 
 
 class _OutboxWorker:
+    calls = 0
+
+    def __init__(self):
+        self.run_calls = 0
+
     def run_once(self) -> dict:
+        self.run_calls += 1
+        _OutboxWorker.calls += 1
         return {"sent": 0, "failed": 0, "dead_letter": 0}
 
 
@@ -90,6 +105,8 @@ def test_scheduler_sends_b_tier_summary_from_scan_selection(monkeypatch) -> None
     ledger = Ledger(inst_id="GLOBAL", init_capital=10000.0, equity=10000.0)
     dispatcher = _Dispatcher()
     store = _SummaryStore()
+    lifecycle_store = _LifecycleStore()
+    outbox_worker = _OutboxWorker()
 
     monkeypatch.setattr(scheduler, "load_symbols_for_scan", lambda dataset=None: ["BTC-USDT-SWAP", "ETH-USDT-SWAP"])
     monkeypatch.setattr(
@@ -112,7 +129,8 @@ def test_scheduler_sends_b_tier_summary_from_scan_selection(monkeypatch) -> None
     )
     monkeypatch.setattr(scheduler, "NotificationDispatcher", lambda lifecycle_store=None: dispatcher)
     monkeypatch.setattr(scheduler, "BTierSummaryNotificationStore", lambda: store)
-    monkeypatch.setattr(scheduler, "LifecycleOutboxWorker", lambda store, dispatcher: _OutboxWorker())
+    monkeypatch.setattr(scheduler, "SignalLifecycleStore", lambda: lifecycle_store)
+    monkeypatch.setattr(scheduler, "LifecycleOutboxWorker", lambda store, dispatcher: outbox_worker)
 
     signal_scheduler = scheduler.SignalScheduler(
         dataset="unit",
@@ -124,6 +142,18 @@ def test_scheduler_sends_b_tier_summary_from_scan_selection(monkeypatch) -> None
     results = signal_scheduler.run_cycle()
 
     assert [item["inst_id"] for item in results] == ["BTC-USDT-SWAP"]
+    assert dispatcher.a_signals == []
+    assert lifecycle_store.enqueued == [
+        (
+            tier_a.notify_key,
+            {
+                "signal_id": None,
+                "event_type": "A_TIER_SIGNAL",
+                "payload": tier_a.payload,
+            },
+        )
+    ]
+    assert outbox_worker.run_calls == 1
     assert dispatcher.b_summaries == [([tier_b], 2, "15m", "1h")]
     assert tier_a.health_item["total_candidates"] == 2
     assert store.marked[0][0].startswith("b_tier_summary|")

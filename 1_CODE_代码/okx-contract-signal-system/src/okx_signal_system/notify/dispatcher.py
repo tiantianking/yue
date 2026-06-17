@@ -129,6 +129,9 @@ class NotificationDispatcher:
         )
 
     def send_lifecycle_event(self, event: dict[str, Any]) -> bool:
+        if event.get("event_type") == "A_TIER_SIGNAL":
+            return self._send_a_tier_outbox_event(event)
+
         payload = event.get("payload") if isinstance(event.get("payload"), dict) else event
         lifecycle_event = payload.get("lifecycle_event") if isinstance(payload.get("lifecycle_event"), dict) else {}
         status = _payload_value(payload, "status", "state") or event.get("event_type")
@@ -159,6 +162,38 @@ class NotificationDispatcher:
         if event.get("outbox_id"):
             lines.append(f"outbox_id: {event['outbox_id']}")
         return send_text("\n".join(lines))
+
+    def _send_a_tier_outbox_event(self, event: dict[str, Any]) -> bool:
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        signal = payload.get("signal") if isinstance(payload.get("signal"), dict) else {}
+        risk = payload.get("risk") if isinstance(payload.get("risk"), dict) else {}
+        lifecycle = payload.get("lifecycle") if isinstance(payload.get("lifecycle"), dict) else {}
+        reason_codes = signal.get("reason_codes") or ()
+        if isinstance(reason_codes, str):
+            reason = reason_codes
+        else:
+            reason = ", ".join(str(code) for code in reason_codes if code)
+        return send_signal_observation(
+            inst_id=str(signal.get("inst_id") or payload.get("symbol") or event.get("signal_id") or "-"),
+            side=str(signal.get("side") or payload.get("side") or "-"),
+            entry_ref=float(signal.get("entry_ref") or 0),
+            stop_loss=float(signal.get("stop_loss") or 0),
+            take_profit=float(signal.get("take_profit") or 0),
+            reason=reason,
+            signal_score=float(signal.get("signal_score") or risk.get("signal_score") or 0),
+            risk_reward_ratio=risk.get("risk_reward_ratio") or signal.get("risk_reward_ratio"),
+            stop_reason=str(risk.get("stop_reason") or ""),
+            tp_reason=str(risk.get("tp_reason") or ""),
+            kline_time=pd.Timestamp(signal.get("ts")).isoformat() if signal.get("ts") else "",
+            signal_timeframe=str(payload.get("signal_timeframe") or ""),
+            trend_timeframe=str(payload.get("trend_timeframe") or ""),
+            tier=payload.get("tier"),
+            rank=payload.get("rank"),
+            total_candidates=payload.get("total_candidates") or payload.get("total_formal_candidates"),
+            lifecycle_status=lifecycle.get("status") or payload.get("lifecycle_status"),
+            invalidation_price=signal.get("invalidation_price") or signal.get("stop_loss"),
+            quality_model=payload.get("quality_model") if isinstance(payload.get("quality_model"), dict) else None,
+        )
 
     def send_startup(self, *, symbol_count: int, environment: str) -> bool:
         return send_text(

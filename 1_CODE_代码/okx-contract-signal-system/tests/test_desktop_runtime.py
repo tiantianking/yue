@@ -401,8 +401,6 @@ def test_publish_tiered_candidates_uses_scan_service_selection() -> None:
         (),
         {
             "enqueue_notification": lambda self, key, **metadata: outbox.append(("pending", key, metadata)),
-            "mark_notification_sent": lambda self, key: outbox.append(("sent", key)),
-            "mark_notification_failed": lambda self, key, error: outbox.append(("failed", key, error)),
         },
     )()
     monitor._signal_notification_store = Store()
@@ -419,11 +417,18 @@ def test_publish_tiered_candidates_uses_scan_service_selection() -> None:
     assert callback_candidates[0].health_item["rank"] == 1
     assert callback_candidates[0].health_item["total_formal_candidates"] == 2
     assert recorded == ["LOW-USDT-SWAP"]
-    assert outbox[0][0] == "pending"
-    assert outbox[0][1] == "LOW-USDT-SWAP:6.0"
-    assert outbox[0][2]["event_type"] == "A_TIER_SIGNAL"
-    assert outbox[1] == ("sent", "LOW-USDT-SWAP:6.0")
-    assert monitor._signal_notification_store.marked[0][0] == "LOW-USDT-SWAP:6.0"
+    assert outbox == [
+        (
+            "pending",
+            "LOW-USDT-SWAP:6.0",
+            {
+                "signal_id": None,
+                "event_type": "A_TIER_SIGNAL",
+                "payload": low_score_a.payload,
+            },
+        )
+    ]
+    assert monitor._signal_notification_store.marked == []
     assert low_score_a.health_item["tier"] == "A"
     assert high_score_b.health_item["tier"] == "B"
 
@@ -492,8 +497,6 @@ def test_publish_tiered_candidates_keeps_legacy_two_arg_callback() -> None:
         (),
         {
             "enqueue_notification": lambda self, key, **metadata: None,
-            "mark_notification_sent": lambda self, key: None,
-            "mark_notification_failed": lambda self, key, error: None,
         },
     )()
     monitor._signal_notification_store = Store()

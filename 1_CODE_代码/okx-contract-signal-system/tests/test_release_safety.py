@@ -76,7 +76,7 @@ def test_release_version_sources_stay_consistent() -> None:
     gui_text = _read("gui.py")
     start_text = _read("start.bat")
 
-    assert package_version == "3.53.0"
+    assert package_version == "3.54.0"
     assert pyproject["project"]["version"] == package_version
     assert f"Version: {package_version}" in pkg_info
     assert "from okx_signal_system import __version__ as _PACKAGE_VERSION" in main_text
@@ -97,7 +97,7 @@ def test_strict_research_default_version_matches_cli_release() -> None:
     cli_text = _read("src/okx_signal_system/backtest/research_cli.py")
     default_version = research.run_dataset_research_artifacts.__kwdefaults__["research_version"]
 
-    assert default_version == "v3.53-strict"
+    assert default_version == "v3.54-strict"
     assert f'parser.add_argument("--research-version", default="{default_version}")' in cli_text
 
 

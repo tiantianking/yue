@@ -18,10 +18,20 @@ LifecycleStatus = Literal[
     "CONFIRMED",
     "INVALIDATED",
     "EXPIRED",
+    "PENDING_ENTRY",
+    "ACTIVE",
     "TARGET_REACHED",
     "STOP_REACHED",
     "TIMEOUT_RESULT",
+    "CENSORED",
 ]
+
+SetupState = Literal["TRIGGERED", "CONFIRMED", "INVALIDATED", "EXPIRED"]
+OutcomeState = Literal["PENDING_ENTRY", "ACTIVE", "TARGET_REACHED", "STOP_REACHED", "TIMEOUT_RESULT", "CENSORED"]
+
+SETUP_STATES = {"TRIGGERED", "CONFIRMED", "INVALIDATED", "EXPIRED"}
+OUTCOME_STATES = {"PENDING_ENTRY", "ACTIVE", "TARGET_REACHED", "STOP_REACHED", "TIMEOUT_RESULT", "CENSORED"}
+OUTCOME_TERMINAL_STATES = {"TARGET_REACHED", "STOP_REACHED", "TIMEOUT_RESULT", "CENSORED"}
 
 _OUTCOME_SIMULATOR = SignalOutcomeSimulator()
 DEFAULT_LIFECYCLE_OUTBOX_MAX_ATTEMPTS = 3
@@ -39,7 +49,10 @@ class SignalLifecycleRecord:
     entry_ref: float
     invalidation_price: float
     max_hold_bars: int
+    analysis_stop_loss: float | None = None
     take_profit: float | None = None
+    setup_state: SetupState = "TRIGGERED"
+    outcome_state: OutcomeState = "PENDING_ENTRY"
     status: LifecycleStatus = "TRIGGERED"
     bars_seen: int = 0
     last_closed_time: str | None = None
@@ -63,7 +76,7 @@ class SignalLifecycleRecord:
 
     @property
     def stop_loss(self) -> float:
-        return self.invalidation_price
+        return float(self.analysis_stop_loss if self.analysis_stop_loss is not None else self.invalidation_price)
 
     @property
     def accepted(self) -> bool:
@@ -97,15 +110,6 @@ def _is_closed_value(value: Any) -> bool:
 
 
 def lifecycle_payload(record: SignalLifecycleRecord) -> dict[str, Any]:
-    if record.confirmed_at:
-        setup_state = "CONFIRMED"
-    elif record.invalidated_at:
-        setup_state = "INVALIDATED"
-    elif record.expired_at:
-        setup_state = "EXPIRED"
-    else:
-        setup_state = record.status
-    outcome_state = record.status if record.status in {"TARGET_REACHED", "STOP_REACHED", "TIMEOUT_RESULT"} else None
     return {
         "signal_id": record.signal_id,
         "inst_id": record.inst_id,
@@ -113,8 +117,8 @@ def lifecycle_payload(record: SignalLifecycleRecord) -> dict[str, Any]:
         "side": record.side,
         "signal_time": record.signal_time,
         "entry_ref": record.entry_ref,
-        "setup_state": setup_state,
-        "outcome_state": outcome_state,
+        "setup_state": record.setup_state,
+        "outcome_state": record.outcome_state,
         "state": record.status,
         "status": record.status,
         "lifecycle_event": {
@@ -123,6 +127,8 @@ def lifecycle_payload(record: SignalLifecycleRecord) -> dict[str, Any]:
         },
         "triggered_at": record.signal_time,
         "invalidation_price": record.invalidation_price,
+        "analysis_stop_loss": record.analysis_stop_loss,
+        "stop_loss": record.analysis_stop_loss,
         "take_profit": record.take_profit,
         "target_price": record.take_profit,
         "bars_seen": record.bars_seen,
@@ -176,8 +182,11 @@ class SignalLifecycleStore:
                 signal_time TEXT NOT NULL,
                 entry_ref REAL NOT NULL,
                 invalidation_price REAL NOT NULL,
+                analysis_stop_loss REAL,
                 take_profit REAL,
                 max_hold_bars INTEGER NOT NULL,
+                setup_state TEXT NOT NULL DEFAULT 'TRIGGERED',
+                outcome_state TEXT NOT NULL DEFAULT 'PENDING_ENTRY',
                 status TEXT NOT NULL,
                 bars_seen INTEGER NOT NULL DEFAULT 0,
                 last_closed_time TEXT,
@@ -252,7 +261,10 @@ class SignalLifecycleStore:
     def _ensure_lifecycle_record_columns(conn: sqlite3.Connection) -> None:
         existing = {str(row["name"]) for row in conn.execute("PRAGMA table_info(lifecycle_records)").fetchall()}
         columns = {
+            "analysis_stop_loss": "REAL",
             "take_profit": "REAL",
+            "setup_state": "TEXT NOT NULL DEFAULT 'TRIGGERED'",
+            "outcome_state": "TEXT NOT NULL DEFAULT 'PENDING_ENTRY'",
             "target_reached_at": "TEXT",
             "stop_reached_at": "TEXT",
             "timeout_result_at": "TEXT",
@@ -260,6 +272,40 @@ class SignalLifecycleStore:
         for name, column_type in columns.items():
             if name not in existing:
                 conn.execute(f"ALTER TABLE lifecycle_records ADD COLUMN {name} {column_type}")
+        conn.execute(
+            """
+            UPDATE lifecycle_records
+            SET analysis_stop_loss = invalidation_price
+            WHERE analysis_stop_loss IS NULL
+            """
+        )
+        conn.execute(
+            """
+            UPDATE lifecycle_records
+            SET setup_state = CASE
+                    WHEN status IN ('TRIGGERED', 'CONFIRMED', 'INVALIDATED', 'EXPIRED') THEN status
+                    WHEN invalidated_at IS NOT NULL THEN 'INVALIDATED'
+                    WHEN expired_at IS NOT NULL THEN 'EXPIRED'
+                    WHEN confirmed_at IS NOT NULL THEN 'CONFIRMED'
+                    ELSE 'TRIGGERED'
+                END,
+                outcome_state = CASE
+                    WHEN status IN ('TARGET_REACHED', 'STOP_REACHED', 'TIMEOUT_RESULT', 'CENSORED') THEN status
+                    WHEN target_reached_at IS NOT NULL THEN 'TARGET_REACHED'
+                    WHEN stop_reached_at IS NOT NULL THEN 'STOP_REACHED'
+                    WHEN timeout_result_at IS NOT NULL THEN 'TIMEOUT_RESULT'
+                    WHEN confirmed_at IS NOT NULL THEN 'ACTIVE'
+                    ELSE 'PENDING_ENTRY'
+                END
+            WHERE setup_state IS NULL
+               OR setup_state = ''
+               OR outcome_state IS NULL
+               OR outcome_state = ''
+               OR (setup_state = 'TRIGGERED' AND status IN ('CONFIRMED', 'INVALIDATED', 'EXPIRED'))
+               OR (outcome_state = 'PENDING_ENTRY' AND (status IN ('TARGET_REACHED', 'STOP_REACHED', 'TIMEOUT_RESULT', 'CENSORED') OR confirmed_at IS NOT NULL))
+               OR status IN ('TARGET_REACHED', 'STOP_REACHED', 'TIMEOUT_RESULT', 'CENSORED')
+            """
+        )
 
     @staticmethod
     def _ensure_notification_outbox_columns(conn: sqlite3.Connection) -> None:
@@ -315,18 +361,66 @@ class SignalLifecycleStore:
             )
 
     @staticmethod
+    def _setup_state_from_legacy(item: dict[str, Any]) -> SetupState:
+        value = str(item.get("setup_state") or "")
+        if value in SETUP_STATES:
+            return value  # type: ignore[return-value]
+        status = str(item.get("status") or "")
+        if status in SETUP_STATES:
+            return status  # type: ignore[return-value]
+        if item.get("invalidated_at"):
+            return "INVALIDATED"
+        if item.get("expired_at"):
+            return "EXPIRED"
+        if item.get("confirmed_at"):
+            return "CONFIRMED"
+        return "TRIGGERED"
+
+    @staticmethod
+    def _outcome_state_from_legacy(item: dict[str, Any], setup_state: str) -> OutcomeState:
+        value = str(item.get("outcome_state") or "")
+        if value in OUTCOME_STATES:
+            return value  # type: ignore[return-value]
+        status = str(item.get("status") or "")
+        if status in OUTCOME_STATES:
+            return status  # type: ignore[return-value]
+        if item.get("target_reached_at"):
+            return "TARGET_REACHED"
+        if item.get("stop_reached_at"):
+            return "STOP_REACHED"
+        if item.get("timeout_result_at"):
+            return "TIMEOUT_RESULT"
+        if setup_state == "CONFIRMED":
+            return "ACTIVE"
+        return "PENDING_ENTRY"
+
+    @staticmethod
+    def _compat_status(setup_state: str, outcome_state: str) -> LifecycleStatus:
+        if outcome_state in OUTCOME_TERMINAL_STATES:
+            return outcome_state  # type: ignore[return-value]
+        return setup_state  # type: ignore[return-value]
+
+    @staticmethod
     def _record_from_dict(item: dict[str, Any]) -> SignalLifecycleRecord:
         now = _now_text()
+        setup_state = SignalLifecycleStore._setup_state_from_legacy(item)
+        outcome_state = SignalLifecycleStore._outcome_state_from_legacy(item, setup_state)
+        status = SignalLifecycleStore._compat_status(setup_state, outcome_state)
+        invalidation_price = float(item.get("invalidation_price", 0.0) or 0.0)
+        analysis_stop_loss = item.get("analysis_stop_loss", item.get("stop_loss"))
         return SignalLifecycleRecord(
             signal_id=str(item["signal_id"]),
             inst_id=str(item.get("inst_id", "")),
             side=str(item.get("side", "")),
             signal_time=str(item.get("signal_time") or item.get("triggered_at") or ""),
             entry_ref=float(item.get("entry_ref", 0.0) or 0.0),
-            invalidation_price=float(item.get("invalidation_price", 0.0) or 0.0),
+            invalidation_price=invalidation_price,
+            analysis_stop_loss=float(analysis_stop_loss) if analysis_stop_loss is not None else invalidation_price,
             take_profit=float(item["take_profit"]) if item.get("take_profit") is not None else None,
             max_hold_bars=int(item.get("max_hold_bars", 0) or 0),
-            status=str(item.get("status", "TRIGGERED")),  # type: ignore[arg-type]
+            setup_state=setup_state,
+            outcome_state=outcome_state,
+            status=status,
             bars_seen=int(item.get("bars_seen", 0) or 0),
             last_closed_time=item.get("last_closed_time"),
             last_close=float(item["last_close"]) if item.get("last_close") is not None else None,
@@ -346,6 +440,10 @@ class SignalLifecycleStore:
 
     @staticmethod
     def _record_from_row(row: sqlite3.Row) -> SignalLifecycleRecord:
+        item = dict(row)
+        setup_state = SignalLifecycleStore._setup_state_from_legacy(item)
+        outcome_state = SignalLifecycleStore._outcome_state_from_legacy(item, setup_state)
+        status = SignalLifecycleStore._compat_status(setup_state, outcome_state)
         return SignalLifecycleRecord(
             signal_id=str(row["signal_id"]),
             inst_id=str(row["inst_id"]),
@@ -353,9 +451,12 @@ class SignalLifecycleStore:
             signal_time=str(row["signal_time"]),
             entry_ref=float(row["entry_ref"]),
             invalidation_price=float(row["invalidation_price"]),
+            analysis_stop_loss=float(row["analysis_stop_loss"]) if row["analysis_stop_loss"] is not None else float(row["invalidation_price"]),
             take_profit=float(row["take_profit"]) if row["take_profit"] is not None else None,
             max_hold_bars=int(row["max_hold_bars"]),
-            status=str(row["status"]),  # type: ignore[arg-type]
+            setup_state=setup_state,
+            outcome_state=outcome_state,
+            status=status,
             bars_seen=int(row["bars_seen"]),
             last_closed_time=row["last_closed_time"],
             last_close=float(row["last_close"]) if row["last_close"] is not None else None,
@@ -386,19 +487,23 @@ class SignalLifecycleStore:
             """
             INSERT INTO lifecycle_records (
                 signal_id, inst_id, side, signal_time, entry_ref, invalidation_price,
-                take_profit, max_hold_bars, status, bars_seen, last_closed_time, last_close,
+                analysis_stop_loss, take_profit, max_hold_bars, setup_state, outcome_state,
+                status, bars_seen, last_closed_time, last_close,
                 confirmed_at, invalidated_at, expired_at, target_reached_at, stop_reached_at,
                 timeout_result_at, last_event_type, last_event_at, signal_timeframe,
                 trend_timeframe, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(signal_id) DO UPDATE SET
                 inst_id = excluded.inst_id,
                 side = excluded.side,
                 signal_time = excluded.signal_time,
                 entry_ref = excluded.entry_ref,
                 invalidation_price = excluded.invalidation_price,
+                analysis_stop_loss = excluded.analysis_stop_loss,
                 take_profit = excluded.take_profit,
                 max_hold_bars = excluded.max_hold_bars,
+                setup_state = excluded.setup_state,
+                outcome_state = excluded.outcome_state,
                 status = excluded.status,
                 bars_seen = excluded.bars_seen,
                 last_closed_time = excluded.last_closed_time,
@@ -423,8 +528,11 @@ class SignalLifecycleStore:
                 record.signal_time,
                 record.entry_ref,
                 record.invalidation_price,
+                record.analysis_stop_loss,
                 record.take_profit,
                 record.max_hold_bars,
+                record.setup_state,
+                record.outcome_state,
                 record.status,
                 record.bars_seen,
                 record.last_closed_time,
@@ -452,11 +560,17 @@ class SignalLifecycleStore:
         event_type: str,
         event_at: str,
         status: str | None = None,
+        setup_state: str | None = None,
+        outcome_state: str | None = None,
     ) -> None:
         event_status = status or record.status
         payload = lifecycle_payload(record)
         payload["state"] = event_status
         payload["status"] = event_status
+        if setup_state is not None:
+            payload["setup_state"] = setup_state
+        if outcome_state is not None:
+            payload["outcome_state"] = outcome_state
         payload["lifecycle_event"] = {"type": event_type, "at": event_at}
         payload_json = json.dumps(payload, ensure_ascii=False)
         conn.execute(
@@ -540,6 +654,7 @@ class SignalLifecycleStore:
             return None
         entry_ref = getattr(signal, "entry_ref", None)
         invalidation = invalidation_price if invalidation_price is not None else getattr(signal, "stop_loss", None)
+        analysis_stop = getattr(signal, "stop_loss", None)
         if entry_ref is None or invalidation is None:
             return None
         sid = signal_id or _default_signal_id(signal)
@@ -559,6 +674,7 @@ class SignalLifecycleStore:
             signal_time=signal_time,
             entry_ref=float(entry_ref),
             invalidation_price=float(invalidation),
+            analysis_stop_loss=float(analysis_stop) if analysis_stop is not None else float(invalidation),
             take_profit=float(target_price) if target_price is not None else None,
             max_hold_bars=int(getattr(signal, "max_hold_bars", 0) or 0),
             signal_timeframe=signal_timeframe,
@@ -590,22 +706,26 @@ class SignalLifecycleStore:
         if df.empty:
             return 0
         updated = 0
-        lifecycle_events: list[tuple[SignalLifecycleRecord, str, str, str]] = []
+        lifecycle_events: list[tuple[SignalLifecycleRecord, str, str, str, str, str]] = []
         for record in self.records:
-            if record.inst_id != inst_id or record.status not in {"TRIGGERED", "CONFIRMED"}:
+            if record.inst_id != inst_id:
+                continue
+            if record.setup_state not in {"TRIGGERED", "CONFIRMED"} and record.outcome_state in OUTCOME_TERMINAL_STATES:
                 continue
             if self._update_record(record, df, lifecycle_events):
                 updated += 1
         if updated:
             self._save()
             with self._connect() as conn:
-                for record, event_type, event_at, status in lifecycle_events:
+                for record, event_type, event_at, status, setup_state, outcome_state in lifecycle_events:
                     self._insert_lifecycle_event(
                         conn,
                         record,
                         event_type=event_type,
                         event_at=event_at,
                         status=status,
+                        setup_state=setup_state,
+                        outcome_state=outcome_state,
                     )
         return updated
 
@@ -847,7 +967,8 @@ class SignalLifecycleStore:
         }
 
     def summary(self) -> dict[str, Any]:
-        counts = Counter(item.status for item in self.records)
+        setup_counts = Counter(item.setup_state for item in self.records)
+        outcome_counts = Counter(item.outcome_state for item in self.records)
         latest_updated = max((item.updated_at for item in self.records if item.updated_at), default=None)
         latest_event_at = max(
             (item.last_event_at or item.updated_at or item.created_at for item in self.records if (item.last_event_at or item.updated_at or item.created_at)),
@@ -863,20 +984,24 @@ class SignalLifecycleStore:
         outbox = self.outbox_summary()
         return {
             "total": len(self.records),
-            "triggered": counts.get("TRIGGERED", 0),
-            "confirmed": counts.get("CONFIRMED", 0),
-            "invalidated": counts.get("INVALIDATED", 0),
-            "expired": counts.get("EXPIRED", 0),
-            "target_reached": counts.get("TARGET_REACHED", 0),
-            "stop_reached": counts.get("STOP_REACHED", 0),
-            "timeout_result": counts.get("TIMEOUT_RESULT", 0),
-            "active": counts.get("TRIGGERED", 0) + counts.get("CONFIRMED", 0),
+            "triggered": setup_counts.get("TRIGGERED", 0),
+            "confirmed": setup_counts.get("CONFIRMED", 0),
+            "invalidated": setup_counts.get("INVALIDATED", 0),
+            "expired": setup_counts.get("EXPIRED", 0),
+            "pending_entry": outcome_counts.get("PENDING_ENTRY", 0),
+            "outcome_active": outcome_counts.get("ACTIVE", 0),
+            "target_reached": outcome_counts.get("TARGET_REACHED", 0),
+            "stop_reached": outcome_counts.get("STOP_REACHED", 0),
+            "timeout_result": outcome_counts.get("TIMEOUT_RESULT", 0),
+            "censored": outcome_counts.get("CENSORED", 0),
+            "active": setup_counts.get("TRIGGERED", 0) + setup_counts.get("CONFIRMED", 0),
             "terminal": (
-                counts.get("INVALIDATED", 0)
-                + counts.get("EXPIRED", 0)
-                + counts.get("TARGET_REACHED", 0)
-                + counts.get("STOP_REACHED", 0)
-                + counts.get("TIMEOUT_RESULT", 0)
+                setup_counts.get("INVALIDATED", 0)
+                + setup_counts.get("EXPIRED", 0)
+                + outcome_counts.get("TARGET_REACHED", 0)
+                + outcome_counts.get("STOP_REACHED", 0)
+                + outcome_counts.get("TIMEOUT_RESULT", 0)
+                + outcome_counts.get("CENSORED", 0)
             ),
             "latest_event_type": latest_event_type,
             "latest_event_at": latest_event_at,
@@ -909,7 +1034,7 @@ class SignalLifecycleStore:
         self,
         record: SignalLifecycleRecord,
         df: pd.DataFrame,
-        lifecycle_events: list[tuple[SignalLifecycleRecord, str, str, str]] | None = None,
+        lifecycle_events: list[tuple[SignalLifecycleRecord, str, str, str, str, str]] | None = None,
     ) -> bool:
         start = pd.Timestamp(record.signal_time)
         if start.tzinfo is None:
@@ -930,56 +1055,81 @@ class SignalLifecycleStore:
                 changed = True
 
             result_event = self._research_result_event(record, future.iloc[:bars_seen])
-            if result_event is not None:
-                if record.status == "TRIGGERED" and self._confirms(record, close):
-                    record.status = "CONFIRMED"
+            if result_event is not None and record.outcome_state not in OUTCOME_TERMINAL_STATES:
+                if record.setup_state == "TRIGGERED" and self._confirms(record, close):
+                    record.setup_state = "CONFIRMED"
+                    record.outcome_state = "ACTIVE"
                     record.confirmed_at = closed_time
+                    record.status = self._compat_status(record.setup_state, record.outcome_state)
                     record.last_event_type = "CONFIRMED"
                     record.last_event_at = closed_time
                     changed = True
                     if lifecycle_events is not None:
-                        lifecycle_events.append((record, "CONFIRMED", closed_time, record.status))
+                        lifecycle_events.append((record, "CONFIRMED", closed_time, record.status, record.setup_state, record.outcome_state))
                 event_type, attr_name, event_at = result_event
-                record.status = event_type
+                record.outcome_state = event_type  # type: ignore[assignment]
+                record.status = self._compat_status(record.setup_state, record.outcome_state)
                 setattr(record, attr_name, event_at)
                 record.last_event_type = event_type
                 record.last_event_at = event_at
                 record.updated_at = _now_text()
                 if lifecycle_events is not None:
-                    lifecycle_events.append((record, event_type, event_at, record.status))
+                    lifecycle_events.append((record, event_type, event_at, record.status, record.setup_state, record.outcome_state))
                 return True
 
-            if record.status == "TRIGGERED" and self._invalidates(record, close):
-                record.status = "INVALIDATED"
+            if record.setup_state == "TRIGGERED" and self._invalidates(record, close):
+                record.setup_state = "INVALIDATED"
+                record.status = self._compat_status(record.setup_state, record.outcome_state)
                 record.invalidated_at = closed_time
                 record.last_event_type = "INVALIDATED"
                 record.last_event_at = closed_time
                 record.updated_at = _now_text()
+                changed = True
                 if lifecycle_events is not None:
-                    lifecycle_events.append((record, "INVALIDATED", closed_time, record.status))
-                return True
+                    lifecycle_events.append((record, "INVALIDATED", closed_time, record.status, record.setup_state, record.outcome_state))
+                continue
 
-            if record.status == "TRIGGERED" and self._confirms(record, close):
-                record.status = "CONFIRMED"
+            if record.setup_state == "TRIGGERED" and self._confirms(record, close):
+                record.setup_state = "CONFIRMED"
+                if record.outcome_state == "PENDING_ENTRY":
+                    record.outcome_state = "ACTIVE"
+                record.status = self._compat_status(record.setup_state, record.outcome_state)
                 record.confirmed_at = closed_time
                 record.last_event_type = "CONFIRMED"
                 record.last_event_at = closed_time
                 changed = True
                 if lifecycle_events is not None:
-                    lifecycle_events.append((record, "CONFIRMED", closed_time, record.status))
+                    lifecycle_events.append((record, "CONFIRMED", closed_time, record.status, record.setup_state, record.outcome_state))
 
-            if record.status == "TRIGGERED" and record.max_hold_bars > 0 and bars_seen >= record.max_hold_bars:
-                record.status = "EXPIRED"
+            if record.setup_state == "TRIGGERED" and record.max_hold_bars > 0 and bars_seen >= record.max_hold_bars:
+                record.setup_state = "EXPIRED"
+                record.status = self._compat_status(record.setup_state, record.outcome_state)
                 record.expired_at = closed_time
                 record.last_event_type = "EXPIRED"
                 record.last_event_at = closed_time
                 record.updated_at = _now_text()
+                changed = True
                 if lifecycle_events is not None:
-                    lifecycle_events.append((record, "EXPIRED", closed_time, record.status))
-                return True
+                    lifecycle_events.append((record, "EXPIRED", closed_time, record.status, record.setup_state, record.outcome_state))
+
+            if (
+                record.setup_state == "INVALIDATED"
+                and record.outcome_state not in OUTCOME_TERMINAL_STATES
+                and record.max_hold_bars > 0
+                and bars_seen >= record.max_hold_bars
+            ):
+                record.outcome_state = "CENSORED"
+                record.status = self._compat_status(record.setup_state, record.outcome_state)
+                record.last_event_type = "CENSORED"
+                record.last_event_at = closed_time
+                record.updated_at = _now_text()
+                changed = True
+                if lifecycle_events is not None:
+                    lifecycle_events.append((record, "CENSORED", closed_time, record.status, record.setup_state, record.outcome_state))
 
         if changed:
             record.updated_at = _now_text()
+            record.status = self._compat_status(record.setup_state, record.outcome_state)
         return changed
 
     @staticmethod

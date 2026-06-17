@@ -8,14 +8,22 @@ function datasetName(timeframe: string) {
   return `okx_${timeframe}_extended`;
 }
 
+function pathApiFor(inputPath: string) {
+  if (/^[a-zA-Z]:[\\/]/.test(inputPath) || /^[\\/]{2}[^\\/]/.test(inputPath)) {
+    return path.win32;
+  }
+  return path.posix;
+}
+
 function datasetUnderDataRoot(dataRoot: string, dataset: string) {
-  if (path.basename(dataRoot) === dataset) {
+  const pathApi = pathApiFor(dataRoot);
+  if (pathApi.basename(dataRoot) === dataset) {
     return dataRoot;
   }
-  if (path.basename(dataRoot) === "lightweight_history") {
-    return path.join(dataRoot, dataset);
+  if (pathApi.basename(dataRoot) === "lightweight_history") {
+    return pathApi.join(dataRoot, dataset);
   }
-  return path.join(dataRoot, "lightweight_history", dataset);
+  return pathApi.join(dataRoot, "lightweight_history", dataset);
 }
 
 function explicitHistoryDir(timeframe = "15m") {

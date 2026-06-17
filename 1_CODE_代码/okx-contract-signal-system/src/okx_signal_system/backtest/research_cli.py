@@ -25,11 +25,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--full-grid", action="store_true", help="kept for compatibility; formal mode already uses the full grid")
     parser.add_argument("--per-symbol-params", action="store_true")
     parser.add_argument("--legacy-split", action="store_true", help="allow non-formal per-symbol fallback split")
+    parser.add_argument("--precommit-blind", action="store_true", help="write a pre-blind token hash commitment without opening blind data")
     parser.add_argument("--unlock-blind", action="store_true", help="run blind-set evaluation and write an access manifest")
     parser.add_argument("--blind-release-token", default=None)
     parser.add_argument("--blind-release-token-sha256", default=None)
     parser.add_argument("--blind-registry-path", default=None)
-    parser.add_argument("--research-version", default="v3.53-strict")
+    parser.add_argument("--research-version", default="v3.54-strict")
     return parser
 
 
@@ -50,6 +51,7 @@ def main() -> None:
         signal_timeframe=args.signal_timeframe,
         trend_timeframe=args.trend_timeframe,
         legacy_split=args.legacy_split,
+        precommit_blind=args.precommit_blind,
         unlock_blind=args.unlock_blind,
         blind_release_token=args.blind_release_token,
         blind_release_token_sha256=args.blind_release_token_sha256,
