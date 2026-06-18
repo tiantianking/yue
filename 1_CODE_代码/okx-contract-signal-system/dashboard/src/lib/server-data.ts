@@ -20,6 +20,7 @@ import { dashboardExecTimeoutMs, historyScriptArgs, pythonPath } from "./runtime
 const execFileAsync = promisify(execFile);
 const SCAN_STALE_MINUTES = 20;
 const WS_STALE_MINUTES = 10;
+const CLOSED_BACKFILL_GRACE_MINUTES = 5;
 
 export const projectRoot = path.resolve(
   process.env.OKX_SIGNAL_ROOT ?? path.join(process.cwd(), ".."),
@@ -72,6 +73,14 @@ function minutesSince(value?: string) {
   return Math.max(0, (Date.now() - ts) / 60000);
 }
 
+function timestampMs(value?: string) {
+  if (!value) {
+    return null;
+  }
+  const ts = new Date(value).getTime();
+  return Number.isNaN(ts) ? null : ts;
+}
+
 function minutesSinceEpochSeconds(value?: number | null) {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     return null;
@@ -79,13 +88,30 @@ function minutesSinceEpochSeconds(value?: number | null) {
   return Math.max(0, (Date.now() - value * 1000) / 60000);
 }
 
-function enrichLatestScan(latestScan: LatestScanStatus | null): LatestScanStatus | null {
+function isClosedBackfillFresh(status?: ClosedBackfillStatus | null): boolean {
+  if (!status?.all_complete) {
+    return false;
+  }
+  const nextRunAt = timestampMs(status.next_run_at);
+  if (nextRunAt !== null) {
+    return Date.now() <= nextRunAt + CLOSED_BACKFILL_GRACE_MINUTES * 60000;
+  }
+  const generatedAge = minutesSince(status.generated_at);
+  return typeof generatedAge === "number" && generatedAge <= SCAN_STALE_MINUTES;
+}
+
+function enrichLatestScan(
+  latestScan: LatestScanStatus | null,
+  closedBackfill?: ClosedBackfillStatus | null,
+  closedBackfill5m?: ClosedBackfillStatus | null,
+): LatestScanStatus | null {
   if (!latestScan) {
     return null;
   }
   const ageMinutes = minutesSince(latestScan.generated_at);
   const ws = latestScan.websocket ?? null;
   const wsMessageAge = minutesSinceEpochSeconds(ws?.last_message_at);
+  const closedBackfillFresh = isClosedBackfillFresh(closedBackfill) || isClosedBackfillFresh(closedBackfill5m);
   let runtimeStatus = "online";
   let runtimeReason = "live_status_fresh";
 
@@ -102,8 +128,12 @@ function enrichLatestScan(latestScan: LatestScanStatus | null): LatestScanStatus
     runtimeStatus = "stale";
     runtimeReason = "websocket_degraded";
   } else if (typeof wsMessageAge === "number" && wsMessageAge > WS_STALE_MINUTES) {
-    runtimeStatus = "stale";
-    runtimeReason = "websocket_message_stale";
+    if (closedBackfillFresh) {
+      runtimeReason = "closed_backfill_fresh_ws_quiet";
+    } else {
+      runtimeStatus = "stale";
+      runtimeReason = "websocket_message_stale";
+    }
   }
 
   return {
@@ -247,7 +277,7 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
     ? (dataConfig.symbols.filter((item) => typeof item === "string") as string[])
     : [];
   const backfillSymbols = backfill.map((row) => row.inst_id);
-  const enrichedLatestScan = enrichLatestScan(latestScan);
+  const enrichedLatestScan = enrichLatestScan(latestScan, closedBackfill, closedBackfill5m);
   const scanSymbols = latestScanSymbols(enrichedLatestScan);
   const closedSymbols = (closedBackfill?.symbols ?? []).map((row) => row.inst_id);
   const symbols = [...new Set([...configuredSymbols, ...scanSymbols, ...closedSymbols, ...backfillSymbols])];
@@ -314,6 +344,7 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
     latest_signal: effectiveLatestSignal,
     latest_scan: enrichedLatestScan,
     closed_backfill: closedBackfill,
+    closed_backfill_5m: closedBackfill5m,
     closed_backfills: {
       "15m": closedBackfill,
       "5m": closedBackfill5m,

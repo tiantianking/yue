@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RELEASE_TEXT_FILES = [
     "README.md",
     "docs/RELEASE_SAFETY.md",
+    "docs/RUNTIME_VERIFICATION.md",
     "docs/SYSTEM_ARCHITECTURE.md",
     "src/okx_signal_system/reporting/report_builder.py",
     "src/okx_signal_system/signal_service/app.py",
@@ -78,7 +79,7 @@ def test_release_version_sources_stay_consistent() -> None:
     gui_text = _read("gui.py")
     start_text = _read("start.bat")
 
-    assert package_version == "3.56.2"
+    assert package_version == "3.56.3"
     assert pyproject["project"]["version"] == package_version
     assert APPROVED_STRATEGY_VERSION == package_version
     assert f"Version: {package_version}" in pkg_info
@@ -138,11 +139,16 @@ def test_dashboard_reads_approved_manifest_before_legacy_selected_params() -> No
 
 def test_dashboard_payload_prefers_live_runtime_status() -> None:
     server_data = _read("dashboard/src/lib/server-data.ts")
+    types = _read("dashboard/src/lib/types.ts")
 
     assert "generated_at: new Date().toISOString()" in server_data
     assert "latestScanSymbols(enrichedLatestScan)" in server_data
     assert "...configuredSymbols, ...scanSymbols, ...closedSymbols, ...backfillSymbols" in server_data
     assert "push_allowed: Boolean(enrichedLatestScan?.push_allowed ?? quality.push_allowed)" in server_data
+    assert "closed_backfill_fresh_ws_quiet" in server_data
+    assert "isClosedBackfillFresh(closedBackfill)" in server_data
+    assert "closed_backfill_5m: closedBackfill5m" in server_data
+    assert "closed_backfill_5m?: ClosedBackfillStatus | null" in types
 
 
 def test_env_example_is_signal_only_and_has_no_private_okx_keys() -> None:

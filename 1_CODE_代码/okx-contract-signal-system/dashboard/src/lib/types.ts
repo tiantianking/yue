@@ -205,6 +205,7 @@ export type DashboardPayload = {
   latest_signal: LatestSignal | null;
   latest_scan?: LatestScanStatus | null;
   closed_backfill: ClosedBackfillStatus | null;
+  closed_backfill_5m?: ClosedBackfillStatus | null;
   closed_backfills?: Record<string, ClosedBackfillStatus | null>;
   learning_review: DailyLearningReviewStatus | null;
 };
