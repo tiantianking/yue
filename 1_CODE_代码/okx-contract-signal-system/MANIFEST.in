@@ -8,9 +8,15 @@ recursive-include src *.py
 global-exclude .env .env.*
 global-exclude *.py[cod] *$py.class
 global-exclude *.sqlite *.sqlite3 *.db
+global-exclude *.sqlite-wal *.sqlite-shm *.sqlite-journal
+global-exclude *.sqlite3-wal *.sqlite3-shm *.sqlite3-journal
+global-exclude *.db-wal *.db-shm *.db-journal
 global-exclude build.log
+global-exclude *.log
+global-exclude okx_signal.lock
 prune .pytest_cache
 prune __pycache__
+prune logs
 prune output
 prune outputs
 include .env.example

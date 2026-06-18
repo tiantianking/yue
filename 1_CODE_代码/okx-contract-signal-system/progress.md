@@ -597,3 +597,14 @@
 ### Notes
 - Modified files include runtime entrypoints, signal service runtime helpers, data loader/gap handler, notification dispatcher/outbox tests, lifecycle tests, ML observation locks, risk model, version metadata, release docs, and this progress entry.
 - Rollback: revert only the v3.55 hunks in the listed source, test, version, and docs files, then remove this appended progress entry.
+
+## 2026-06-18 - Task: v3.56.7 duplicate v3.56.6 dashboard health audit closure
+### What was done
+- Independently verified the re-uploaded v3.56.6 ZIP/SHA pair and confirmed it differed from the previously accepted content tree.
+- Fixed offline/current stale-symbol evidence merging, invalid-age fail-closed behavior, fresh-authority scoping, and manifest blocking-reason semantics.
+- Split actual runtime push permission from Dashboard operational health so the UI cannot claim a backend notification block that Python does not enforce.
+- Replaced per-update full candle sorting with an ordered realtime fast path while preserving strict anomaly fallback and closed-bar precedence.
+- Preserved both v3.56.6 audit/observation documents and restored a complete deterministic distribution source list.
+- Bumped shared package and approved strategy version metadata to v3.56.7.
+### Scope
+- Dashboard health aggregation, realtime in-memory candle merge performance, release metadata, tests, and documentation. Strategy, scan decisions, runtime-cache storage boundaries, manifest semantic validation, lifecycle outbox, and notification delivery were not changed.

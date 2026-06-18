@@ -753,6 +753,43 @@ def test_realtime_store_overwrites_same_bar_without_dtype_error(tmp_path) -> Non
     assert frame.iloc[-1]["volume"] == 90035.49768
 
 
+def test_realtime_store_never_downgrades_closed_bar_to_open(tmp_path) -> None:
+    store = RealtimeDataStore(tmp_path, timeframe="15m")
+    inst_id = "BTC-USDT-SWAP"
+    store.append_candle(
+        inst_id,
+        {
+            "ts": "2026-06-15T18:00:00Z",
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.5,
+            "volume": 10.0,
+            "quote_volume": 1000.0,
+            "is_closed": True,
+        },
+    )
+
+    store.append_candle(
+        inst_id,
+        {
+            "ts": "2026-06-15T18:00:00Z",
+            "open": 100.0,
+            "high": 102.0,
+            "low": 98.0,
+            "close": 99.0,
+            "volume": 20.0,
+            "quote_volume": 2000.0,
+            "is_closed": False,
+        },
+    )
+
+    frame = store.load(inst_id)
+    assert len(frame) == 1
+    assert bool(frame.iloc[-1]["is_closed"])
+    assert frame.iloc[-1]["close"] == 100.5
+
+
 @pytest.mark.parametrize(
     "cached_frame",
     [

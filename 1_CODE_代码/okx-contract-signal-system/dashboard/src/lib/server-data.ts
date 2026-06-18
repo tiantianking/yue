@@ -16,8 +16,14 @@ import type {
   SymbolRow,
 } from "./types";
 import { dashboardExecTimeoutMs, historyScriptArgs, pythonPath } from "./runtime-paths";
-import { enrichLatestScan } from "./runtime-health";
-import { runtimeBlockingReasons, runtimePushAllowed } from "./runtime-quality";
+import { enrichLatestScan, isClosedBackfillFresh } from "./runtime-health";
+import {
+  resolveManifestReason,
+  runtimeBlockingReasons,
+  runtimeHealthBlockingReasons,
+  runtimeOperationalReady,
+  runtimePushAllowed,
+} from "./runtime-quality";
 import { dashboardStaleSymbols } from "./runtime-stale-symbols";
 import { buildSymbolRows } from "./symbol-rows";
 
@@ -187,26 +193,32 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
   const runtimeParams = asRecord(enrichedLatestScan?.selected_params) as StrategyParams;
   const runtimeOperational = enrichedLatestScan?.runtime_status === "online";
   const closedBackfillOperational = closedBackfill?.all_complete === true;
+  const closedBackfillFresh = isClosedBackfillFresh(closedBackfill);
+  const latestScanPushAllowed = enrichedLatestScan?.push_allowed === true;
+  const manifestReason = resolveManifestReason({
+    manifestStatusReason: runtimeManifestStatus.reason,
+    latestScanPresent: enrichedLatestScan !== null,
+    latestScanPushAllowed,
+  });
   const pushAllowed = runtimePushAllowed({
     runtimeOperational,
     runtimeReason: enrichedLatestScan?.runtime_reason,
     closedBackfillOperational,
-    latestScanPushAllowed: enrichedLatestScan?.push_allowed === true,
-    manifestReason: "",
+    latestScanPushAllowed,
+    manifestReason,
   });
-  const manifestReason =
-    typeof runtimeManifestStatus.reason === "string"
-      ? runtimeManifestStatus.reason
-      : pushAllowed
-        ? "approved_manifest_valid"
-        : enrichedLatestScan
-          ? "runtime_manifest_not_approved"
-          : "runtime_status_missing";
   const blockingReasons = runtimeBlockingReasons({
     runtimeOperational,
     runtimeReason: enrichedLatestScan?.runtime_reason,
     closedBackfillOperational,
-    latestScanPushAllowed: enrichedLatestScan?.push_allowed === true,
+    latestScanPushAllowed,
+    manifestReason,
+  });
+  const baseHealthBlockingReasons = runtimeHealthBlockingReasons({
+    runtimeOperational,
+    runtimeReason: enrichedLatestScan?.runtime_reason,
+    closedBackfillOperational,
+    latestScanPushAllowed,
     manifestReason,
   });
   const effectiveLatestSignal = enrichedLatestScan
@@ -219,7 +231,25 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
     legacyRows: backfill,
     actualBySymbol,
   });
-  const staleSymbols = dashboardStaleSymbols(symbolRows, quality, runtimeOperational, closedBackfill);
+  const staleSymbols = dashboardStaleSymbols(
+    symbolRows,
+    quality,
+    runtimeOperational,
+    closedBackfill,
+    closedBackfillFresh,
+  );
+  const healthBlockingReasons = [
+    ...baseHealthBlockingReasons,
+    ...(staleSymbols.length > 0 ? ["stale_symbols_detected"] : []),
+  ];
+  const operationalReady =
+    runtimeOperationalReady({
+      runtimeOperational,
+      runtimeReason: enrichedLatestScan?.runtime_reason,
+      closedBackfillOperational,
+      latestScanPushAllowed,
+      manifestReason,
+    }) && healthBlockingReasons.length === 0;
 
   return {
     generated_at: new Date().toISOString(),
@@ -241,8 +271,9 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
     ),
     symbols: symbolRows,
     quality: {
-      status: pushAllowed ? "runtime_approved" : "runtime_blocked",
+      status: operationalReady ? "runtime_healthy" : "runtime_degraded",
       push_allowed: pushAllowed,
+      operational_ready: operationalReady,
       manifest_reason: manifestReason,
       params_source:
         Object.keys(runtimeParams).length === 0
@@ -261,6 +292,7 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
           ...blockingReasons,
         ]),
       ],
+      health_blocking_reasons: [...new Set(healthBlockingReasons)],
       stale_symbols: staleSymbols,
     },
     train_summary: asRecord(quality.train_summary) as SummaryMetrics,

@@ -2,9 +2,11 @@
 .env.* export-ignore
 .env.example -export-ignore
 build.log export-ignore
+*.log export-ignore
 .pytest_cache/** export-ignore
 __pycache__/** export-ignore
 **/__pycache__/** export-ignore
+logs/** export-ignore
 output/** export-ignore
 outputs/** export-ignore
 *.pyc export-ignore
@@ -12,3 +14,13 @@ outputs/** export-ignore
 *.sqlite export-ignore
 *.sqlite3 export-ignore
 *.db export-ignore
+*.sqlite-wal export-ignore
+*.sqlite-shm export-ignore
+*.sqlite-journal export-ignore
+*.sqlite3-wal export-ignore
+*.sqlite3-shm export-ignore
+*.sqlite3-journal export-ignore
+*.db-wal export-ignore
+*.db-shm export-ignore
+*.db-journal export-ignore
+okx_signal.lock export-ignore

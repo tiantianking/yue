@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildSymbolRows } from "./symbol-rows.ts";
 import { enrichLatestScan, isClosedBackfillFresh } from "./runtime-health.ts";
-import { runtimeBlockingReasons, runtimePushAllowed } from "./runtime-quality.ts";
+import {
+  resolveManifestReason,
+  runtimeBlockingReasons,
+  runtimeHealthBlockingReasons,
+  runtimeOperationalReady,
+  runtimePushAllowed,
+} from "./runtime-quality.ts";
 import { dashboardStaleSymbols } from "./runtime-stale-symbols.ts";
 
 test("closed runtime backfill is authoritative over stale history summaries", () => {
@@ -166,6 +172,7 @@ test("fresh closed backfill rows override stale row age in dashboard stale symbo
           },
         ],
       },
+      true,
     ),
     [],
   );
@@ -194,15 +201,105 @@ test("failed closed backfill rows are stale even when runtime is online", () => 
   );
 });
 
-test("closed backfill must be complete before dashboard can approve runtime push", () => {
+test("closed backfill health does not falsify the actual runtime push permission", () => {
+  const inputs = {
+    runtimeOperational: true,
+    closedBackfillOperational: false,
+    latestScanPushAllowed: true,
+    manifestReason: "approved_manifest_valid",
+  };
+  assert.equal(runtimePushAllowed(inputs), true);
+  assert.equal(runtimeOperationalReady(inputs), false);
+  assert.deepEqual(runtimeBlockingReasons(inputs), []);
+  assert.deepEqual(runtimeHealthBlockingReasons(inputs), ["closed_backfill_incomplete"]);
+});
+
+test("offline runtime combines startup diagnostics with current failures", () => {
+  assert.deepEqual(
+    dashboardStaleSymbols(
+      [
+        {
+          inst_id: "ETH-USDT-SWAP",
+          status: "failed",
+          error: "internal_gap",
+          age_minutes: 2,
+        },
+      ],
+      { stale_symbols: ["BTC-USDT-SWAP"] },
+      false,
+    ),
+    ["BTC-USDT-SWAP", "ETH-USDT-SWAP"],
+  );
+});
+
+test("online passed symbol without a valid timestamp remains stale without fresh authority", () => {
+  assert.deepEqual(
+    dashboardStaleSymbols(
+      [{ inst_id: "BTC-USDT-SWAP", status: "passed", age_minutes: null }],
+      {},
+      true,
+    ),
+    ["BTC-USDT-SWAP"],
+  );
+});
+
+test("stale closed backfill cannot override stale runtime symbol age", () => {
+  assert.deepEqual(
+    dashboardStaleSymbols(
+      [{ inst_id: "BTC-USDT-SWAP", status: "passed", age_minutes: 180 }],
+      {},
+      true,
+      {
+        all_complete: true,
+        symbols: [
+          {
+            inst_id: "BTC-USDT-SWAP",
+            status: "passed",
+            missing_closed_bars: 0,
+            data_complete: true,
+          },
+        ],
+      },
+      false,
+    ),
+    ["BTC-USDT-SWAP"],
+  );
+});
+
+test("fresh authoritative backfill does not hide configured symbols missing from it", () => {
+  assert.deepEqual(
+    dashboardStaleSymbols(
+      [
+        { inst_id: "BTC-USDT-SWAP", status: "passed", age_minutes: 180 },
+        { inst_id: "ETH-USDT-SWAP", status: "unknown", age_minutes: null },
+      ],
+      {},
+      true,
+      {
+        all_complete: true,
+        symbols: [
+          {
+            inst_id: "BTC-USDT-SWAP",
+            status: "passed",
+            missing_closed_bars: 0,
+            data_complete: true,
+          },
+        ],
+      },
+      true,
+    ),
+    ["ETH-USDT-SWAP"],
+  );
+});
+
+test("manifest reason resolution does not turn approval into a blocking reason", () => {
   assert.equal(
-    runtimePushAllowed({
-      runtimeOperational: true,
-      closedBackfillOperational: false,
+    resolveManifestReason({
+      manifestStatusReason: undefined,
+      latestScanPresent: true,
       latestScanPushAllowed: true,
-      manifestReason: "approved_manifest_valid",
     }),
-    false,
+    "approved_manifest_valid",
   );
   assert.deepEqual(
     runtimeBlockingReasons({
@@ -211,17 +308,18 @@ test("closed backfill must be complete before dashboard can approve runtime push
       latestScanPushAllowed: true,
       manifestReason: "approved_manifest_valid",
     }),
-    ["closed_backfill_incomplete", "approved_manifest_valid"],
+    [],
   );
 });
 
-test("offline runtime keeps startup stale symbol diagnostics", () => {
+test("inconsistent denied push cannot report an approved manifest as the blocker", () => {
   assert.deepEqual(
-    dashboardStaleSymbols(
-      [],
-      { stale_symbols: ["BTC-USDT-SWAP", "ETH-USDT-SWAP"] },
-      false,
-    ),
-    ["BTC-USDT-SWAP", "ETH-USDT-SWAP"],
+    runtimeBlockingReasons({
+      runtimeOperational: true,
+      closedBackfillOperational: true,
+      latestScanPushAllowed: false,
+      manifestReason: "approved_manifest_valid",
+    }),
+    ["runtime_manifest_not_approved"],
   );
 });

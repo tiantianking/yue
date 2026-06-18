@@ -145,6 +145,45 @@ def _dedupe_candles_prefer_closed(frame: pd.DataFrame) -> pd.DataFrame:
     return df.drop_duplicates(subset=["ts"], keep="last").sort_values("ts").reset_index(drop=True)
 
 
+def _closed_flag(value: Any) -> bool:
+    return str(value).strip().lower() in {"true", "1", "yes"}
+
+
+def _merge_live_candle(existing: pd.DataFrame, new_row: pd.DataFrame) -> pd.DataFrame:
+    """Fast-path the ordered realtime cases and keep the strict fallback for anomalies."""
+    if existing.empty or existing.isna().all(axis=None):
+        return _concat_live_row(existing, new_row)
+    if "ts" not in existing.columns or "ts" not in new_row.columns:
+        return _dedupe_candles_prefer_closed(_concat_live_row(existing, new_row))
+
+    existing_ts = pd.to_datetime(existing["ts"], utc=True, errors="coerce")
+    new_ts = pd.to_datetime(new_row["ts"].iloc[0], utc=True, errors="coerce")
+    if (
+        pd.isna(new_ts)
+        or existing_ts.isna().any()
+        or not existing_ts.is_monotonic_increasing
+        or existing_ts.duplicated().any()
+    ):
+        return _dedupe_candles_prefer_closed(_concat_live_row(existing, new_row))
+
+    last_ts = existing_ts.iloc[-1]
+    if new_ts > last_ts:
+        columns = list(dict.fromkeys([*existing.columns, *new_row.columns]))
+        return pd.concat(
+            [existing.reindex(columns=columns), new_row.reindex(columns=columns)],
+            ignore_index=True,
+        )
+
+    if new_ts == last_ts:
+        existing_closed = _closed_flag(existing.iloc[-1].get("is_closed", True))
+        new_closed = _closed_flag(new_row.iloc[0].get("is_closed", False))
+        if existing_closed and not new_closed:
+            return existing
+        return _concat_live_row(existing.iloc[:-1], new_row)
+
+    return _dedupe_candles_prefer_closed(_concat_live_row(existing, new_row))
+
+
 def _json_default(value: Any) -> Any:
     if isinstance(value, (datetime, pd.Timestamp)):
         return value.isoformat()
@@ -332,8 +371,7 @@ class RealtimeDataStore:
 
         # Merge then de-duplicate instead of assigning by row; old parquet
         # columns may have stricter dtypes than live float payloads.
-        df = _concat_live_row(df, new_row)
-        df = _dedupe_candles_prefer_closed(df)
+        df = _merge_live_candle(df, new_row)
 
         # 保持足够的预热K线在内存
         if len(df) > self.max_cache_bars:

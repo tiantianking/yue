@@ -61,10 +61,12 @@ const emptyData: DashboardPayload = {
   quality: {
     status: "loading",
     push_allowed: false,
+    operational_ready: false,
     manifest_reason: "runtime_status_missing",
     params_source: "none",
     reasons: [],
     push_blocking_reasons: [],
+    health_blocking_reasons: [],
     stale_symbols: [],
   },
   train_summary: {},
@@ -113,7 +115,7 @@ function MetricGrid({ data }: { data: DashboardPayload }) {
   const valid = data.valid_summary;
   const train = data.train_summary;
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
       <MetricTile
         label="验证盈亏比"
         value={numberText(valid.payoff_ratio, 2)}
@@ -142,6 +144,12 @@ function MetricGrid({ data }: { data: DashboardPayload }) {
         value={data.quality.push_allowed ? "允许" : "拦截"}
         hint={data.quality.manifest_reason}
         tone={data.quality.push_allowed ? "green" : "red"}
+      />
+      <MetricTile
+        label="运行健康"
+        value={data.quality.operational_ready ? "就绪" : "降级"}
+        hint={data.quality.health_blocking_reasons.join(", ") || "runtime_health_ready"}
+        tone={data.quality.operational_ready ? "green" : "amber"}
       />
     </div>
   );
@@ -349,6 +357,7 @@ function RuntimePanel({ data }: { data: DashboardPayload }) {
 function QualityPanel({ data }: { data: DashboardPayload }) {
   const stress = data.stress_checks;
   const blockingCount = data.quality.push_blocking_reasons.length;
+  const healthBlockingCount = data.quality.health_blocking_reasons.length;
   const staleCount = data.quality.stale_symbols.length;
   return (
     <div className="rounded-lg border border-[#9be7e3] bg-white/90 p-4 shadow-sm">
@@ -370,8 +379,12 @@ function QualityPanel({ data }: { data: DashboardPayload }) {
           <span className="font-mono font-bold">{numberText(Number(stress.target_reward_to_risk), 1)}R</span>
         </div>
         <div className="flex items-center justify-between gap-3">
-          <span className="text-zinc-500">阻断原因</span>
+          <span className="text-zinc-500">推送阻断</span>
           <span className="font-mono font-bold">{integerText(blockingCount)}</span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-zinc-500">健康告警</span>
+          <span className="font-mono font-bold">{integerText(healthBlockingCount)}</span>
         </div>
         <div className="flex items-center justify-between gap-3">
           <span className="text-zinc-500">过期币种</span>
@@ -620,6 +633,9 @@ export function Dashboard() {
               </Badge>
               <Badge tone={data.runtime_mode === "formal_push" ? "green" : "amber"}>
                 {data.runtime_mode === "formal_push" ? "正式推送模式" : "研究观察模式"}
+              </Badge>
+              <Badge tone={data.quality.operational_ready ? "green" : "amber"}>
+                {data.quality.operational_ready ? "Health Ready" : "Health Degraded"}
               </Badge>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-3 text-sm font-semibold text-zinc-600">

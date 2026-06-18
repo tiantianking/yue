@@ -10,7 +10,7 @@ from zipfile import ZipFile
 import okx_signal_system
 import pytest
 import scripts.build_release_zip as release_zip_builder
-from scripts.build_release_zip import build_release_zip
+from scripts.build_release_zip import build_release_zip, write_sha256_file
 from okx_signal_system.config import load_config
 
 
@@ -21,6 +21,11 @@ RELEASE_TEXT_FILES = [
     "docs/RUNTIME_VERIFICATION.md",
     "docs/SYSTEM_ARCHITECTURE.md",
     "docs/V3.56.6_RUNTIME_OBSERVATION_CN.md",
+    "docs/V3.56.6_STALE_SYMBOL_AUDIT_CN.md",
+    "docs/V3.56.7_DASHBOARD_HEALTH_GUARD_CN.md",
+    "docs/V3.56.7_FULL_SOURCE_PACKAGE_OPERATIONS_CN.md",
+    "docs/V3.56.7_SOURCE_PACKAGE_SAFETY_AUDIT_CN.md",
+    "docs/V3.56.7_UPDATE_PACKAGE_README_CN.md",
     "src/okx_signal_system/reporting/report_builder.py",
     "src/okx_signal_system/signal_service/app.py",
     "src/okx_signal_system/notify/feishu.py",
@@ -35,6 +40,9 @@ RELEASE_ARTIFACT_EXCLUDES = [
     ".env",
     ".env.*",
     "build.log",
+    "*.log",
+    "logs/",
+    "okx_signal.lock",
     ".pytest_cache/",
     "__pycache__/",
     "*.py[cod]",
@@ -43,6 +51,15 @@ RELEASE_ARTIFACT_EXCLUDES = [
     "*.sqlite",
     "*.sqlite3",
     "*.db",
+    "*.sqlite-wal",
+    "*.sqlite-shm",
+    "*.sqlite-journal",
+    "*.sqlite3-wal",
+    "*.sqlite3-shm",
+    "*.sqlite3-journal",
+    "*.db-wal",
+    "*.db-shm",
+    "*.db-journal",
 ]
 
 
@@ -80,7 +97,7 @@ def test_release_version_sources_stay_consistent() -> None:
     gui_text = _read("gui.py")
     start_text = _read("start.bat")
 
-    assert package_version == "3.56.6"
+    assert package_version == "3.56.7"
     assert pyproject["project"]["version"] == package_version
     assert APPROVED_STRATEGY_VERSION == package_version
     assert f"Version: {package_version}" in pkg_info
@@ -125,6 +142,37 @@ def test_research_package_is_in_distribution_sources() -> None:
         "src/okx_signal_system/research/promote.py",
     ]:
         assert path in sources
+
+
+def test_distribution_sources_cover_all_python_modules_and_release_docs() -> None:
+    sources = {
+        line.strip()
+        for line in _read("src/okx_contract_signal_system.egg-info/SOURCES.txt").splitlines()
+        if line.strip()
+    }
+    expected = {
+        path.relative_to(ROOT).as_posix()
+        for base in [ROOT / "src" / "okx_signal_system", ROOT / "tests"]
+        for path in base.rglob("*.py")
+    }
+    expected.update(path.relative_to(ROOT).as_posix() for path in (ROOT / "docs").glob("*.md"))
+
+    assert expected - sources == set()
+
+
+def test_release_file_manifest_is_present_and_self_including() -> None:
+    manifest_path = ROOT / "RELEASE_FILES.txt"
+    lines = [
+        line.strip()
+        for line in manifest_path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+    assert "RELEASE_FILES.txt" in lines
+    assert "scripts/build_release_zip.py" in lines
+    assert "docs/V3.56.7_SOURCE_PACKAGE_SAFETY_AUDIT_CN.md" in lines
+    assert len(lines) == len(set(lines))
+    assert all("\\" not in line and not line.startswith("/") and ".." not in Path(line).parts for line in lines)
 
 
 def test_dashboard_uses_validated_runtime_snapshot_and_never_legacy_param_overrides() -> None:
@@ -197,9 +245,19 @@ def test_gitignore_blocks_real_env_but_keeps_example() -> None:
 def test_source_distribution_manifest_excludes_runtime_artifacts() -> None:
     manifest = "\n".join(_manifest_lines())
 
-    for pattern in [".env .env.*", "*.py[cod]", "*.sqlite *.sqlite3 *.db", "build.log"]:
+    for pattern in [
+        ".env .env.*",
+        "*.py[cod]",
+        "*.sqlite *.sqlite3 *.db",
+        "*.sqlite-wal *.sqlite-shm *.sqlite-journal",
+        "*.sqlite3-wal *.sqlite3-shm *.sqlite3-journal",
+        "*.db-wal *.db-shm *.db-journal",
+        "build.log",
+        "*.log",
+        "okx_signal.lock",
+    ]:
         assert pattern in manifest
-    for directory in [".pytest_cache", "__pycache__", "output", "outputs"]:
+    for directory in [".pytest_cache", "__pycache__", "logs", "output", "outputs"]:
         assert f"prune {directory}" in manifest
 
 
@@ -214,6 +272,7 @@ def test_source_archive_export_ignores_runtime_artifacts() -> None:
         ".pytest_cache/** export-ignore",
         "__pycache__/** export-ignore",
         "**/__pycache__/** export-ignore",
+        "logs/** export-ignore",
         "output/** export-ignore",
         "outputs/** export-ignore",
         "*.pyc export-ignore",
@@ -221,6 +280,16 @@ def test_source_archive_export_ignores_runtime_artifacts() -> None:
         "*.sqlite export-ignore",
         "*.sqlite3 export-ignore",
         "*.db export-ignore",
+        "*.sqlite-wal export-ignore",
+        "*.sqlite-shm export-ignore",
+        "*.sqlite-journal export-ignore",
+        "*.sqlite3-wal export-ignore",
+        "*.sqlite3-shm export-ignore",
+        "*.sqlite3-journal export-ignore",
+        "*.db-wal export-ignore",
+        "*.db-shm export-ignore",
+        "*.db-journal export-ignore",
+        "okx_signal.lock export-ignore",
     ]:
         assert pattern in lines
 
@@ -241,6 +310,49 @@ def test_release_zip_entries_use_posix_paths(tmp_path: Path) -> None:
     assert any("/" in name for name in names)
 
 
+def test_release_zip_sha256_sidecar_uses_release_naming(tmp_path: Path) -> None:
+    output_zip = tmp_path / "release.zip"
+    output_zip.write_bytes(b"release")
+
+    sha256_file = write_sha256_file(output_zip)
+
+    assert sha256_file == tmp_path / "release.sha256"
+    assert sha256_file.read_text(encoding="ascii").endswith("  release.zip\n")
+
+
+def test_release_zip_sha256_sidecar_creates_parent_directory(tmp_path: Path) -> None:
+    output_zip = tmp_path / "release.zip"
+    output_zip.write_bytes(b"release")
+    sha256_file = tmp_path / "checksums" / "release.sha256"
+
+    written = write_sha256_file(output_zip, sha256_file)
+
+    assert written == sha256_file
+    assert sha256_file.read_text(encoding="ascii").endswith("  release.zip\n")
+
+
+def test_release_zip_excludes_untracked_files_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    tracked = tmp_path / "src" / "app.py"
+    tracked.parent.mkdir(parents=True)
+    tracked.write_text("print('safe')", encoding="utf-8")
+    secret = tmp_path / "credentials.txt"
+    secret.write_text("TOP-SECRET-TOKEN=abc123", encoding="utf-8")
+    output_zip = tmp_path / "release.zip"
+
+    def fake_run(*args, **kwargs):
+        return SimpleNamespace(stdout=b"src/app.py\0")
+
+    monkeypatch.setattr(release_zip_builder.subprocess, "run", fake_run)
+
+    build_release_zip(tmp_path, output_zip)
+
+    with ZipFile(output_zip) as archive:
+        names = archive.namelist()
+
+    assert names == ["src/app.py"]
+    assert "credentials.txt" not in names
+
+
 def test_release_zip_denylist_filters_explicit_paths(tmp_path: Path) -> None:
     safe_file = tmp_path / "src" / "safe.py"
     env_file = tmp_path / ".env"
@@ -249,11 +361,14 @@ def test_release_zip_denylist_filters_explicit_paths(tmp_path: Path) -> None:
     next_file = tmp_path / "dashboard" / ".next" / "server" / "page.js"
     tsbuild_file = tmp_path / "dashboard" / "tsconfig.tsbuildinfo"
     next_env_file = tmp_path / "dashboard" / "next-env.d.ts"
+    log_file = tmp_path / "logs" / "runtime.log"
+    lock_file = tmp_path / "okx_signal.lock"
     safe_file.parent.mkdir(parents=True)
     safe_file.write_text("print('safe')", encoding="utf-8")
     env_file.write_text("FEISHU_WEBHOOK_URL=secret", encoding="utf-8")
     db_file.write_text("sqlite", encoding="utf-8")
-    for generated in [node_file, next_file, tsbuild_file, next_env_file]:
+    lock_file.write_text("locked", encoding="utf-8")
+    for generated in [node_file, next_file, tsbuild_file, next_env_file, log_file]:
         generated.parent.mkdir(parents=True, exist_ok=True)
         generated.write_text("generated", encoding="utf-8")
     output_zip = tmp_path / "release.zip"
@@ -269,6 +384,8 @@ def test_release_zip_denylist_filters_explicit_paths(tmp_path: Path) -> None:
             next_file.relative_to(tmp_path),
             tsbuild_file.relative_to(tmp_path),
             next_env_file.relative_to(tmp_path),
+            log_file.relative_to(tmp_path),
+            lock_file.relative_to(tmp_path),
         ],
     )
 
@@ -289,6 +406,8 @@ def test_release_zip_denylist_filters_git_tracked_sensitive_paths(tmp_path: Path
         "outputs/report.csv",
         "__pycache__/module.pyc",
         "build.log",
+        "logs/runtime.log",
+        "okx_signal.lock",
         "dashboard/node_modules/pkg/index.js",
         "dashboard/.next/server/page.js",
         "dashboard/tsconfig.tsbuildinfo",
@@ -314,29 +433,16 @@ def test_release_zip_denylist_filters_git_tracked_sensitive_paths(tmp_path: Path
     assert names == [".env.example", "src/safe.py"]
 
 
-def test_release_zip_denylist_filters_non_git_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    paths = [
-        "src/safe.py",
-        ".env",
-        ".env.secret",
-        ".env.example",
-        "outputs/output/report.csv",
-        "output/report.csv",
-        "cache/state.json",
-        "123codexnpm-cache/package.tgz",
-        "__pycache__/module.pyc",
-        "runtime.sqlite3-wal",
-        "runtime.db",
-        "build.log",
-        "dashboard/node_modules/pkg/index.js",
-        "dashboard/.next/server/page.js",
-        "dashboard/tsconfig.tsbuildinfo",
-        "dashboard/next-env.d.ts",
-    ]
-    for path in paths:
-        target = tmp_path / path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(path, encoding="utf-8")
+def test_release_zip_non_git_fallback_uses_explicit_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    safe_file = tmp_path / "src" / "safe.py"
+    safe_file.parent.mkdir(parents=True)
+    safe_file.write_text("print('safe')", encoding="utf-8")
+    secret = tmp_path / "credentials.txt"
+    secret.write_text("TOP-SECRET-TOKEN=abc123", encoding="utf-8")
+    manifest = tmp_path / "RELEASE_FILES.txt"
+    manifest.write_text("RELEASE_FILES.txt\nsrc/safe.py\n", encoding="utf-8")
 
     def fake_run(*args, **kwargs):
         raise subprocess.CalledProcessError(1, args[0])
@@ -349,7 +455,22 @@ def test_release_zip_denylist_filters_non_git_fallback(tmp_path: Path, monkeypat
     with ZipFile(output_zip) as archive:
         names = archive.namelist()
 
-    assert names == [".env.example", "src/safe.py"]
+    assert names == ["RELEASE_FILES.txt", "src/safe.py"]
+    assert "credentials.txt" not in names
+
+
+def test_release_zip_non_git_fallback_refuses_missing_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "credentials.txt").write_text("TOP-SECRET-TOKEN=abc123", encoding="utf-8")
+
+    def fake_run(*args, **kwargs):
+        raise subprocess.CalledProcessError(1, args[0])
+
+    monkeypatch.setattr(release_zip_builder.subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="release manifest missing"):
+        build_release_zip(tmp_path, tmp_path / "release.zip")
 
 
 def test_release_docs_do_not_advertise_live_order_defaults() -> None:

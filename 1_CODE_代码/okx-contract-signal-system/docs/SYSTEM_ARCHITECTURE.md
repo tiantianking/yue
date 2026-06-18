@@ -470,3 +470,14 @@ src/okx_signal_system/
 - A fresh, complete closed backfill no longer produces stale-symbol warnings just because the latest closed bar is quiet between exchange candle events.
 - Dashboard runtime approval now also requires the 15m closed backfill to be complete; incomplete or missing closed-backfill status adds `closed_backfill_incomplete` to `push_blocking_reasons`.
 - Package metadata and visible launcher displays are synchronized to `3.56.6`; launchers continue deriving their visible `v3.56.6` label from the shared package version source.
+
+## v3.56.7 Dashboard health-guard closure
+
+- A fresh, complete closed-backfill is authoritative only for symbols explicitly present in that status file; missing configured symbols still use current runtime evidence.
+- Stale or absent closed-backfill status cannot suppress invalid timestamps, old rows, current runtime failures, or startup diagnostics. Offline/stale/error mode unions all available diagnostics instead of trusting an empty legacy list.
+- Dashboard blocking reasons represent failed conditions only. `approved_manifest_valid` is never emitted as a blocker, and inconsistent denied-push snapshots normalize to `runtime_manifest_not_approved`.
+- Actual push permission and runtime health are separate: `quality.push_allowed`/`runtime_mode` mirror the Python approved-manifest permission, while `operational_ready` and `health_blocking_reasons` expose closed-backfill and stale-symbol health without pretending to enforce notification delivery.
+- Strategy, signal generation, approved-manifest validation, lifecycle outbox, and notification delivery remain unchanged.
+- Realtime candle merging uses an ordered fast path for append/same-bar replacement while retaining the strict sort/deduplicate fallback for anomalous input; closed bars cannot be downgraded by later open updates.
+- Package metadata and visible launcher displays are synchronized to `3.56.7`.
+

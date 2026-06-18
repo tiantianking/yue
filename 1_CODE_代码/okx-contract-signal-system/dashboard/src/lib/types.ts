@@ -224,10 +224,12 @@ export type DashboardPayload = {
   quality: {
     status: string;
     push_allowed: boolean;
+    operational_ready: boolean;
     manifest_reason: string;
     params_source: string;
     reasons: string[];
     push_blocking_reasons: string[];
+    health_blocking_reasons: string[];
     stale_symbols: string[];
   };
   train_summary: SummaryMetrics;
