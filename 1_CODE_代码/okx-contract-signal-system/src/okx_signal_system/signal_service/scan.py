@@ -21,7 +21,13 @@ from okx_signal_system.signal_quality.observation import (
 )
 from okx_signal_system.signal_quality.quality_shadow import QualityModelShadowScorer
 from okx_signal_system.signal_quality.selector import TieredSelection
-from okx_signal_system.signal_quality.selector import assign_tiers
+from okx_signal_system.signal_quality.selector import (
+    DEFAULT_MAX_A_PER_CORRELATION_GROUP,
+    DEFAULT_MAX_A_PER_CYCLE,
+    DEFAULT_MIN_A_QUALITY_SCORE,
+    DEFAULT_MIN_B_QUALITY_SCORE,
+    assign_tiers,
+)
 from okx_signal_system.signal_service.runtime import is_latest_bar_fresh
 from okx_signal_system.signal_runtime import DEFAULT_MAX_SIGNAL_LAG_MINUTES, signal_is_stale
 from okx_signal_system.strategy.ensemble import ensemble_vote
@@ -102,6 +108,10 @@ class SignalScanContext:
     send_health_report: bool = False
     shadow_score_min_closed: int = 6
     correlation_min_samples: int = DEFAULT_MIN_CORRELATION_SAMPLES
+    max_a_per_cycle: int = DEFAULT_MAX_A_PER_CYCLE
+    max_a_per_correlation_group: int = DEFAULT_MAX_A_PER_CORRELATION_GROUP
+    min_a_quality_score: float = DEFAULT_MIN_A_QUALITY_SCORE
+    min_b_quality_score: float = DEFAULT_MIN_B_QUALITY_SCORE
 
 
 @dataclass(frozen=True)
@@ -376,7 +386,10 @@ class SignalScanService:
         selection = assign_tiers(
             ready_candidates,
             observation_candidates=observation_candidates,
-            max_tier_a=2,
+            max_a_per_cycle=context.max_a_per_cycle,
+            max_a_per_correlation_group=context.max_a_per_correlation_group,
+            min_a_quality_score=context.min_a_quality_score,
+            min_b_quality_score=context.min_b_quality_score,
             price_history=candidate_history,
             min_correlation_samples=context.correlation_min_samples,
         )

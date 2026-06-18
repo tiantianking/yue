@@ -49,6 +49,12 @@ strategy:
   atr_window: 14
   min_vote_approval_rate: 0.40
 
+signal_policy:
+  max_a_per_cycle: 4
+  max_a_per_correlation_group: 1
+  min_a_quality_score: 80
+  min_b_quality_score: 68
+
 learning:
   live_param_updates_enabled: false
   daily_review_enabled: true

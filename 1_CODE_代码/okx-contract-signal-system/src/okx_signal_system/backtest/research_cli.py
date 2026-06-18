@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 
 from okx_signal_system.backtest.research import run_dataset_research_artifacts, write_research_artifacts
 from okx_signal_system.config import project_paths
+from okx_signal_system.research.approved_strategy_manifest import research_run_dir
 from okx_signal_system.strategy.trend_breakout import StrategyParams
 
 
@@ -30,7 +32,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--blind-release-token", default=None)
     parser.add_argument("--blind-release-token-sha256", default=None)
     parser.add_argument("--blind-registry-path", default=None)
-    parser.add_argument("--research-version", default="v3.55-strict")
+    parser.add_argument("--research-version", default="v3.56-strict")
+    parser.add_argument("--run-id", default=None, help="research run directory name under outputs/research_runs")
     return parser
 
 
@@ -59,7 +62,12 @@ def main() -> None:
         research_version=args.research_version,
         research_mode=research_mode,
     )
-    write_research_artifacts(artifacts, project_paths().output_dir)
+    run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    paths = write_research_artifacts(artifacts, research_run_dir(project_paths().output_dir, run_id))
+    candidate_path = paths.get("candidate_params")
+    if candidate_path is not None:
+        print(f"research candidate written: {candidate_path}")
+        print(f"promote with: python -m okx_signal_system.research.promote --run-id {run_id}")
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ from okx_signal_system.paths import find_lightweight_history
 from okx_signal_system.risk.model import Ledger, RiskConfig
 from okx_signal_system.signal_service import SignalScanContext, SignalScanService
 from okx_signal_system.signal_service.regime import AdaptiveParamsManager
-from okx_signal_system.signal_service.runtime import load_selected_strategy_params
+from okx_signal_system.signal_service.runtime import load_selected_strategy_params_status
 from okx_signal_system.strategy.trend_breakout import StrategyParams
 from okx_signal_system.timeframe import timeframe_spec
 
@@ -32,7 +32,8 @@ def latest_signal_payload(
 ) -> dict:
     signal_timeframe = timeframe_spec(signal_timeframe).key
     trend_timeframe = timeframe_spec(trend_timeframe).key
-    params = params or load_selected_strategy_params()
+    manifest_status = load_selected_strategy_params_status()
+    params = params or manifest_status.params
 
     async def candle_loader(_inst_id: str, limit: int):
         data = load_symbol_file(find_lightweight_history(dataset) / symbol_file)
@@ -49,7 +50,7 @@ def latest_signal_payload(
         strategy_params=params,
         risk_config=load_runtime_config().risk_config(),
         ledger=Ledger(inst_id, init_capital=10000, equity=10000),
-        quality_gate_allows_push=True,
+        quality_gate_allows_push=bool(manifest_status.ok),
         min_vote_approval_rate=0.4,
         mode="signal_only",
         min_history_bars=50,
@@ -67,6 +68,8 @@ def latest_signal_payload(
             "dataset": dataset,
             "signal_timeframe": signal_timeframe,
             "trend_timeframe": trend_timeframe,
+            "quality_gate_allows_push": bool(manifest_status.ok),
+            "manifest_status": manifest_status.as_dict(),
             "selected_params": {
                 "fast_ema": params.fast_ema,
                 "slow_ema": params.slow_ema,

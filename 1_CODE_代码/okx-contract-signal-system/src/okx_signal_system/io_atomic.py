@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time
@@ -52,3 +53,23 @@ def write_parquet_atomic(frame: pd.DataFrame, path: Path, *, attempts: int = 8) 
         except FileNotFoundError:
             pass
         raise
+
+
+def write_text_atomic(text: str, path: Path, *, attempts: int = 8, encoding: str = "utf-8") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(
+        f"{path.stem}.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex}.tmp{path.suffix}"
+    )
+    try:
+        tmp_path.write_text(text, encoding=encoding)
+        replace_with_retry(tmp_path, path, attempts=attempts)
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def write_json_atomic(payload: object, path: Path, *, attempts: int = 8, encoding: str = "utf-8") -> None:
+    write_text_atomic(json.dumps(payload, ensure_ascii=False, indent=2, default=str), path, attempts=attempts, encoding=encoding)

@@ -1,6 +1,7 @@
 import pytest
 import pandas as pd
 import hashlib
+import json
 
 from tests._integration import require_lightweight_history
 from okx_signal_system.backtest import research as research_module
@@ -25,6 +26,14 @@ from okx_signal_system.backtest.research import (
 )
 from okx_signal_system.data.loader import SymbolData
 from okx_signal_system.data.loader import load_symbol_file
+from okx_signal_system.research.approved_strategy_manifest import (
+    CandidatePromotionError,
+    build_approved_manifest,
+    candidate_params_path,
+    promote_candidate_manifest,
+    research_run_dir,
+    write_approved_manifest_atomic,
+)
 from okx_signal_system.risk.costs import CostConfig
 from okx_signal_system.strategy.trend_breakout import StrategyParams
 
@@ -775,6 +784,188 @@ def test_research_cli_smoke_is_explicit_non_formal(monkeypatch) -> None:
     assert captured["research_mode"] == "NON_FORMAL_SMOKE"
     assert captured["max_symbols"] == 3
     assert len(captured["params_grid"]) == 3
+
+
+def _strict_candidate_payload(
+    params: StrategyParams,
+    *,
+    generated_at: str = "2026-01-01T00:00:00+00:00",
+    research_mode: str = "FORMAL",
+    promotion_eligible: bool = True,
+) -> dict:
+    candidate_params = {
+        "fast_ema": params.fast_ema,
+        "slow_ema": params.slow_ema,
+        "breakout_window": params.breakout_window,
+        "atr_stop_mult": params.atr_stop_mult,
+        "take_profit_mult": params.take_profit_mult,
+        "max_hold_bars": params.max_hold_bars,
+        "atr_window": params.atr_window,
+    }
+    return {
+        "artifact_type": "strict_research_candidate",
+        "generated_at": generated_at,
+        "dataset": "unit",
+        "signal_timeframe": "15m",
+        "trend_timeframe": "1h",
+        "research_version": "unit",
+        "research_mode": research_mode,
+        "promotion_eligible": promotion_eligible,
+        "candidate_params": candidate_params,
+        "candidate_params_sha256": hashlib.sha256(
+            json.dumps(candidate_params, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+        "artifact_hashes": {},
+        "research_metadata": {},
+    }
+
+
+def _write_strict_candidate(output_dir, run_id: str, payload: dict):
+    path = candidate_params_path(output_dir, run_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def test_failed_research_candidate_cannot_modify_runtime_manifest(tmp_path) -> None:
+    approved = build_approved_manifest(
+        _strict_candidate_payload(StrategyParams(fast_ema=10), generated_at="2026-01-02T00:00:00+00:00"),
+        approved_at="2026-01-02T01:00:00+00:00",
+    )
+    manifest_path = tmp_path / "runtime" / "approved_strategy_manifest.json"
+    write_approved_manifest_atomic(approved, manifest_path)
+    before = json.loads(manifest_path.read_text(encoding="utf-8"))
+    run_id = "research-failed"
+    _write_strict_candidate(
+        tmp_path,
+        run_id,
+        _strict_candidate_payload(
+            StrategyParams(fast_ema=20),
+            generated_at="2026-01-04T00:00:00+00:00",
+            promotion_eligible=False,
+        ),
+    )
+
+    with pytest.raises(CandidatePromotionError, match="PROMOTION_NOT_ELIGIBLE"):
+        promote_candidate_manifest(output_dir=tmp_path, run_id=run_id)
+
+    after = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert after == before
+
+
+def test_non_formal_smoke_candidate_cannot_promote(tmp_path) -> None:
+    candidate_path = _write_strict_candidate(
+        tmp_path,
+        "research-smoke",
+        _strict_candidate_payload(
+            StrategyParams(fast_ema=20),
+            research_mode="NON_FORMAL_SMOKE",
+            promotion_eligible=True,
+        ),
+    )
+
+    with pytest.raises(CandidatePromotionError, match="CANDIDATE_NOT_FORMAL_RESEARCH"):
+        promote_candidate_manifest(output_dir=tmp_path, candidate_path=candidate_path)
+
+    assert not (tmp_path / "runtime" / "approved_strategy_manifest.json").exists()
+
+
+def test_promote_candidate_requires_run_id_or_explicit_candidate_path(tmp_path) -> None:
+    with pytest.raises(CandidatePromotionError, match="RUN_ID_REQUIRED"):
+        promote_candidate_manifest(output_dir=tmp_path)
+
+
+def test_candidate_param_hash_mismatch_cannot_promote(tmp_path) -> None:
+    run_id = "research-tampered"
+    payload = _strict_candidate_payload(StrategyParams(fast_ema=20))
+    payload["candidate_params"]["fast_ema"] = 21
+    _write_strict_candidate(tmp_path, run_id, payload)
+
+    with pytest.raises(CandidatePromotionError, match="CANDIDATE_PARAM_HASH_MISMATCH"):
+        promote_candidate_manifest(output_dir=tmp_path, run_id=run_id)
+
+    assert not (tmp_path / "runtime" / "approved_strategy_manifest.json").exists()
+
+
+def test_stale_candidate_cannot_overwrite_newer_approved_manifest(tmp_path) -> None:
+    manifest_path = tmp_path / "runtime" / "approved_strategy_manifest.json"
+    approved = build_approved_manifest(
+        _strict_candidate_payload(StrategyParams(fast_ema=30), generated_at="2026-01-03T00:00:00+00:00"),
+        approved_at="2026-01-03T01:00:00+00:00",
+    )
+    write_approved_manifest_atomic(approved, manifest_path)
+    run_id = "research-stale"
+    _write_strict_candidate(
+        tmp_path,
+        run_id,
+        _strict_candidate_payload(StrategyParams(fast_ema=60), generated_at="2026-01-02T00:00:00+00:00"),
+    )
+
+    with pytest.raises(CandidatePromotionError, match="STALE_CANDIDATE_ARTIFACT"):
+        promote_candidate_manifest(output_dir=tmp_path, run_id=run_id)
+
+    after = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert after["selected_params"]["fast_ema"] == 30
+
+
+def test_research_artifacts_write_candidate_not_runtime_manifest(tmp_path) -> None:
+    trades = pd.DataFrame(
+        [
+            {
+                "inst_id": "BTC-USDT-SWAP",
+                "entry_time": "2026-01-01T00:00:00Z",
+                "exit_time": "2026-01-01T01:00:00Z",
+                "side": "long",
+                "entry_price": 100.0,
+                "exit_price": 110.0,
+                "stop_loss": 95.0,
+                "take_profit": 115.0,
+                "qty": 1.0,
+                "risk_amount": 10.0,
+                "notional": 100.0,
+                "gross_pnl": 10.0,
+                "costs": 1.0,
+                "net_pnl": 9.0,
+                "exit_reason": "take_profit",
+                "outcome": "TP",
+                "net_r": 0.9,
+                "final_net_r": 0.9,
+            }
+        ]
+    )
+    artifacts = {
+        "sample_trades": trades,
+        "portfolio_results": pd.DataFrame(
+            [
+                {
+                    "valid_total_trades": 1,
+                    "valid_total_return": 0.1,
+                    "valid_profit_factor": 1.2,
+                    "pass_fail": "passed",
+                }
+            ]
+        ),
+        "selected_params": StrategyParams(fast_ema=10),
+        "research_metadata": {
+            "dataset": "unit",
+            "research_mode": "FORMAL",
+            "research_version": "unit",
+            "signal_timeframe": "15m",
+            "trend_timeframe": "1h",
+            "promotion_eligible": False,
+        },
+    }
+
+    run_id = "research-artifacts"
+    run_output_dir = research_run_dir(tmp_path, run_id)
+    paths = write_research_artifacts(artifacts, run_output_dir)
+    candidate = json.loads(paths["candidate_params"].read_text(encoding="utf-8"))
+
+    assert paths["candidate_params"] == candidate_params_path(tmp_path, run_id)
+    assert candidate["research_run_id"] == run_id
+    assert candidate["promotion_eligible"] is False
+    assert candidate["candidate_params"]["fast_ema"] == 10
+    assert not (tmp_path / "runtime" / "approved_strategy_manifest.json").exists()
 
 
 def test_shared_train_grid_uses_portfolio_profit_factor(monkeypatch, tmp_path) -> None:

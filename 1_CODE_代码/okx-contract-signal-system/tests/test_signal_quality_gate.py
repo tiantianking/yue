@@ -2,15 +2,38 @@ import json
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 from okx_signal_system.exchange.candles import okx_candles_to_frame
+from okx_signal_system.research.approved_strategy_manifest import build_approved_manifest, write_approved_manifest_atomic
 from okx_signal_system.training.startup_quality import (
     _anti_future_checks,
     _select_symbols,
     is_latest_bar_fresh,
     load_selected_strategy_params,
+    load_selected_strategy_params_status,
     push_blocking_reasons,
 )
+from okx_signal_system.strategy.trend_breakout import StrategyParams
+
+
+def _strict_candidate(params: dict, *, generated_at: str = "2026-01-01T00:00:00+00:00") -> dict:
+    return {
+        "artifact_type": "strict_research_candidate",
+        "generated_at": generated_at,
+        "dataset": "unit",
+        "signal_timeframe": "15m",
+        "trend_timeframe": "1h",
+        "research_version": "unit",
+        "research_mode": "FORMAL",
+        "promotion_eligible": True,
+        "candidate_params": params,
+        "candidate_params_sha256": __import__("hashlib").sha256(
+            json.dumps(params, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+        "artifact_hashes": {},
+        "research_metadata": {},
+    }
 
 
 def test_okx_candles_to_frame_accepts_nine_and_ten_field_rows() -> None:
@@ -26,26 +49,60 @@ def test_okx_candles_to_frame_accepts_nine_and_ten_field_rows() -> None:
     assert frame.iloc[0]["quote_volume"] == 1200
 
 
-def test_load_selected_strategy_params_reads_frozen_training_output(tmp_path) -> None:
-    (tmp_path / "selected_params.json").write_text(
-        json.dumps(
-            {
-                "fast_ema": 10,
-                "slow_ema": 80,
-                "breakout_window": 60,
-                "atr_stop_mult": 1.5,
-                "take_profit_mult": 2.0,
-                "max_hold_bars": 24,
-                "atr_window": 14,
-            }
-        ),
-        encoding="utf-8",
-    )
+def test_load_selected_strategy_params_reads_approved_runtime_manifest(tmp_path) -> None:
+    raw_params = {
+        "fast_ema": 10,
+        "slow_ema": 80,
+        "breakout_window": 60,
+        "atr_stop_mult": 1.5,
+        "take_profit_mult": 3.5,
+        "max_hold_bars": 24,
+        "atr_window": 14,
+    }
+    manifest = build_approved_manifest(_strict_candidate(raw_params), approved_at="2026-01-02T00:00:00+00:00")
+    write_approved_manifest_atomic(manifest, tmp_path / "runtime" / "approved_strategy_manifest.json")
+
     params = load_selected_strategy_params(tmp_path)
+
     assert params.fast_ema == 10
     assert params.slow_ema == 80
     assert params.breakout_window == 60
     assert params.take_profit_mult == 3.5
+
+
+def test_missing_approved_manifest_blocks_formal_push_but_returns_default_params(tmp_path) -> None:
+    status = load_selected_strategy_params_status(tmp_path)
+
+    assert status.ok is False
+    assert status.reason == "runtime_manifest_missing"
+    assert status.params == StrategyParams()
+    assert load_selected_strategy_params(tmp_path) == StrategyParams()
+
+
+def test_hand_modified_runtime_manifest_fails_hash_validation(tmp_path) -> None:
+    raw_params = {
+        "fast_ema": 10,
+        "slow_ema": 80,
+        "breakout_window": 60,
+        "atr_stop_mult": 1.5,
+        "take_profit_mult": 3.5,
+        "max_hold_bars": 24,
+        "atr_window": 14,
+    }
+    path = tmp_path / "runtime" / "approved_strategy_manifest.json"
+    write_approved_manifest_atomic(
+        build_approved_manifest(_strict_candidate(raw_params), approved_at="2026-01-02T00:00:00+00:00"),
+        path,
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["selected_params"]["fast_ema"] = 11
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    status = load_selected_strategy_params_status(tmp_path)
+
+    assert status.ok is False
+    assert status.reason == "runtime_manifest_hash_mismatch"
+    assert status.params == StrategyParams()
 
 
 def test_latest_bar_freshness_blocks_stale_history() -> None:
@@ -77,6 +134,10 @@ def test_training_performance_warnings_do_not_block_push() -> None:
 
 def test_validation_loss_blocks_push() -> None:
     assert push_blocking_reasons(["validation_profit_factor_below_1"]) == ["validation_profit_factor_below_1"]
+
+
+def test_manifest_hash_failure_blocks_push() -> None:
+    assert push_blocking_reasons(["runtime_manifest_hash_mismatch"]) == ["runtime_manifest_hash_mismatch"]
 
 
 def test_same_timeframe_trend_has_no_incomplete_higher_bar_failure() -> None:

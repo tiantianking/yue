@@ -402,8 +402,6 @@ def test_publish_tiered_candidates_uses_scan_service_selection() -> None:
             "enqueue_notification": lambda self, key, **metadata: outbox.append(("pending", key, metadata)),
         },
     )()
-    monitor._signal_notification_store = Store()
-    monitor._b_tier_summary_store = Store(existing=True)
     monitor._last_ready_signal = None
 
     asyncio.run(monitor._publish_tiered_candidates(selection))
@@ -427,7 +425,6 @@ def test_publish_tiered_candidates_uses_scan_service_selection() -> None:
             },
         )
     ]
-    assert monitor._signal_notification_store.marked == []
     assert low_score_a.health_item["tier"] == "A"
     assert high_score_b.health_item["tier"] == "B"
 
@@ -437,13 +434,6 @@ def test_publish_tiered_candidates_keeps_legacy_two_arg_callback() -> None:
     from okx_signal_system.risk.model import RiskDecision
     from okx_signal_system.signal_quality import SignalCandidate, TieredSelection
     from okx_signal_system.strategy.trend_breakout import TradeSignal
-
-    class Store:
-        def has(self, _key):
-            return False
-
-        def mark(self, _key, metadata=None):
-            return True
 
     signal = TradeSignal(
         ts=pd.Timestamp("2026-01-01T00:00:00Z"),
@@ -498,8 +488,6 @@ def test_publish_tiered_candidates_keeps_legacy_two_arg_callback() -> None:
             "enqueue_notification": lambda self, key, **metadata: None,
         },
     )()
-    monitor._signal_notification_store = Store()
-    monitor._b_tier_summary_store = Store()
     monitor._last_ready_signal = None
 
     asyncio.run(

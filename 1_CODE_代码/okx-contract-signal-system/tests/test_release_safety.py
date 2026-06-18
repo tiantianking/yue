@@ -69,6 +69,8 @@ def test_release_tests_package_can_import_integration_helpers() -> None:
 
 
 def test_release_version_sources_stay_consistent() -> None:
+    from okx_signal_system.research.approved_strategy_manifest import APPROVED_STRATEGY_VERSION
+
     pyproject = tomllib.loads(_read("pyproject.toml"))
     package_version = okx_signal_system.__version__
     pkg_info = _read("src/okx_contract_signal_system.egg-info/PKG-INFO")
@@ -76,8 +78,9 @@ def test_release_version_sources_stay_consistent() -> None:
     gui_text = _read("gui.py")
     start_text = _read("start.bat")
 
-    assert package_version == "3.55.0"
+    assert package_version == "3.56.0"
     assert pyproject["project"]["version"] == package_version
+    assert APPROVED_STRATEGY_VERSION == package_version
     assert f"Version: {package_version}" in pkg_info
     assert "from okx_signal_system import __version__ as _PACKAGE_VERSION" in main_text
     assert 'APP_VERSION = f"v{_PACKAGE_VERSION}"' in main_text
@@ -97,8 +100,40 @@ def test_strict_research_default_version_matches_cli_release() -> None:
     cli_text = _read("src/okx_signal_system/backtest/research_cli.py")
     default_version = research.run_dataset_research_artifacts.__kwdefaults__["research_version"]
 
-    assert default_version == "v3.55-strict"
+    assert default_version == "v3.56-strict"
     assert f'parser.add_argument("--research-version", default="{default_version}")' in cli_text
+
+
+def test_research_package_exports_runtime_manifest_paths() -> None:
+    import okx_signal_system.research as research
+
+    assert callable(research.approved_manifest_path)
+    assert callable(research.candidate_params_path)
+    assert callable(research.research_run_dir)
+
+
+def test_research_package_is_in_distribution_sources() -> None:
+    sources = _read("src/okx_contract_signal_system.egg-info/SOURCES.txt")
+
+    for path in [
+        "src/okx_signal_system/research/__init__.py",
+        "src/okx_signal_system/research/approved_strategy_manifest.py",
+        "src/okx_signal_system/research/promote.py",
+    ]:
+        assert path in sources
+
+
+def test_dashboard_reads_approved_manifest_before_legacy_selected_params() -> None:
+    server_data = _read("dashboard/src/lib/server-data.ts")
+    readme = _read("dashboard/README.md")
+
+    manifest_ref = 'path.join(outputsDir, "runtime", "approved_strategy_manifest.json")'
+    legacy_ref = 'path.join(outputsDir, "selected_params.json")'
+    assert manifest_ref in server_data
+    assert legacy_ref in server_data
+    assert server_data.index(manifest_ref) < server_data.index(legacy_ref)
+    assert "selectedParamsFromManifest(approvedManifest)" in server_data
+    assert "`outputs/runtime/approved_strategy_manifest.json`" in readme
 
 
 def test_env_example_is_signal_only_and_has_no_private_okx_keys() -> None:

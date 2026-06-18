@@ -15,7 +15,8 @@ Open http://127.0.0.1:3001.
 The dashboard reads the existing local system files:
 
 - `outputs/startup_quality_gate.json`
-- `outputs/selected_params.json`
+- `outputs/runtime/approved_strategy_manifest.json`
+- `outputs/selected_params.json` as a legacy fallback only
 - `outputs/latest_signal.json`
 - `outputs/15m_backfill_3y_report.json`
 - 15m parquet candles from `OKX_HISTORY_DIR`, `OKX_HISTORY_BASE`, `JIAOYI_DATA_DIR`, or `config/base.yaml` `data.root_dir`

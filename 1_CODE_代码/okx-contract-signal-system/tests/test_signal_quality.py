@@ -7,6 +7,7 @@ import pytest
 
 from okx_signal_system.risk.model import RiskDecision
 from okx_signal_system.signal_quality import SignalCandidate, assign_tiers
+from okx_signal_system.signal_quality.selector import absolute_quality_score
 from okx_signal_system.signal_quality.candidate import ObservationCandidate
 from okx_signal_system.signal_quality.observation import (
     breakout_distance_atr,
@@ -69,7 +70,7 @@ def _history_with_closed_flags(symbol: str, returns: list[float], is_closed: lis
     return frame
 
 
-def test_assign_tiers_keeps_all_candidates_and_limits_a_tier() -> None:
+def test_assign_tiers_requires_absolute_quality_for_a_tier() -> None:
     selection = assign_tiers(
         [
             _candidate("LOW-USDT-SWAP", 6.1),
@@ -84,10 +85,49 @@ def test_assign_tiers_keeps_all_candidates_and_limits_a_tier() -> None:
         "MID-USDT-SWAP",
         "LOW-USDT-SWAP",
     ]
-    assert [item.tier for item in selection.ranked] == ["A", "A", "B"]
+    assert [item.tier for item in selection.ranked] == ["A", "B", "B"]
     assert [item.rank for item in selection.ranked] == [1, 2, 3]
-    assert len(selection.tier_a) == 2
-    assert len(selection.tier_b) == 1
+    assert selection.ranked[0].health_item["quality_score"] >= 80
+    assert selection.ranked[1].health_item["quality_score"] < 80
+    assert len(selection.tier_a) == 1
+    assert len(selection.tier_b) == 2
+
+
+def test_assign_tiers_single_barely_passing_candidate_is_not_a() -> None:
+    candidate = _candidate("BTC-USDT-SWAP", 6.2)
+
+    selection = assign_tiers([candidate], max_tier_a=2)
+
+    assert selection.ranked[0].tier == "B"
+    assert selection.ranked[0].health_item["tier_reason"] == "below_a_quality_threshold"
+    assert absolute_quality_score(candidate) < 80
+
+
+def test_assign_tiers_demotes_below_b_quality_to_c_observation() -> None:
+    candidate = _candidate("BTC-USDT-SWAP", 4.0)
+
+    selection = assign_tiers([candidate], max_tier_a=2)
+
+    assert selection.tier_a == []
+    assert selection.tier_b == []
+    assert selection.ranked[0].tier == "C"
+    assert selection.ranked[0].health_item["tier_reason"] == "below_b_quality_threshold"
+
+
+def test_assign_tiers_allows_three_unrelated_absolute_a_candidates() -> None:
+    selection = assign_tiers(
+        [
+            _candidate("BTC-USDT-SWAP", 9.2),
+            _candidate("ETH-USDT-SWAP", 8.8),
+            _candidate("SOL-USDT-SWAP", 8.5),
+        ],
+        max_a_per_cycle=4,
+        min_correlation_samples=8,
+    )
+
+    assert [item.tier for item in selection.ranked] == ["A", "A", "A"]
+    assert all(item.health_item["quality_score"] >= 80 for item in selection.tier_a)
+    assert all(item.payload["quality_score"] == item.health_item["quality_score"] for item in selection.tier_a)
 
 
 def test_assign_tiers_limits_a_tier_to_one_candidate_per_correlation_group() -> None:

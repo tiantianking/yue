@@ -39,6 +39,9 @@ src/okx_signal_system/notification/__init__.py
 src/okx_signal_system/notification/feishu.py
 src/okx_signal_system/notify/__init__.py
 src/okx_signal_system/notify/feishu.py
+src/okx_signal_system/research/__init__.py
+src/okx_signal_system/research/approved_strategy_manifest.py
+src/okx_signal_system/research/promote.py
 src/okx_signal_system/reporting/__init__.py
 src/okx_signal_system/reporting/cli.py
 src/okx_signal_system/reporting/report_builder.py

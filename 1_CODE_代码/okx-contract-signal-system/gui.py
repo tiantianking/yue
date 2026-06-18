@@ -172,11 +172,8 @@ class OKXSignalGUI:
         self._startup_quality_report = None
         self._quality_gate_allows_push = False
         self._last_candidate_health_report_ts = 0.0
-        self._signal_notification_store = None
-        self._b_tier_summary_store = None
         self._lifecycle_store = None
         self._notification_dispatcher_instance = None
-        self._lifecycle_outbox_worker_instance = None
         self._quality_model_shadow = None
         self._runtime_modules: dict[str, dict] = {}
         self._background_tasks: list[asyncio.Task] = []
@@ -393,7 +390,6 @@ class OKXSignalGUI:
             )
             self._last_candidate_health_report_ts = asyncio.get_event_loop().time()
             if ok:
-                self._lifecycle_outbox_worker().run_once()
                 log.info("Candidate health report queued: %s symbols", len(items))
                 self.message_queue.put(('log', (f"候选信号体检已进入通知队列：{len(items)} 个币种", "INFO")))
             else:
@@ -403,20 +399,6 @@ class OKXSignalGUI:
             self._last_candidate_health_report_ts = asyncio.get_event_loop().time()
             log.warning("Candidate health report failed: %s", e)
             self.message_queue.put(('log', (f"候选信号体检推送失败: {e}", "WARNING")))
-
-    def _notification_store(self):
-        if self._signal_notification_store is None:
-            from okx_signal_system.notify.signal_dedupe import SignalNotificationStore
-
-            self._signal_notification_store = SignalNotificationStore()
-        return self._signal_notification_store
-
-    def _summary_notification_store(self):
-        if self._b_tier_summary_store is None:
-            from okx_signal_system.notify.signal_dedupe import BTierSummaryNotificationStore
-
-            self._b_tier_summary_store = BTierSummaryNotificationStore()
-        return self._b_tier_summary_store
 
     def _signal_lifecycle_store(self):
         if self._lifecycle_store is None:
@@ -431,16 +413,6 @@ class OKXSignalGUI:
 
             self._notification_dispatcher_instance = NotificationDispatcher(self._signal_lifecycle_store())
         return self._notification_dispatcher_instance
-
-    def _lifecycle_outbox_worker(self):
-        if self._lifecycle_outbox_worker_instance is None:
-            from okx_signal_system.signal_quality import LifecycleOutboxWorker
-
-            self._lifecycle_outbox_worker_instance = LifecycleOutboxWorker(
-                self._signal_lifecycle_store(),
-                self._notification_dispatcher(),
-            )
-        return self._lifecycle_outbox_worker_instance
 
     def _quality_model_shadow_scorer(self):
         if self._quality_model_shadow is None:
@@ -459,19 +431,6 @@ class OKXSignalGUI:
             params=getattr(self, "_trained_params", None),
         )
 
-    def _mark_signal_notified(self, key: str, signal, *, score: float | None = None) -> None:
-        self._notification_store().mark(
-            key,
-            {
-                "symbol": signal.inst_id,
-                "side": signal.side,
-                "kline_time": signal.ts.isoformat() if hasattr(signal.ts, "isoformat") else str(signal.ts),
-                "score": float(score) if score is not None else None,
-                "signal_timeframe": self.api.timeframe.key if self.api else None,
-                "trend_timeframe": self.api.trend_timeframe.key if self.api else None,
-            },
-        )
-
     def _b_tier_summary_key(self, candidates) -> str | None:
         if not candidates:
             return None
@@ -481,18 +440,8 @@ class OKXSignalGUI:
             candidates[0].candle_time,
             signal_timeframe=self.api.timeframe.key if self.api else None,
             trend_timeframe=self.api.trend_timeframe.key if self.api else None,
-        )
-
-    def _mark_b_tier_summary_notified(self, key: str, candidates) -> None:
-        candle_time = candidates[0].candle_time if candidates else None
-        self._summary_notification_store().mark(
-            key,
-            {
-                "kline_time": candle_time.isoformat() if hasattr(candle_time, "isoformat") else str(candle_time or ""),
-                "candidate_count": len(candidates),
-                "signal_timeframe": self.api.timeframe.key if self.api else None,
-                "trend_timeframe": self.api.trend_timeframe.key if self.api else None,
-            },
+            params=getattr(self, "_trained_params", None),
+            candidates=candidates,
         )
 
     def create_widgets(self):
@@ -924,19 +873,25 @@ class OKXSignalGUI:
             try:
                 from types import SimpleNamespace
 
-                from okx_signal_system.signal_service.runtime import load_selected_strategy_params
+                from okx_signal_system.signal_service.runtime import load_selected_strategy_params_status
 
-                runtime_params = load_selected_strategy_params()
+                manifest_status = load_selected_strategy_params_status()
+                runtime_params = manifest_status.params
+                self._update_runtime_module_status(
+                    "approved_strategy_manifest",
+                    "healthy" if manifest_status.ok else "blocked",
+                    **manifest_status.as_dict(),
+                )
                 self.message_queue.put(('log', ("已加载运行时信号参数，跳过离线研究质量门", "INFO")))
                 report = SimpleNamespace(
                     strategy_params=runtime_params,
-                    status="runtime",
+                    status="runtime_manifest_valid" if manifest_status.ok else "runtime_manifest_blocked",
                     valid_summary={"total_trades": 0, "profit_factor": 0.0},
                     selected_params=asdict(runtime_params),
                     stale_symbols=[],
-                    reasons=[],
-                    push_allowed=True,
-                    push_blocking_reasons=[],
+                    reasons=[] if manifest_status.ok else [manifest_status.reason],
+                    push_allowed=bool(manifest_status.ok),
+                    push_blocking_reasons=[] if manifest_status.ok else [manifest_status.reason],
                 )
                 self._startup_quality_report = report
                 self._trained_params = report.strategy_params
@@ -964,7 +919,8 @@ class OKXSignalGUI:
                         "WARNING",
                     )))
             except Exception as e:
-                self._quality_gate_allows_push = True
+                self._quality_gate_allows_push = False
+                self._update_runtime_module_status("approved_strategy_manifest", "failed", error=str(e))
                 self.message_queue.put(('log', (f"运行时参数加载异常，使用默认参数: {e}", "WARNING")))
 
             # 连接 WebSocket（接收实时更新）
@@ -1179,11 +1135,6 @@ class OKXSignalGUI:
             selection = scan_result.selection
             total_formal_candidates = len(selection.tier_a) + len(selection.tier_b)
             for candidate in selection.tier_a:
-                signal = candidate.signal
-                decision = candidate.decision
-                if self._notification_store().has(candidate.notify_key):
-                    self.message_queue.put(('log', (f"已通知过同一根K线A级信号，跳过重复推送: {signal.inst_id} {signal.side}", "INFO")))
-                    continue
                 self._signal_lifecycle_store().enqueue_notification(
                     candidate.notify_key,
                     signal_id=(candidate.payload.get("lifecycle") or {}).get("signal_id"),
@@ -1195,32 +1146,22 @@ class OKXSignalGUI:
                 self.message_queue.put(('log', (f"B级候选已保留到体检/面板：{len(selection.tier_b)} 个", "INFO")))
             if selection.tier_b:
                 summary_key = self._b_tier_summary_key(selection.tier_b)
-                if summary_key and self._summary_notification_store().has(summary_key):
-                    self.message_queue.put(('log', ("B-tier summary already sent for this candle", "INFO")))
-                else:
-                    try:
-                        summary_sent = self._notification_dispatcher().enqueue_b_tier_summary(
-                            summary_key or f"desktop_b_tier:{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}",
-                            selection.tier_b,
-                            total_candidates=total_formal_candidates,
-                            signal_timeframe=self.api.timeframe.key if self.api else None,
-                            trend_timeframe=self.api.trend_timeframe.key if self.api else None,
-                        )
-                    except Exception as e:
-                        summary_sent = False
-                        self.message_queue.put(('log', (f"B-tier summary enqueue failed: {e}", "WARNING")))
-                    if summary_sent and summary_key:
-                        self._mark_b_tier_summary_notified(summary_key, selection.tier_b)
-                        self.message_queue.put(('log', (f"B-tier summary queued: {len(selection.tier_b)} candidates", "INFO")))
-                    elif summary_key:
-                        self.message_queue.put(('log', ("B-tier summary was not queued; will retry", "WARNING")))
+                try:
+                    summary_sent = self._notification_dispatcher().enqueue_b_tier_summary(
+                        summary_key or f"desktop_b_tier:{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}",
+                        selection.tier_b,
+                        total_candidates=total_formal_candidates,
+                        signal_timeframe=self.api.timeframe.key if self.api else None,
+                        trend_timeframe=self.api.trend_timeframe.key if self.api else None,
+                    )
+                except Exception as e:
+                    summary_sent = False
+                    self.message_queue.put(('log', (f"B-tier summary enqueue failed: {e}", "WARNING")))
+                if summary_sent:
+                    self.message_queue.put(('log', (f"B-tier summary queued: {len(selection.tier_b)} candidates", "INFO")))
+                elif summary_key:
+                    self.message_queue.put(('log', ("B-tier summary was not queued; will retry", "WARNING")))
             self._write_latest_scan_status(cycle_health, base_params)
-            try:
-                outbox_summary = self._lifecycle_outbox_worker().run_once()
-                if outbox_summary.get("sent") or outbox_summary.get("failed") or outbox_summary.get("dead_letter"):
-                    self.message_queue.put(('log', (f"Lifecycle outbox processed: {outbox_summary}", "INFO")))
-            except Exception as e:
-                self.message_queue.put(('log', (f"Lifecycle outbox processing failed: {e}", "WARNING")))
             if send_health_report:
                 self._send_candidate_health_report(cycle_health, base_params)
         

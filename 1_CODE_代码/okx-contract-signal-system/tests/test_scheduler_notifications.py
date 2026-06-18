@@ -7,18 +7,6 @@ from okx_signal_system import scheduler
 from okx_signal_system.notify import signal_dedupe
 
 
-class _SummaryStore:
-    def __init__(self):
-        self.marked = []
-
-    def has(self, key: str) -> bool:
-        return False
-
-    def mark(self, key: str, metadata=None) -> bool:
-        self.marked.append((key, metadata or {}))
-        return True
-
-
 class _LifecycleStore:
     def __init__(self):
         self.enqueued = []
@@ -108,7 +96,6 @@ def test_scheduler_sends_b_tier_summary_from_scan_selection(monkeypatch) -> None
     selection = TieredSelection(ranked=[tier_a, tier_b], tier_a=[tier_a], tier_b=[tier_b], tier_c=[])
     ledger = Ledger(inst_id="GLOBAL", init_capital=10000.0, equity=10000.0)
     dispatcher = _Dispatcher()
-    store = _SummaryStore()
     lifecycle_store = _LifecycleStore()
     outbox_worker = _OutboxWorker()
 
@@ -132,7 +119,6 @@ def test_scheduler_sends_b_tier_summary_from_scan_selection(monkeypatch) -> None
         ),
     )
     monkeypatch.setattr(scheduler, "NotificationDispatcher", lambda lifecycle_store=None: dispatcher)
-    monkeypatch.setattr(scheduler, "BTierSummaryNotificationStore", lambda: store)
     monkeypatch.setattr(scheduler, "SignalLifecycleStore", lambda: lifecycle_store)
     monkeypatch.setattr(scheduler, "LifecycleOutboxWorker", lambda store, dispatcher: outbox_worker)
 
@@ -157,13 +143,9 @@ def test_scheduler_sends_b_tier_summary_from_scan_selection(monkeypatch) -> None
             },
         )
     ]
-    assert outbox_worker.run_calls == 1
+    assert outbox_worker.run_calls == 0
     assert dispatcher.b_summaries == [([tier_b], 2, "15m", "1h")]
     assert tier_a.health_item["total_candidates"] == 2
-    assert store.marked[0][0].startswith("b_tier_summary|")
-    assert store.marked[0][1]["candidate_count"] == 1
-    assert store.marked[0][1]["strategy_version"]
-    assert store.marked[0][1]["parameter_hash"]
 
 
 def test_b_tier_summary_key_changes_with_version_params_and_candidates(monkeypatch) -> None:

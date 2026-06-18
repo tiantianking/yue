@@ -387,7 +387,7 @@ src/okx_signal_system/
 - Validation and blind evaluations run on frames that include the required indicator warmup history, then filter trade entries back to the validation or blind evaluation window. This keeps indicator state mature without allowing training-period trades into validation metrics.
 - Research data manifests now include per-symbol file SHA-256, canonical OHLCV/is_closed content SHA-256, rows, and timestamp bounds. The manifest hash changes when candle values change, even if file path, row count, and timestamp range stay unchanged.
 - Blind access is registered in SQLite under `outputs/research_registry/blind_registry.sqlite3` by default. The registry uses dataset content hash, research config hash, selected parameter hash, and git commit to build a one-time `registry_id`; a sealed blind run cannot be opened again with the same identity.
-- The strict research CLI and core function use the same default research version, currently `v3.55-strict`, so artifacts created from different entrypoints carry the same release identity.
+- The strict research CLI and core function use the same default research version, currently `v3.56-strict`, so artifacts created from different entrypoints carry the same release identity.
 
 ## v3.51 Data Reliability Closure
 

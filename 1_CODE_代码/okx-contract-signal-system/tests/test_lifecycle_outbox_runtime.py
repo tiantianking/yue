@@ -53,7 +53,7 @@ def _runtime_calls(paths: list[Path]) -> list[tuple[Path, int, str]]:
     return calls
 
 
-def test_scheduler_run_cycle_consumes_lifecycle_outbox(monkeypatch) -> None:
+def test_scheduler_run_cycle_does_not_drain_lifecycle_outbox(monkeypatch) -> None:
     from okx_signal_system import scheduler
 
     calls: list[str] = []
@@ -66,13 +66,6 @@ def test_scheduler_run_cycle_consumes_lifecycle_outbox(monkeypatch) -> None:
             calls.append("run_once")
             return {"sent": 0, "failed": 0}
 
-    class FakeSummaryStore:
-        def has(self, _key):
-            return False
-
-        def mark(self, _key, _metadata):
-            return True
-
     def fake_run_scan_cycle(_symbols, ledger, _params, **kwargs):
         if kwargs.get("include_selection"):
             return [], ledger, TieredSelection(ranked=[], tier_a=[], tier_b=[], tier_c=[])
@@ -80,7 +73,6 @@ def test_scheduler_run_cycle_consumes_lifecycle_outbox(monkeypatch) -> None:
 
     monkeypatch.setattr(scheduler, "LifecycleOutboxWorker", FakeWorker)
     monkeypatch.setattr(scheduler, "SignalLifecycleStore", lambda: object())
-    monkeypatch.setattr(scheduler, "BTierSummaryNotificationStore", lambda: FakeSummaryStore())
     monkeypatch.setattr(scheduler, "_data_defaults", lambda: ("test", "15m", "1h"))
     monkeypatch.setattr(scheduler, "load_symbols_for_scan", lambda _dataset=None: ["BTC-USDT-SWAP"])
     monkeypatch.setattr(scheduler, "run_scan_cycle", fake_run_scan_cycle)
@@ -88,7 +80,7 @@ def test_scheduler_run_cycle_consumes_lifecycle_outbox(monkeypatch) -> None:
     instance = scheduler.SignalScheduler()
 
     assert instance.run_once() == []
-    assert calls == ["run_once"]
+    assert calls == []
 
 
 @dataclass(frozen=True)
@@ -105,7 +97,7 @@ class _ScanServiceStub:
         )
 
 
-def test_live_monitor_loop_consumes_lifecycle_outbox_after_scan(monkeypatch) -> None:
+def test_live_monitor_loop_does_not_drain_lifecycle_outbox_after_scan(monkeypatch) -> None:
     from okx_signal_system.exchange import realtime
 
     calls: list[str] = []
@@ -143,7 +135,7 @@ def test_live_monitor_loop_consumes_lifecycle_outbox_after_scan(monkeypatch) -> 
 
     asyncio.run(monitor._monitor_loop())
 
-    assert calls == ["run_once"]
+    assert calls == []
 
 
 def test_formal_a_tier_runtime_paths_do_not_call_feishu_signal_senders() -> None:

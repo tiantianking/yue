@@ -12,7 +12,7 @@ from okx_signal_system.config import load_config, load_runtime_config
 from okx_signal_system.data.loader import load_symbol_file
 from okx_signal_system.paths import find_lightweight_history
 from okx_signal_system.notify.dispatcher import NotificationDispatcher
-from okx_signal_system.notify.signal_dedupe import BTierSummaryNotificationStore, b_tier_summary_key
+from okx_signal_system.notify.signal_dedupe import b_tier_summary_key
 from okx_signal_system.risk.model import Ledger
 from okx_signal_system.signal_quality.lifecycle import LifecycleOutboxWorker, SignalLifecycleStore
 from okx_signal_system.signal_quality.selector import TieredSelection
@@ -153,6 +153,10 @@ def run_scan_cycle(
         mode="scheduler_signal_only",
         min_history_bars=100,
         max_signal_lag_minutes=DEFAULT_MAX_SIGNAL_LAG_MINUTES,
+        max_a_per_cycle=int(load_config("base.yaml").get("signal_policy", {}).get("max_a_per_cycle", 4)),
+        max_a_per_correlation_group=int(load_config("base.yaml").get("signal_policy", {}).get("max_a_per_correlation_group", 1)),
+        min_a_quality_score=float(load_config("base.yaml").get("signal_policy", {}).get("min_a_quality_score", 80)),
+        min_b_quality_score=float(load_config("base.yaml").get("signal_policy", {}).get("min_b_quality_score", 68)),
     )
     try:
         scan_result = asyncio.run(service.scan_cycle([symbol_to_inst_id(symbol) for symbol in symbols], context))
@@ -247,7 +251,6 @@ class SignalScheduler:
         self._lifecycle_store = SignalLifecycleStore()
         self._notification_dispatcher = NotificationDispatcher(self._lifecycle_store)
         self._lifecycle_outbox_worker = LifecycleOutboxWorker(self._lifecycle_store, self._notification_dispatcher)
-        self._b_tier_summary_store = BTierSummaryNotificationStore()
         self._symbols = load_symbols_for_scan(dataset)
 
     def stop(self):
@@ -265,20 +268,6 @@ class SignalScheduler:
             trend_timeframe=self.trend_timeframe,
             params=self.params,
             candidates=candidates,
-        )
-
-    def _mark_b_tier_summary_notified(self, key: str, candidates) -> None:
-        candle_time = candidates[0].candle_time if candidates else None
-        self._b_tier_summary_store.mark(
-            key,
-            {
-                "kline_time": pd.Timestamp(candle_time).isoformat() if candle_time is not None else "",
-                "candidate_count": len(candidates),
-                "signal_timeframe": self.signal_timeframe,
-                "trend_timeframe": self.trend_timeframe,
-                "strategy_version": strategy_version(),
-                "parameter_hash": parameter_hash(self.params),
-            },
         )
 
     def run_cycle(self) -> list[dict]:
@@ -312,29 +301,21 @@ class SignalScheduler:
 
         if selection.tier_b:
             summary_key = self._b_tier_summary_key(selection.tier_b)
-            if summary_key and self._b_tier_summary_store.has(summary_key):
-                log.info("scheduler B-tier summary already sent for this candle: %s", summary_key)
+            try:
+                summary_sent = self._notification_dispatcher.enqueue_b_tier_summary(
+                    summary_key or f"scheduler_b_tier:{self._cycle}",
+                    selection.tier_b,
+                    total_candidates=total_formal_candidates,
+                    signal_timeframe=self.signal_timeframe,
+                    trend_timeframe=self.trend_timeframe,
+                )
+            except Exception as exc:
+                log.error("scheduler B-tier summary enqueue failed: %s", exc)
+                summary_sent = False
+            if summary_sent:
+                log.info("scheduler B-tier summary queued: %s candidates", len(selection.tier_b))
             else:
-                try:
-                    summary_sent = self._notification_dispatcher.enqueue_b_tier_summary(
-                        summary_key or f"scheduler_b_tier:{self._cycle}",
-                        selection.tier_b,
-                        total_candidates=total_formal_candidates,
-                        signal_timeframe=self.signal_timeframe,
-                        trend_timeframe=self.trend_timeframe,
-                    )
-                except Exception as exc:
-                    log.error("scheduler B-tier summary enqueue failed: %s", exc)
-                    summary_sent = False
-                if summary_sent and summary_key:
-                    self._mark_b_tier_summary_notified(summary_key, selection.tier_b)
-                    log.info("scheduler B-tier summary queued: %s candidates", len(selection.tier_b))
-                elif summary_key:
-                    log.warning("scheduler B-tier summary was not queued; will retry next scan")
-
-        outbox_summary = self._lifecycle_outbox_worker.run_once()
-        if outbox_summary.get("sent") or outbox_summary.get("failed") or outbox_summary.get("dead_letter"):
-            log.info("lifecycle outbox processed: %s", outbox_summary)
+                log.warning("scheduler B-tier summary was not queued; will retry next scan")
 
         if self._cycle % 2 == 0:
             self._notification_dispatcher.enqueue_status(
@@ -343,9 +324,6 @@ class SignalScheduler:
                 cycle_count=self._cycle,
                 last_signal_count=sum(1 for r in results if r.get("candidate") and r["candidate"].tier == "A"),
             )
-            outbox_summary = self._lifecycle_outbox_worker.run_once()
-            if outbox_summary.get("sent") or outbox_summary.get("failed") or outbox_summary.get("dead_letter"):
-                log.info("status outbox processed: %s", outbox_summary)
 
         if self.status_callback:
             msg = format_status_message(self._ledger, self._cycle)

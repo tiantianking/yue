@@ -57,6 +57,10 @@ function asRecord(value: unknown): JsonRecord {
     : {};
 }
 
+function selectedParamsFromManifest(manifest: JsonRecord): StrategyParams {
+  return asRecord(manifest.selected_params) as StrategyParams;
+}
+
 function minutesSince(value?: string) {
   if (!value) {
     return null;
@@ -174,7 +178,8 @@ async function readActualHistory(symbols: string[]) {
 export async function loadDashboardData(): Promise<DashboardPayload> {
   const [
     quality,
-    selectedParams,
+    approvedManifest,
+    legacySelectedParams,
     latestSignal,
     latestScan,
     backfill,
@@ -187,6 +192,10 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
     await Promise.all([
       readJson<JsonRecord>(
         path.join(outputsDir, "startup_quality_gate.json"),
+        {},
+      ),
+      readJson<JsonRecord>(
+        path.join(outputsDir, "runtime", "approved_strategy_manifest.json"),
         {},
       ),
       readJson<StrategyParams>(path.join(outputsDir, "selected_params.json"), {}),
@@ -219,6 +228,10 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
     ]);
 
   const dataConfig = asRecord(baseConfig.data);
+  const selectedParams = {
+    ...legacySelectedParams,
+    ...selectedParamsFromManifest(approvedManifest),
+  };
   const configuredSymbols = Array.isArray(dataConfig.symbols)
     ? (dataConfig.symbols.filter((item) => typeof item === "string") as string[])
     : [];

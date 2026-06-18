@@ -1,9 +1,11 @@
 import json
+import hashlib
 from datetime import datetime, timezone
 
 import pandas as pd
 
 from okx_signal_system.data.loader import SymbolData
+from okx_signal_system.research.approved_strategy_manifest import build_approved_manifest, write_approved_manifest_atomic
 from okx_signal_system.strategy.trend_breakout import StrategyParams
 from okx_signal_system.training import daily_learning
 from okx_signal_system.training.daily_learning import (
@@ -37,6 +39,36 @@ def _gate_config() -> LearningReviewConfig:
         min_profitable_symbol_ratio=0.0,
         shadow_min_closed_signals=0,
     )
+
+
+def _write_approved_params(tmp_path, params: StrategyParams) -> None:
+    candidate_params = {
+        "fast_ema": params.fast_ema,
+        "slow_ema": params.slow_ema,
+        "breakout_window": params.breakout_window,
+        "atr_stop_mult": params.atr_stop_mult,
+        "take_profit_mult": params.take_profit_mult,
+        "max_hold_bars": params.max_hold_bars,
+        "atr_window": params.atr_window,
+    }
+    candidate = {
+        "artifact_type": "strict_research_candidate",
+        "generated_at": "2026-01-01T00:00:00+00:00",
+        "dataset": "unit",
+        "signal_timeframe": "15m",
+        "trend_timeframe": "1h",
+        "research_version": "unit",
+        "research_mode": "FORMAL",
+        "promotion_eligible": True,
+        "candidate_params": candidate_params,
+        "candidate_params_sha256": hashlib.sha256(
+            json.dumps(candidate_params, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+        "artifact_hashes": {},
+        "research_metadata": {},
+    }
+    manifest = build_approved_manifest(candidate, approved_at="2026-01-01T01:00:00+00:00")
+    write_approved_manifest_atomic(manifest, tmp_path / "runtime" / "approved_strategy_manifest.json")
 
 
 def test_should_run_daily_review_respects_interval(tmp_path) -> None:
@@ -140,20 +172,7 @@ def test_daily_learning_passes_vote_gate_to_backtest(tmp_path, monkeypatch) -> N
         "load_all_symbols",
         lambda dataset: [SymbolData("BTC-USDT-SWAP", tmp_path / "BTC.parquet", frame)],
     )
-    (tmp_path / "selected_params.json").write_text(
-        json.dumps(
-            {
-                "fast_ema": 5,
-                "slow_ema": 10,
-                "breakout_window": 5,
-                "atr_stop_mult": 1.5,
-                "take_profit_mult": 3.5,
-                "max_hold_bars": 12,
-                "atr_window": 5,
-            }
-        ),
-        encoding="utf-8",
-    )
+    _write_approved_params(tmp_path, StrategyParams(fast_ema=5, slow_ema=10, breakout_window=5, atr_stop_mult=1.5, take_profit_mult=3.5, max_hold_bars=12, atr_window=5))
     calls = []
 
     def fake_backtest(*args, **kwargs):
@@ -203,20 +222,7 @@ def test_daily_learning_review_writes_report_with_closed_frames(tmp_path, monkey
         "load_all_symbols",
         lambda dataset: [SymbolData("BTC-USDT-SWAP", tmp_path / "BTC.parquet", frame)],
     )
-    (tmp_path / "selected_params.json").write_text(
-        json.dumps(
-            {
-                "fast_ema": 5,
-                "slow_ema": 10,
-                "breakout_window": 5,
-                "atr_stop_mult": 1.5,
-                "take_profit_mult": 3.5,
-                "max_hold_bars": 12,
-                "atr_window": 5,
-            }
-        ),
-        encoding="utf-8",
-    )
+    _write_approved_params(tmp_path, StrategyParams(fast_ema=5, slow_ema=10, breakout_window=5, atr_stop_mult=1.5, take_profit_mult=3.5, max_hold_bars=12, atr_window=5))
 
     report = run_daily_learning_review(
         symbols=["BTC-USDT-SWAP"],

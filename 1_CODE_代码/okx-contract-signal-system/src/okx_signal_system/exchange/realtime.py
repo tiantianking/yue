@@ -950,9 +950,10 @@ class LiveSignalMonitor:
 
         # --- 市场环境自适应（延迟导入避免循环依赖） ---
         from okx_signal_system.signal_service.regime import AdaptiveParamsManager
-        from okx_signal_system.signal_service.runtime import load_selected_strategy_params
+        from okx_signal_system.signal_service.runtime import load_selected_strategy_params_status
         self._regime_mgr = AdaptiveParamsManager()
-        self._strategy_params = load_selected_strategy_params()
+        self._runtime_manifest_status = load_selected_strategy_params_status()
+        self._strategy_params = self._runtime_manifest_status.params
         from okx_signal_system.strategy.vote_gate import min_vote_approval_rate
         learning_cfg = self.api.config.get("learning", {}) if isinstance(self.api.config, dict) else {}
         self._min_vote_approval_rate = min_vote_approval_rate(self.api.config if isinstance(self.api.config, dict) else {})
@@ -966,14 +967,10 @@ class LiveSignalMonitor:
             lifecycle_store=self._lifecycle_store,
             notify_key_builder=self._signal_notification_key,
         )
-        self._quality_gate_allows_push = True
+        self._quality_gate_allows_push = bool(self._runtime_manifest_status.ok)
         self._last_candidate_health_report_ts = 0.0
         self._last_ready_signal: dict[str, Any] | None = None
         self._sent_startup_health_report = False
-        from okx_signal_system.notify.signal_dedupe import BTierSummaryNotificationStore, SignalNotificationStore
-
-        self._signal_notification_store = SignalNotificationStore()
-        self._b_tier_summary_store = BTierSummaryNotificationStore()
         self._notification_dispatcher = NotificationDispatcher(self._lifecycle_store)
         self._lifecycle_outbox_worker = LifecycleOutboxWorker(self._lifecycle_store, self._notification_dispatcher)
         try:
@@ -995,21 +992,7 @@ class LiveSignalMonitor:
             signal,
             signal_timeframe=self.api.timeframe.key,
             trend_timeframe=self.api.trend_timeframe.key,
-            params=self._strategy_params,
-        )
-
-    def _mark_signal_notified(self, key: str, signal: TradeSignal, *, score: float | None = None) -> None:
-        self._signal_notification_store.mark(
-            key,
-            {
-                "symbol": signal.inst_id,
-                "side": signal.side,
-                "kline_time": pd.Timestamp(signal.ts).isoformat(),
-                "score": float(score) if score is not None else None,
-                "signal_timeframe": self.api.timeframe.key,
-                "trend_timeframe": self.api.trend_timeframe.key,
-                "strategy_version": __import__("okx_signal_system").__version__,
-            },
+            params=getattr(self, "_strategy_params", None),
         )
 
     def _b_tier_summary_key(self, candidates: list[SignalCandidate]) -> str | None:
@@ -1021,18 +1004,8 @@ class LiveSignalMonitor:
             candidates[0].candle_time,
             signal_timeframe=self.api.timeframe.key,
             trend_timeframe=self.api.trend_timeframe.key,
-        )
-
-    def _mark_b_tier_summary_notified(self, key: str, candidates: list[SignalCandidate]) -> None:
-        candle_time = candidates[0].candle_time if candidates else None
-        self._b_tier_summary_store.mark(
-            key,
-            {
-                "kline_time": pd.Timestamp(candle_time).isoformat() if candle_time is not None else "",
-                "candidate_count": len(candidates),
-                "signal_timeframe": self.api.timeframe.key,
-                "trend_timeframe": self.api.trend_timeframe.key,
-            },
+            params=getattr(self, "_strategy_params", None),
+            candidates=candidates,
         )
 
     async def start(self):
@@ -1045,14 +1018,18 @@ class LiveSignalMonitor:
         log.info("Live signal monitor started")
 
         try:
-            from okx_signal_system.signal_service.runtime import load_selected_strategy_params
+            from okx_signal_system.signal_service.runtime import load_selected_strategy_params_status
 
-            self._strategy_params = load_selected_strategy_params()
-            self._quality_gate_allows_push = True
-            log.info("Loaded runtime signal parameters without running offline research gates")
+            self._runtime_manifest_status = load_selected_strategy_params_status()
+            self._strategy_params = self._runtime_manifest_status.params
+            self._quality_gate_allows_push = bool(self._runtime_manifest_status.ok)
+            if self._quality_gate_allows_push:
+                log.info("Loaded approved runtime signal manifest")
+            else:
+                log.warning("Formal push disabled by runtime manifest status: %s", self._runtime_manifest_status.reason)
         except Exception as exc:
-            self._quality_gate_allows_push = True
-            log.warning("Runtime parameter load failed; using existing signal parameters: %s", exc)
+            self._quality_gate_allows_push = False
+            log.warning("Runtime parameter load failed; formal push disabled: %s", exc)
 
         # 启动后台持久化任务
         self._monitor_task = asyncio.create_task(self._monitor_loop())
@@ -1138,6 +1115,7 @@ class LiveSignalMonitor:
             "signal_timeframe": self.api.timeframe.key,
             "trend_timeframe": self.api.trend_timeframe.key,
             "push_allowed": self._quality_gate_allows_push,
+            "manifest_status": self._runtime_manifest_status.as_dict(),
             "selected_params": asdict(self._strategy_params),
             "websocket": ws_status,
             "shadow_summary": shadow_summary,
@@ -1165,8 +1143,6 @@ class LiveSignalMonitor:
                     "trend_timeframe": self.api.trend_timeframe.key,
                 },
             )
-            if queued:
-                self._run_lifecycle_outbox_once()
             log.info("Candidate health report queued: %s symbols", len(items))
         except Exception as exc:
             log.warning("Candidate health report failed: %s", exc)
@@ -1203,10 +1179,6 @@ class LiveSignalMonitor:
                     candidate.payload["total_formal_candidates"] = total_formal_candidates
                     candidate.payload["total_observations"] = total_observations
         for candidate in selection.tier_a:
-            if self._signal_notification_store.has(candidate.notify_key):
-                self._last_ready_signal = candidate.payload
-                log.info("Signal already notified; skipping duplicate push: %s %s", candidate.inst_id, candidate.side)
-                continue
             signal = candidate.signal
             decision = candidate.decision
             self._last_ready_signal = candidate.payload
@@ -1231,25 +1203,21 @@ class LiveSignalMonitor:
         if selection.tier_b:
             log.info("B-tier candidates retained for summary: %s", len(selection.tier_b))
             summary_key = self._b_tier_summary_key(selection.tier_b)
-            if summary_key and self._b_tier_summary_store.has(summary_key):
-                log.info("B-tier summary already sent for this candle: %s", summary_key)
-            else:
-                try:
-                    summary_sent = self._notification_dispatcher.enqueue_b_tier_summary(
-                        summary_key or f"live_b_tier:{pd.Timestamp.now(tz='UTC').strftime('%Y%m%dT%H%M%S')}",
-                        selection.tier_b,
-                        total_candidates=total_formal_candidates,
-                        signal_timeframe=self.api.timeframe.key,
-                        trend_timeframe=self.api.trend_timeframe.key,
-                    )
-                except Exception as exc:
-                    log.error("B-tier summary enqueue failed: %s", exc)
-                    summary_sent = False
-                if summary_sent and summary_key:
-                    self._mark_b_tier_summary_notified(summary_key, selection.tier_b)
-                    log.info("B-tier summary queued: %s candidates", len(selection.tier_b))
-                elif summary_key:
-                    log.warning("B-tier summary was not queued; will retry next scan")
+            try:
+                summary_sent = self._notification_dispatcher.enqueue_b_tier_summary(
+                    summary_key or f"live_b_tier:{pd.Timestamp.now(tz='UTC').strftime('%Y%m%dT%H%M%S')}",
+                    selection.tier_b,
+                    total_candidates=total_formal_candidates,
+                    signal_timeframe=self.api.timeframe.key,
+                    trend_timeframe=self.api.trend_timeframe.key,
+                )
+            except Exception as exc:
+                log.error("B-tier summary enqueue failed: %s", exc)
+                summary_sent = False
+            if summary_sent:
+                log.info("B-tier summary queued: %s candidates", len(selection.tier_b))
+            elif summary_key:
+                log.warning("B-tier summary was not queued; will retry next scan")
 
     @staticmethod
     def _call_signal_callback(callback, signal, decision, candidate):
@@ -1296,16 +1264,6 @@ class LiveSignalMonitor:
                 cycle_health = scan_result.cycle_health
 
                 await self._publish_tiered_candidates(scan_result.selection)
-                try:
-                    outbox_summary = self._run_lifecycle_outbox_once()
-                    if (
-                        outbox_summary.get("sent")
-                        or outbox_summary.get("failed")
-                        or outbox_summary.get("dead_letter")
-                    ):
-                        log.info("Lifecycle outbox processed: %s", outbox_summary)
-                except Exception as exc:
-                    log.warning("Lifecycle outbox processing failed: %s", exc)
                 self.api.persist_data()
                 self._write_latest_scan_status(cycle_health)
                 now_ts = time.time()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +13,11 @@ import pandas as pd
 from okx_signal_system.backtest.runner import run_backtest, split_train_valid, summarize_trades, validate_backtest_result
 from okx_signal_system.config import load_config, project_paths
 from okx_signal_system.features.indicators import prior_breakout_levels, resample_trend
+from okx_signal_system.research.approved_strategy_manifest import (
+    ApprovedManifestStatus,
+    load_approved_manifest_status,
+    strategy_params_from_dict,
+)
 from okx_signal_system.risk.model import Ledger, RiskConfig, smart_leverage_for_signal, validate_signal
 from okx_signal_system.strategy.trend_breakout import StrategyParams, TradeSignal
 from okx_signal_system.strategy.vote_gate import min_vote_approval_rate
@@ -20,6 +26,8 @@ from okx_signal_system.timeframe import bars_for_hours, default_trend_timeframe,
 if TYPE_CHECKING:
     from okx_signal_system.data.loader import SymbolData
 
+
+log = logging.getLogger(__name__)
 
 PUSH_BLOCKING_REASONS = frozenset(
     {
@@ -32,12 +40,26 @@ PUSH_BLOCKING_REASONS = frozenset(
         "validation_no_valid_backtest",
         "validation_return_not_positive",
         "validation_profit_factor_below_1",
+        "runtime_manifest_missing",
+        "runtime_manifest_json_invalid",
+        "runtime_manifest_invalid_json",
+        "runtime_manifest_schema_unsupported",
+        "runtime_manifest_type_invalid",
+        "runtime_manifest_hash_mismatch",
+        "runtime_manifest_param_hash_mismatch",
+        "runtime_manifest_params_missing",
+        "runtime_manifest_params_invalid",
     }
 )
 
 
 def is_push_blocking_reason(reason: str) -> bool:
-    return reason in PUSH_BLOCKING_REASONS or reason.endswith(":history_too_short")
+    return (
+        reason in PUSH_BLOCKING_REASONS
+        or reason.endswith(":history_too_short")
+        or reason.startswith("runtime_manifest_params_missing:")
+        or reason.startswith("runtime_manifest_params_invalid:")
+    )
 
 
 def push_blocking_reasons(reasons: Iterable[str]) -> list[str]:
@@ -58,6 +80,7 @@ class StartupQualityReport:
     anti_future_checks: dict
     stress_checks: dict
     stale_symbols: list[str]
+    runtime_manifest: dict
     reasons: list[str]
     push_allowed: bool
     push_blocking_reasons: list[str]
@@ -68,26 +91,15 @@ class StartupQualityReport:
 
 
 def params_from_dict(data: dict) -> StrategyParams:
-    return StrategyParams(
-        fast_ema=int(data.get("fast_ema", 120)),
-        slow_ema=int(data.get("slow_ema", 720)),
-        breakout_window=int(data.get("breakout_window", 384)),
-        atr_stop_mult=float(data.get("atr_stop_mult", 4.0)),
-        take_profit_mult=max(float(data.get("take_profit_mult", 6.0)), 3.5),
-        max_hold_bars=int(data.get("max_hold_bars", 768)),
-        atr_window=int(data.get("atr_window", 14)),
-    )
+    return strategy_params_from_dict(data)
+
+
+def load_selected_strategy_params_status(output_dir: str | Path | None = None) -> ApprovedManifestStatus:
+    return load_approved_manifest_status(output_dir)
 
 
 def load_selected_strategy_params(output_dir: str | Path | None = None) -> StrategyParams:
-    out = Path(output_dir) if output_dir else project_paths().output_dir
-    path = out / "selected_params.json"
-    if not path.exists():
-        return StrategyParams()
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        return StrategyParams()
-    return params_from_dict(data)
+    return load_selected_strategy_params_status(output_dir).params
 
 
 def latest_bar_age_hours(frame: pd.DataFrame, now: pd.Timestamp | None = None) -> float | None:
@@ -233,7 +245,8 @@ def run_startup_quality_gate(
     trend_timeframe = timeframe_spec(trend_timeframe).key
     if history_tail is None:
         history_tail = bars_for_hours(24 * 365 * 3, signal_timeframe)
-    params = load_selected_strategy_params(output_dir)
+    manifest_status = load_selected_strategy_params_status(output_dir)
+    params = manifest_status.params
     min_vote_rate = min_vote_approval_rate(config)
     from okx_signal_system.data.loader import load_all_symbols
     all_symbols = _select_symbols(load_all_symbols(dataset), symbols, max_symbols)
@@ -318,6 +331,8 @@ def run_startup_quality_gate(
         reasons.append("validation_profit_factor_below_1")
     if train_summary.get("profit_factor", 0) < 1.0 <= valid_summary.get("profit_factor", 0):
         reasons.append("validation_edge_not_confirmed_by_training")
+    if not manifest_status.ok:
+        reasons.append(manifest_status.reason)
 
     blocking_reasons = push_blocking_reasons(reasons)
     status = "passed" if not reasons else "warning"
@@ -334,6 +349,7 @@ def run_startup_quality_gate(
         anti_future_checks=anti_future,
         stress_checks=stress,
         stale_symbols=stale_symbols,
+        runtime_manifest=manifest_status.as_dict(),
         reasons=reasons,
         push_allowed=not blocking_reasons,
         push_blocking_reasons=blocking_reasons,

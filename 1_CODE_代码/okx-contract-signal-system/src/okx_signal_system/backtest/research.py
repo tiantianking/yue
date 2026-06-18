@@ -21,6 +21,11 @@ from okx_signal_system.backtest.runner import run_backtest, split_train_valid, s
 from okx_signal_system.config import project_paths
 from okx_signal_system.data.loader import SymbolData, load_all_symbols
 from okx_signal_system.risk.costs import CostConfig, estimate_costs
+from okx_signal_system.research.approved_strategy_manifest import (
+    CANDIDATE_PARAMS_FILENAME,
+    STRICT_RESEARCH_CANDIDATE_TYPE,
+    canonical_sha256,
+)
 from okx_signal_system.strategy.trend_breakout import StrategyParams
 from okx_signal_system.timeframe import default_trend_timeframe, timeframe_spec
 
@@ -953,6 +958,7 @@ def _failed_research_artifacts(
     reason: str,
     split_status: str,
     research_mode: str = "FORMAL",
+    research_version: str = "v3.56-strict",
 ) -> dict[str, pd.DataFrame | dict | StrategyParams]:
     single_results = pd.DataFrame(
         [_empty_symbol_research_row(symbol.inst_id, shared_params=shared_params, reason=reason) for symbol in symbols]
@@ -1016,6 +1022,9 @@ def _failed_research_artifacts(
         "research_metadata": {
             "dataset": dataset,
             "research_mode": research_mode,
+            "research_version": research_version,
+            "signal_timeframe": signal_key,
+            "trend_timeframe": trend_key,
             "split_status": split_status,
             "promotion_eligible": False,
             "fail_reasons": reason,
@@ -1530,7 +1539,7 @@ def run_dataset_research_artifacts(
     blind_release_token: str | None = None,
     blind_release_token_sha256: str | None = None,
     blind_registry_path: str | Path | None = None,
-    research_version: str = "v3.55-strict",
+    research_version: str = "v3.56-strict",
     research_mode: str = "FORMAL",
 ) -> dict[str, pd.DataFrame | dict | StrategyParams]:
     symbols = load_all_symbols(dataset)
@@ -1722,6 +1731,9 @@ def run_dataset_research_artifacts(
             "research_metadata": {
                 "dataset": dataset,
                 "research_mode": research_mode,
+                "research_version": research_version,
+                "signal_timeframe": signal_key,
+                "trend_timeframe": trend_key,
                 "split_status": split_status,
                 "blind_lock_status": "BLIND_LOCKED",
                 "precommit_blind": True,
@@ -2136,6 +2148,9 @@ def run_dataset_research_artifacts(
         "research_metadata": {
             "dataset": dataset,
             "research_mode": research_mode,
+            "research_version": research_version,
+            "signal_timeframe": signal_key,
+            "trend_timeframe": trend_key,
             "split_status": split_status,
             "blind_lock_status": blind_lock_status,
             "blind_evaluation": blind_evaluation,
@@ -2394,6 +2409,46 @@ def build_acceptance_checklist(
     )
 
 
+def _artifact_file_hashes(paths: dict[str, Path], *, exclude: set[str] | None = None) -> dict[str, str]:
+    exclude = exclude or set()
+    hashes: dict[str, str] = {}
+    for key, path in paths.items():
+        if key in exclude or not path.exists() or not path.is_file():
+            continue
+        hashes[path.name] = _file_sha256(path)
+    return hashes
+
+
+def _build_candidate_params_payload(
+    artifacts: dict[str, pd.DataFrame | dict | StrategyParams],
+    *,
+    artifact_hashes: dict[str, str],
+    run_id: str = "",
+) -> dict:
+    metadata = artifacts.get("research_metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+    selected = artifacts.get("selected_params")
+    selected_dict = asdict(selected) if isinstance(selected, StrategyParams) else selected
+    selected_dict = selected_dict if isinstance(selected_dict, dict) else {}
+    run_id = str(run_id or metadata.get("research_run_id") or metadata.get("registry_id") or "")
+    return {
+        "artifact_type": STRICT_RESEARCH_CANDIDATE_TYPE,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "research_run_id": run_id,
+        "dataset": metadata.get("dataset", ""),
+        "signal_timeframe": metadata.get("signal_timeframe", ""),
+        "trend_timeframe": metadata.get("trend_timeframe", ""),
+        "research_version": metadata.get("research_version", ""),
+        "research_mode": metadata.get("research_mode", ""),
+        "promotion_eligible": bool(metadata.get("promotion_eligible", False)),
+        "candidate_params": selected_dict,
+        "candidate_params_sha256": canonical_sha256(selected_dict),
+        "research_metadata": metadata,
+        "artifact_hashes": artifact_hashes,
+    }
+
+
 def write_research_artifacts(artifacts: dict[str, pd.DataFrame | dict | StrategyParams], output_dir: str | Path) -> dict[str, Path]:
     sample_trades = artifacts.get("sample_trades")
     if not isinstance(sample_trades, pd.DataFrame):
@@ -2412,7 +2467,7 @@ def write_research_artifacts(artifacts: dict[str, pd.DataFrame | dict | Strategy
     out.mkdir(parents=True, exist_ok=True)
     paths = {
         "train_grid_results": out / "train_grid_results.csv",
-        "selected_params": out / "selected_params.json",
+        "candidate_params": out / CANDIDATE_PARAMS_FILENAME,
         "validation_results": out / "validation_results.csv",
         "single_symbol_results": out / "single_symbol_results.csv",
         "portfolio_results": out / "portfolio_results.csv",
@@ -2448,9 +2503,6 @@ def write_research_artifacts(artifacts: dict[str, pd.DataFrame | dict | Strategy
         value = artifacts.get(key)
         if isinstance(value, dict):
             paths[key].write_text(json.dumps(value, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
-    selected = artifacts.get("selected_params")
-    selected_dict = asdict(selected) if isinstance(selected, StrategyParams) else selected
-    paths["selected_params"].write_text(json.dumps(selected_dict, indent=2, ensure_ascii=False), encoding="utf-8")
     portfolio = artifacts.get("portfolio_results")
     summary = portfolio.iloc[0].to_dict() if isinstance(portfolio, pd.DataFrame) and not portfolio.empty else {}
     panel_summary = {
@@ -2465,6 +2517,9 @@ def write_research_artifacts(artifacts: dict[str, pd.DataFrame | dict | Strategy
     paths["sample_summary"].write_text(json.dumps(panel_summary, indent=2, ensure_ascii=False), encoding="utf-8")
     paths["selection_memo"].write_text(build_selection_memo(artifacts), encoding="utf-8")
     paths["final_report"].write_text(build_final_report(artifacts), encoding="utf-8")
+    artifact_hashes = _artifact_file_hashes(paths, exclude={"candidate_params"})
+    candidate_payload = _build_candidate_params_payload(artifacts, artifact_hashes=artifact_hashes, run_id=out.name)
+    paths["candidate_params"].write_text(json.dumps(candidate_payload, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
     return paths
 
 
