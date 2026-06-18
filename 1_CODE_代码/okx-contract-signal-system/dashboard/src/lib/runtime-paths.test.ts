@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { historyDir, historyScriptArgs, pythonPath } from "./runtime-paths.ts";
 
@@ -25,16 +28,64 @@ function withEnv<T>(values: Record<string, string | undefined>, fn: () => T): T 
   }
 }
 
-test("pythonPath defaults to python and honors env overrides", () => {
-  withEnv({ OKX_DASHBOARD_PYTHON: undefined, PYTHON: undefined }, () => {
-    assert.equal(pythonPath(), "python");
-  });
-  withEnv({ OKX_DASHBOARD_PYTHON: undefined, PYTHON: "py -3.11" }, () => {
-    assert.equal(pythonPath(), "py -3.11");
-  });
-  withEnv({ OKX_DASHBOARD_PYTHON: "custom-python", PYTHON: "python-from-env" }, () => {
+function withCwd<T>(cwd: string, fn: () => T): T {
+  const previous = process.cwd();
+  process.chdir(cwd);
+  try {
+    return fn();
+  } finally {
+    process.chdir(previous);
+  }
+}
+
+test("pythonPath uses workspace Python when available and honors env overrides", () => {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "okx-dashboard-"));
+  const dashboardCwd = path.join(tmp, "workspace", "source", "project", "dashboard");
+  const workspacePython = path.join(
+    tmp,
+    "workspace",
+    "LOCAL_DEPS",
+    "venv",
+    process.platform === "win32" ? "Scripts" : "bin",
+    process.platform === "win32" ? "python.exe" : "python",
+  );
+  mkdirSync(path.dirname(workspacePython), { recursive: true });
+  mkdirSync(dashboardCwd, { recursive: true });
+  writeFileSync(workspacePython, "");
+  withCwd(dashboardCwd, () => withEnv({ OKX_DASHBOARD_PYTHON: undefined, PYTHON: undefined }, () => {
+    assert.equal(pythonPath(), workspacePython);
+  }));
+  withCwd(dashboardCwd, () => withEnv({ OKX_DASHBOARD_PYTHON: undefined, PYTHON: "py -3.11" }, () => {
+    assert.equal(pythonPath(), workspacePython);
+  }));
+  withCwd(dashboardCwd, () => withEnv({ OKX_DASHBOARD_PYTHON: "custom-python", PYTHON: "python-from-env" }, () => {
     assert.equal(pythonPath(), "custom-python");
+  }));
+});
+
+test("pythonPath resolves the current workspace Python when present", () => {
+  const currentWorkspacePython = path.resolve(
+    process.cwd(),
+    "..",
+    "..",
+    "..",
+    "LOCAL_DEPS",
+    "venv",
+    process.platform === "win32" ? "Scripts" : "bin",
+    process.platform === "win32" ? "python.exe" : "python",
+  );
+  withEnv({ OKX_DASHBOARD_PYTHON: undefined, PYTHON: undefined }, () => {
+    if (pythonPath() !== "python") {
+      assert.equal(pythonPath(), currentWorkspacePython);
+    }
   });
+});
+
+test("pythonPath falls back when workspace Python is absent", () => {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "okx-dashboard-"));
+  withCwd(tmp, () => withEnv({ OKX_DASHBOARD_PYTHON: undefined, PYTHON: "py -3.11" }, () => {
+    assert.equal(pythonPath(), "py -3.11");
+  }));
 });
 
 test("historyScriptArgs lets Python resolve JIAOYI_DATA_DIR and config roots", () => {

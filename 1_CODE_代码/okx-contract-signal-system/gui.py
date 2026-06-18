@@ -28,6 +28,7 @@ if str(_src_path) not in sys.path:
 log = logging.getLogger(__name__)
 
 from okx_signal_system import __version__ as _PACKAGE_VERSION
+from okx_signal_system.config import load_runtime_config
 from okx_signal_system.io_atomic import write_text_atomic
 
 APP_VERSION = f"v{_PACKAGE_VERSION}"

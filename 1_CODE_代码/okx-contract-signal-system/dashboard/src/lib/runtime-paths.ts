@@ -1,7 +1,26 @@
+import { existsSync } from "node:fs";
 import path from "node:path";
 
+function workspacePythonPath() {
+  const executable = process.platform === "win32" ? "python.exe" : "python";
+  return path.resolve(
+    process.cwd(),
+    "..",
+    "..",
+    "..",
+    "LOCAL_DEPS",
+    "venv",
+    process.platform === "win32" ? "Scripts" : "bin",
+    executable,
+  );
+}
+
 export function pythonPath() {
-  return process.env.OKX_DASHBOARD_PYTHON ?? process.env.PYTHON ?? "python";
+  const workspacePython = workspacePythonPath();
+  return process.env.OKX_DASHBOARD_PYTHON
+    ?? (existsSync(workspacePython) ? workspacePython : undefined)
+    ?? process.env.PYTHON
+    ?? "python";
 }
 
 function datasetName(timeframe: string) {
