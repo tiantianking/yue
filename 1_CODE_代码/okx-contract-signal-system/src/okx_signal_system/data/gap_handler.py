@@ -272,6 +272,7 @@ class DataGapHandler:
         inst_id: str,
         *,
         allow_existing_open_tail: bool = False,
+        allow_open_candles: bool = False,
     ) -> pd.DataFrame:
         missing_ohlcv = [col for col in OHLCV_COLUMNS if col not in df.columns]
         if missing_ohlcv:
@@ -296,7 +297,9 @@ class DataGapHandler:
             raise ValueError(f"{inst_id} {MISSING_REQUIRED_STRUCTURE_COLUMNS}: {null_metadata}")
 
         checked["is_closed"] = self._coerce_closed_series(checked["is_closed"])
-        if not checked["is_closed"].all() and allow_existing_open_tail:
+        if not checked["is_closed"].all() and allow_open_candles:
+            pass
+        elif not checked["is_closed"].all() and allow_existing_open_tail:
             ordered = checked.sort_values("ts").reset_index(drop=True)
             open_mask = ~ordered["is_closed"]
             first_open_idx = int(open_mask[open_mask].index.min())
@@ -342,12 +345,16 @@ class DataGapHandler:
                     existing,
                     inst_id,
                     allow_existing_open_tail=allow_existing_open_tail,
+                    allow_open_candles=allow_existing_open_tail and mode == "merge",
                 )
 
                 if mode == "append":
                     df = pd.concat([existing, new_data], ignore_index=True)
                 else:  # merge
                     df = pd.concat([existing, new_data], ignore_index=True)
+                    df["_merge_precedence"] = range(len(df))
+                    df["_merge_precedence"] = df["_merge_precedence"] + (df["is_closed"].astype(int) * (len(df) + 1))
+                    df = df.sort_values(["ts", "_merge_precedence"]).drop(columns=["_merge_precedence"])
 
                 df = df.drop_duplicates(subset=["ts"], keep="last")
                 df = df.sort_values("ts").reset_index(drop=True)

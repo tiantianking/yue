@@ -131,6 +131,20 @@ def _concat_live_row(existing: pd.DataFrame, new_row: pd.DataFrame) -> pd.DataFr
     return pd.concat(frames, ignore_index=True).reindex(columns=columns)
 
 
+def _dedupe_candles_prefer_closed(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    df = frame.copy()
+    df["ts"] = pd.to_datetime(df["ts"], utc=True)
+    if "is_closed" not in df.columns:
+        df["is_closed"] = True
+    closed = df["is_closed"].map(lambda value: str(value).strip().lower() in {"true", "1", "yes"})
+    df["_merge_precedence"] = range(len(df))
+    df["_merge_precedence"] = df["_merge_precedence"] + (closed.astype(int) * (len(df) + 1))
+    df = df.sort_values(["ts", "_merge_precedence"]).drop(columns=["_merge_precedence"])
+    return df.drop_duplicates(subset=["ts"], keep="last").sort_values("ts").reset_index(drop=True)
+
+
 def _json_default(value: Any) -> Any:
     if isinstance(value, (datetime, pd.Timestamp)):
         return value.isoformat()
@@ -284,8 +298,7 @@ class RealtimeDataStore:
 
         if frames:
             df = pd.concat(frames, ignore_index=True)
-            df["ts"] = pd.to_datetime(df["ts"], utc=True)
-            df = df.drop_duplicates(subset=["ts"], keep="last").sort_values("ts").reset_index(drop=True)
+            df = _dedupe_candles_prefer_closed(df)
             if len(df) > self.max_cache_bars:
                 df = df.tail(self.max_cache_bars).reset_index(drop=True)
             self._cache[inst_id] = df
@@ -323,8 +336,7 @@ class RealtimeDataStore:
         # Merge then de-duplicate instead of assigning by row; old parquet
         # columns may have stricter dtypes than live float payloads.
         df = _concat_live_row(df, new_row)
-        df["ts"] = pd.to_datetime(df["ts"], utc=True)
-        df = df.drop_duplicates(subset=["ts"], keep="last").sort_values("ts").reset_index(drop=True)
+        df = _dedupe_candles_prefer_closed(df)
 
         # 保持足够的预热K线在内存
         if len(df) > self.max_cache_bars:
@@ -367,8 +379,7 @@ class RealtimeDataStore:
                 existing = _read_parquet_with_retry(path)
                 existing["ts"] = pd.to_datetime(existing["ts"], utc=True)
                 df_combined = pd.concat([existing, df], ignore_index=True)
-                df_combined = df_combined.drop_duplicates(subset=["ts"], keep="last")
-                df_combined = df_combined.sort_values("ts").reset_index(drop=True)
+                df_combined = _dedupe_candles_prefer_closed(df_combined)
                 if len(df_combined) > self.max_cache_bars:
                     df_combined = df_combined.tail(self.max_cache_bars).reset_index(drop=True)
                 _write_parquet_atomic(df_combined, path)

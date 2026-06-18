@@ -515,6 +515,28 @@ def test_gap_merge_allows_only_single_runtime_open_tail(tmp_path) -> None:
     )
 
 
+def test_gap_merge_closes_stale_runtime_open_candle(tmp_path) -> None:
+    timestamps = pd.date_range("2026-06-15T18:00:00Z", periods=4, freq="15min", tz="UTC")
+    frame = _closed_backfill_frame(timestamps)
+    frame.loc[1, "is_closed"] = False
+    frame.to_parquet(tmp_path / "BTC_USDT_USDT_15m.parquet", index=False)
+
+    closed_update = _closed_backfill_frame([timestamps[1]])
+    handler = DataGapHandler(tmp_path, timeframe="15m")
+
+    assert handler.merge_and_save(
+        "BTC-USDT-SWAP",
+        closed_update,
+        mode="merge",
+        allow_existing_open_tail=True,
+    )
+
+    saved = pd.read_parquet(tmp_path / "BTC_USDT_USDT_15m.parquet")
+    saved["ts"] = pd.to_datetime(saved["ts"], utc=True)
+    assert saved["is_closed"].all()
+    assert bool(saved[saved["ts"] == timestamps[1]].iloc[0]["is_closed"])
+
+
 @pytest.mark.parametrize("gap_bars", [1, 2, 10, 180, 500])
 def test_closed_backfill_service_blocks_all_complete_on_internal_gaps(tmp_path, monkeypatch, gap_bars) -> None:
     expected = pd.Timestamp("2026-06-15T18:00:00Z")
@@ -824,6 +846,45 @@ def test_realtime_store_writes_runtime_cache_without_mutating_history(tmp_path) 
     assert len(history_frame) == 1
     assert len(runtime_frame) == 2
     assert pd.to_datetime(runtime_frame["ts"], utc=True).max() == pd.Timestamp("2026-06-15T18:15:00Z")
+
+
+def test_realtime_store_save_does_not_repollute_closed_runtime_candle(tmp_path) -> None:
+    runtime_path = tmp_path / "BTC_USDT_USDT_15m.parquet"
+    stale_open = _closed_backfill_frame([pd.Timestamp("2026-06-15T18:00:00Z")])
+    stale_open["is_closed"] = False
+    stale_open.to_parquet(runtime_path, index=False)
+
+    store = RealtimeDataStore(
+        data_dir=tmp_path,
+        timeframe="15m",
+        max_cache_bars=100,
+    )
+    assert not bool(store.load("BTC-USDT-SWAP").iloc[0]["is_closed"])
+
+    repaired = _closed_backfill_frame([pd.Timestamp("2026-06-15T18:00:00Z")])
+    repaired.to_parquet(runtime_path, index=False)
+
+    store.append_candle(
+        "BTC-USDT-SWAP",
+        {
+            "ts": "2026-06-15T18:15:00Z",
+            "open": 101.0,
+            "high": 102.0,
+            "low": 100.0,
+            "close": 101.5,
+            "volume": 20.0,
+            "quote_volume": 2000.0,
+            "is_closed": False,
+        },
+    )
+    assert store.save("BTC-USDT-SWAP")
+
+    saved = pd.read_parquet(runtime_path)
+    saved["ts"] = pd.to_datetime(saved["ts"], utc=True)
+    old_row = saved[saved["ts"] == pd.Timestamp("2026-06-15T18:00:00Z")]
+    assert bool(old_row.iloc[0]["is_closed"])
+    open_rows = saved[~saved["is_closed"].map(bool)]
+    assert open_rows["ts"].tolist() == [pd.Timestamp("2026-06-15T18:15:00Z")]
 
 
 def test_realtime_store_retains_at_least_3500_bars(tmp_path) -> None:

@@ -19,7 +19,7 @@ RESEARCH_RUNS_DIRNAME = "research_runs"
 MANIFEST_SCHEMA_VERSION = 1
 MANIFEST_TYPE = "approved_strategy_params"
 STRICT_RESEARCH_CANDIDATE_TYPE = "strict_research_candidate"
-APPROVED_STRATEGY_VERSION = "3.56.1"
+APPROVED_STRATEGY_VERSION = "3.56.2"
 BLIND_SEALED_PASS = "BLIND_SEALED_PASS"
 
 PARAM_FIELDS = tuple(StrategyParams.__dataclass_fields__.keys())
