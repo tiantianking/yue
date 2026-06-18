@@ -17,6 +17,7 @@ import type {
 } from "./types";
 import { dashboardExecTimeoutMs, historyScriptArgs, pythonPath } from "./runtime-paths";
 import { enrichLatestScan } from "./runtime-health";
+import { dashboardStaleSymbols } from "./runtime-stale-symbols";
 import { buildSymbolRows } from "./symbol-rows";
 
 const execFileAsync = promisify(execFile);
@@ -210,6 +211,7 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
     legacyRows: backfill,
     actualBySymbol,
   });
+  const staleSymbols = dashboardStaleSymbols(symbolRows, quality, runtimeOperational);
 
   return {
     generated_at: new Date().toISOString(),
@@ -251,9 +253,7 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
           ...runtimeBlockingReasons,
         ]),
       ],
-      stale_symbols: Array.isArray(quality.stale_symbols)
-        ? quality.stale_symbols.map(String)
-        : [],
+      stale_symbols: staleSymbols,
     },
     train_summary: asRecord(quality.train_summary) as SummaryMetrics,
     valid_summary: asRecord(quality.valid_summary) as SummaryMetrics,

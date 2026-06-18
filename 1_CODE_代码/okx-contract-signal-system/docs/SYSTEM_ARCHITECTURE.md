@@ -457,3 +457,9 @@ src/okx_signal_system/
 - Keeps SQLite outbox claim/lease/backoff behavior and now closes every SQLite connection deterministically.
 - Treats a fresh, complete closed-candle backfill as market-data liveness evidence when the WebSocket is connected but quiet between candle events; this does not override scan staleness, disconnection, degradation, or scan errors.
 - Rejects regressions found in the re-uploaded same-name archive: hard-coded scheduler push approval, hash-only manifests, daily-learning writes to the formal candidate path, loss of continuous outbox draining, and dashboard observability removal.
+
+## v3.56.5 runtime dashboard reconciliation
+
+- Dashboard quality stale-symbol counts now use live runtime symbol rows when the runtime snapshot is online, so stale startup-quality diagnostics cannot override complete closed-candle backfill evidence.
+- When runtime status is offline, stale, or errored, Dashboard still preserves startup-quality `stale_symbols` for diagnosis.
+- Package metadata and visible launcher displays are synchronized to `3.56.5`; launchers continue deriving their visible `v3.56.5` label from the shared package version source.

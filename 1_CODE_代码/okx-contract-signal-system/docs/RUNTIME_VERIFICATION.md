@@ -1,6 +1,6 @@
 # Runtime Verification
 
-This note records the v3.56.4 runtime-cache integration acceptance boundary for release packages.
+This note records the v3.56.5 runtime-cache integration acceptance boundary for release packages.
 
 Date: 2026-06-18
 
@@ -32,11 +32,11 @@ Release validation commands:
 - `git diff --check`
 
 Packaging:
-- Build with `py -3.12 scripts/build_release_zip.py --output C:\Users\26492\Desktop\okx-contract-signal-system-v3.56.4-runtime-cache-integrated-final.zip`.
+- Build with `py -3.12 scripts/build_release_zip.py --output C:\Users\26492\Desktop\okx-contract-signal-system-v3.56.5-runtime-observed-final.zip`.
 - The release package must exclude `.env`, `outputs/`, `output/`, logs, caches, SQLite databases, `node_modules/`, `.next/`, and other local runtime/build artifacts.
 - Generate a matching `.sha256` file beside the zip after the package is built.
 
 
 Integration note:
-- This v3.56.4 package keeps the strict approved-manifest semantic gate, experimental daily-learning isolation, continuous outbox draining, write-result/data-completeness separation, UTF-8 dashboard headers, and runtime observability from the previously accepted v3.56.3 line.
+- This v3.56.5 package keeps the strict approved-manifest semantic gate, experimental daily-learning isolation, continuous outbox draining, write-result/data-completeness separation, UTF-8 dashboard headers, runtime observability, and Dashboard stale-symbol runtime reconciliation from the previously accepted v3.56.4 line.
 - The re-uploaded same-name v3.56.3 archive was not byte-identical to the accepted package and was not used as a release baseline.

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildSymbolRows } from "./symbol-rows.ts";
 import { enrichLatestScan, isClosedBackfillFresh } from "./runtime-health.ts";
+import { dashboardStaleSymbols } from "./runtime-stale-symbols.ts";
 
 test("closed runtime backfill is authoritative over stale history summaries", () => {
   const rows = buildSymbolRows({
@@ -113,4 +114,41 @@ test("incomplete closed backfill does not hide stale websocket", () => {
 
   assert.equal(result?.runtime_status, "stale");
   assert.equal(result?.runtime_reason, "websocket_message_stale");
+});
+
+test("online runtime stale symbols come from runtime symbol rows", () => {
+  const freshRows = buildSymbolRows({
+    configuredSymbols: ["BTC-USDT-SWAP"],
+    closedRows: [
+      {
+        inst_id: "BTC-USDT-SWAP",
+        status: "passed",
+        rows_after: 345,
+        last_ts: new Date().toISOString(),
+      },
+    ],
+    scanSymbols: ["BTC-USDT-SWAP"],
+    legacyRows: [],
+    actualBySymbol: new Map(),
+  });
+
+  assert.deepEqual(
+    dashboardStaleSymbols(
+      freshRows,
+      { stale_symbols: ["BTC-USDT-SWAP"] },
+      true,
+    ),
+    [],
+  );
+});
+
+test("offline runtime keeps startup stale symbol diagnostics", () => {
+  assert.deepEqual(
+    dashboardStaleSymbols(
+      [],
+      { stale_symbols: ["BTC-USDT-SWAP", "ETH-USDT-SWAP"] },
+      false,
+    ),
+    ["BTC-USDT-SWAP", "ETH-USDT-SWAP"],
+  );
 });
