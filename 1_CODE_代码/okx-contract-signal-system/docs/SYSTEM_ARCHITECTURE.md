@@ -463,3 +463,10 @@ src/okx_signal_system/
 - Dashboard quality stale-symbol counts now use live runtime symbol rows when the runtime snapshot is online, so stale startup-quality diagnostics cannot override complete closed-candle backfill evidence.
 - When runtime status is offline, stale, or errored, Dashboard still preserves startup-quality `stale_symbols` for diagnosis.
 - Package metadata and visible launcher displays are synchronized to `3.56.5`; launchers continue deriving their visible `v3.56.5` label from the shared package version source.
+
+## v3.56.6 stale-symbol guard closure
+
+- Dashboard stale-symbol detection now treats closed backfill symbol rows as authoritative when runtime is online, using per-symbol `status`, `missing_closed_bars`, `data_complete`, and `error` instead of a raw wall-clock age check.
+- A fresh, complete closed backfill no longer produces stale-symbol warnings just because the latest closed bar is quiet between exchange candle events.
+- Dashboard runtime approval now also requires the 15m closed backfill to be complete; incomplete or missing closed-backfill status adds `closed_backfill_incomplete` to `push_blocking_reasons`.
+- Package metadata and visible launcher displays are synchronized to `3.56.6`; launchers continue deriving their visible `v3.56.6` label from the shared package version source.

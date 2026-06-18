@@ -5,6 +5,17 @@ type RuntimeSymbolRow = {
   age_minutes?: number | null;
 };
 
+type ClosedBackfillLike = {
+  all_complete?: boolean;
+  symbols?: Array<{
+    inst_id?: string;
+    status?: string;
+    missing_closed_bars?: number;
+    data_complete?: boolean;
+    error?: string;
+  }>;
+};
+
 type JsonRecord = Record<string, unknown>;
 
 function stringArray(value: unknown): string[] {
@@ -15,9 +26,26 @@ export function dashboardStaleSymbols(
   symbolRows: RuntimeSymbolRow[],
   quality: JsonRecord,
   runtimeOperational: boolean,
+  closedBackfill?: ClosedBackfillLike | null,
 ): string[] {
   if (!runtimeOperational) {
     return stringArray(quality.stale_symbols);
+  }
+  if (Array.isArray(closedBackfill?.symbols)) {
+    return closedBackfill.symbols
+      .filter((row) => {
+        if (!row.inst_id) {
+          return false;
+        }
+        if (row.status !== "passed" || row.error) {
+          return true;
+        }
+        if (typeof row.missing_closed_bars === "number" && row.missing_closed_bars > 0) {
+          return true;
+        }
+        return row.data_complete === false;
+      })
+      .map((row) => String(row.inst_id));
   }
   return symbolRows
     .filter((row) => {

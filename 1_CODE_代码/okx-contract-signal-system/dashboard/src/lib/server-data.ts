@@ -17,6 +17,7 @@ import type {
 } from "./types";
 import { dashboardExecTimeoutMs, historyScriptArgs, pythonPath } from "./runtime-paths";
 import { enrichLatestScan } from "./runtime-health";
+import { runtimeBlockingReasons, runtimePushAllowed } from "./runtime-quality";
 import { dashboardStaleSymbols } from "./runtime-stale-symbols";
 import { buildSymbolRows } from "./symbol-rows";
 
@@ -185,22 +186,29 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
   const runtimeManifestStatus = asRecord(enrichedLatestScan?.manifest_status);
   const runtimeParams = asRecord(enrichedLatestScan?.selected_params) as StrategyParams;
   const runtimeOperational = enrichedLatestScan?.runtime_status === "online";
-  const runtimePushAllowed = runtimeOperational && enrichedLatestScan?.push_allowed === true;
+  const closedBackfillOperational = closedBackfill?.all_complete === true;
+  const pushAllowed = runtimePushAllowed({
+    runtimeOperational,
+    runtimeReason: enrichedLatestScan?.runtime_reason,
+    closedBackfillOperational,
+    latestScanPushAllowed: enrichedLatestScan?.push_allowed === true,
+    manifestReason: "",
+  });
   const manifestReason =
     typeof runtimeManifestStatus.reason === "string"
       ? runtimeManifestStatus.reason
-      : runtimePushAllowed
+      : pushAllowed
         ? "approved_manifest_valid"
         : enrichedLatestScan
           ? "runtime_manifest_not_approved"
           : "runtime_status_missing";
-  const runtimeBlockingReasons = runtimePushAllowed
-    ? []
-    : [
-        runtimeOperational
-          ? manifestReason
-          : enrichedLatestScan?.runtime_reason ?? "runtime_not_online",
-      ];
+  const blockingReasons = runtimeBlockingReasons({
+    runtimeOperational,
+    runtimeReason: enrichedLatestScan?.runtime_reason,
+    closedBackfillOperational,
+    latestScanPushAllowed: enrichedLatestScan?.push_allowed === true,
+    manifestReason,
+  });
   const effectiveLatestSignal = enrichedLatestScan
     ? enrichedLatestScan.last_signal ?? null
     : latestSignal;
@@ -211,11 +219,11 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
     legacyRows: backfill,
     actualBySymbol,
   });
-  const staleSymbols = dashboardStaleSymbols(symbolRows, quality, runtimeOperational);
+  const staleSymbols = dashboardStaleSymbols(symbolRows, quality, runtimeOperational, closedBackfill);
 
   return {
     generated_at: new Date().toISOString(),
-    runtime_mode: runtimePushAllowed ? "formal_push" : "research_observation",
+    runtime_mode: pushAllowed ? "formal_push" : "research_observation",
     runtime_status_source: enrichedLatestScan
       ? "latest_scan_status.json"
       : "latest_scan_status_missing",
@@ -233,8 +241,8 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
     ),
     symbols: symbolRows,
     quality: {
-      status: runtimePushAllowed ? "runtime_approved" : "runtime_blocked",
-      push_allowed: runtimePushAllowed,
+      status: pushAllowed ? "runtime_approved" : "runtime_blocked",
+      push_allowed: pushAllowed,
       manifest_reason: manifestReason,
       params_source:
         Object.keys(runtimeParams).length === 0
@@ -250,7 +258,7 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
           ...(Array.isArray(quality.push_blocking_reasons)
             ? quality.push_blocking_reasons.map(String)
             : []),
-          ...runtimeBlockingReasons,
+          ...blockingReasons,
         ]),
       ],
       stale_symbols: staleSymbols,

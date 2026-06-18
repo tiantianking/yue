@@ -20,7 +20,7 @@ RELEASE_TEXT_FILES = [
     "docs/RELEASE_SAFETY.md",
     "docs/RUNTIME_VERIFICATION.md",
     "docs/SYSTEM_ARCHITECTURE.md",
-    "docs/V3.56.5_RUNTIME_OBSERVATION_CN.md",
+    "docs/V3.56.6_RUNTIME_OBSERVATION_CN.md",
     "src/okx_signal_system/reporting/report_builder.py",
     "src/okx_signal_system/signal_service/app.py",
     "src/okx_signal_system/notify/feishu.py",
@@ -80,7 +80,7 @@ def test_release_version_sources_stay_consistent() -> None:
     gui_text = _read("gui.py")
     start_text = _read("start.bat")
 
-    assert package_version == "3.56.5"
+    assert package_version == "3.56.6"
     assert pyproject["project"]["version"] == package_version
     assert APPROVED_STRATEGY_VERSION == package_version
     assert f"Version: {package_version}" in pkg_info

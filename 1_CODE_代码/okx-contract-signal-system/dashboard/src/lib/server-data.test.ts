@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildSymbolRows } from "./symbol-rows.ts";
 import { enrichLatestScan, isClosedBackfillFresh } from "./runtime-health.ts";
+import { runtimeBlockingReasons, runtimePushAllowed } from "./runtime-quality.ts";
 import { dashboardStaleSymbols } from "./runtime-stale-symbols.ts";
 
 test("closed runtime backfill is authoritative over stale history summaries", () => {
@@ -139,6 +140,78 @@ test("online runtime stale symbols come from runtime symbol rows", () => {
       true,
     ),
     [],
+  );
+});
+
+test("fresh closed backfill rows override stale row age in dashboard stale symbols", () => {
+  assert.deepEqual(
+    dashboardStaleSymbols(
+      [
+        {
+          inst_id: "BTC-USDT-SWAP",
+          status: "passed",
+          age_minutes: 180,
+        },
+      ],
+      { stale_symbols: ["BTC-USDT-SWAP"] },
+      true,
+      {
+        all_complete: true,
+        symbols: [
+          {
+            inst_id: "BTC-USDT-SWAP",
+            status: "passed",
+            missing_closed_bars: 0,
+            data_complete: true,
+          },
+        ],
+      },
+    ),
+    [],
+  );
+});
+
+test("failed closed backfill rows are stale even when runtime is online", () => {
+  assert.deepEqual(
+    dashboardStaleSymbols(
+      [],
+      {},
+      true,
+      {
+        all_complete: false,
+        symbols: [
+          {
+            inst_id: "ETH-USDT-SWAP",
+            status: "failed",
+            missing_closed_bars: 2,
+            data_complete: false,
+            error: "gap_unrepaired",
+          },
+        ],
+      },
+    ),
+    ["ETH-USDT-SWAP"],
+  );
+});
+
+test("closed backfill must be complete before dashboard can approve runtime push", () => {
+  assert.equal(
+    runtimePushAllowed({
+      runtimeOperational: true,
+      closedBackfillOperational: false,
+      latestScanPushAllowed: true,
+      manifestReason: "approved_manifest_valid",
+    }),
+    false,
+  );
+  assert.deepEqual(
+    runtimeBlockingReasons({
+      runtimeOperational: true,
+      closedBackfillOperational: false,
+      latestScanPushAllowed: true,
+      manifestReason: "approved_manifest_valid",
+    }),
+    ["closed_backfill_incomplete", "approved_manifest_valid"],
   );
 });
 
