@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -319,7 +320,7 @@ class SignalLifecycleStore:
                 conn.execute(f"ALTER TABLE notification_outbox ADD COLUMN {name} {column_type}")
 
     def _load(self) -> None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             self._migrate_legacy_json(conn)
             rows = conn.execute(
                 """
@@ -477,7 +478,7 @@ class SignalLifecycleStore:
     def _save(self) -> None:
         self.records = self._limit_records(self.records)
         self._by_id = {item.signal_id: item for item in self.records}
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             for record in self.records:
                 self._upsert_record(conn, record)
 
@@ -686,13 +687,13 @@ class SignalLifecycleStore:
         self.records.append(record)
         self.records = self._limit_records(self.records)
         self._by_id = {item.signal_id: item for item in self.records}
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             self._upsert_record(conn, record)
             self._insert_lifecycle_event(conn, record, event_type="TRIGGERED", event_at=signal_time)
         return record
 
     def _load_record(self, signal_id: str) -> SignalLifecycleRecord | None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             row = conn.execute(
                 "SELECT * FROM lifecycle_records WHERE signal_id = ?",
                 (signal_id,),
@@ -716,7 +717,7 @@ class SignalLifecycleStore:
                 updated += 1
         if updated:
             self._save()
-            with self._connect() as conn:
+            with closing(self._connect()) as conn, conn:
                 for record, event_type, event_at, status, setup_state, outcome_state in lifecycle_events:
                     self._insert_lifecycle_event(
                         conn,
@@ -740,7 +741,7 @@ class SignalLifecycleStore:
     ) -> None:
         payload = payload or {}
         now = _now_text()
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.execute(
                 """
                 INSERT INTO notification_outbox (
@@ -789,7 +790,7 @@ class SignalLifecycleStore:
 
     def mark_notification_sent(self, outbox_id: str) -> None:
         now = _now_text()
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.execute(
                 """
                 UPDATE notification_outbox
@@ -806,7 +807,7 @@ class SignalLifecycleStore:
 
     def mark_notification_failed(self, outbox_id: str, error: str) -> None:
         now = _now_text()
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             row = conn.execute(
                 """
                 SELECT attempt_count
@@ -841,7 +842,7 @@ class SignalLifecycleStore:
 
     def mark_notification_dead_letter(self, outbox_id: str, error: str) -> None:
         now = _now_text()
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.execute(
                 """
                 UPDATE notification_outbox
@@ -857,7 +858,7 @@ class SignalLifecycleStore:
 
     def pending_notifications(self, *, limit: int = 100) -> list[dict[str, Any]]:
         now = _now_text()
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             rows = conn.execute(
                 """
                 SELECT *
@@ -880,7 +881,7 @@ class SignalLifecycleStore:
     ) -> list[dict[str, Any]]:
         now = _now_text()
         locked_until = _future_text(lease_seconds)
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             conn.commit()
             conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
@@ -925,7 +926,7 @@ class SignalLifecycleStore:
         return [self._outbox_row(row) for row in claimed]
 
     def outbox_summary(self) -> dict[str, Any]:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn, conn:
             rows = conn.execute(
                 "SELECT status, COUNT(*) AS count FROM notification_outbox GROUP BY status"
             ).fetchall()

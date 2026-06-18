@@ -376,6 +376,22 @@ class OKXSignalGUI:
             delay = seconds_until_next_closed_run(self.api.timeframe.key, settle_seconds=60)
             await asyncio.sleep(min(delay, 3600.0))
 
+    async def _outbox_loop(self) -> None:
+        from okx_signal_system.signal_quality import LifecycleOutboxWorker
+
+        worker = LifecycleOutboxWorker(self._signal_lifecycle_store(), self._notification_dispatcher())
+        interval = max(5.0, float(os.environ.get("LIFECYCLE_OUTBOX_DRAIN_INTERVAL_SECONDS", "15")))
+        while self.monitoring:
+            try:
+                summary = await asyncio.to_thread(worker.run_once)
+                if summary.get("sent") or summary.get("failed") or summary.get("dead_letter"):
+                    self.message_queue.put(('log', (f"Outbox drained: {summary}", "INFO")))
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self.message_queue.put(('log', (f"Outbox drain failed: {exc}", "WARNING")))
+            await asyncio.sleep(interval)
+
     def _send_candidate_health_report(self, items: list[dict], params) -> None:
         try:
             ok = self._notification_dispatcher().enqueue_candidate_health_report(
@@ -938,6 +954,7 @@ class OKXSignalGUI:
 
             self._background_tasks = [
                 asyncio.create_task(self._closed_backfill_loop()),
+                asyncio.create_task(self._outbox_loop()),
             ]
             self._update_runtime_module_status(
                 "daily_learning_review",

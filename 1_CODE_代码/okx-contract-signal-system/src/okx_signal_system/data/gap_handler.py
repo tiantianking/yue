@@ -266,7 +266,13 @@ class DataGapHandler:
         """解析OKX K线数据"""
         return okx_candles_to_frame(raw_bars)
 
-    def _validate_merge_frame(self, df: pd.DataFrame, inst_id: str) -> pd.DataFrame:
+    def _validate_merge_frame(
+        self,
+        df: pd.DataFrame,
+        inst_id: str,
+        *,
+        allow_existing_open_tail: bool = False,
+    ) -> pd.DataFrame:
         missing_ohlcv = [col for col in OHLCV_COLUMNS if col not in df.columns]
         if missing_ohlcv:
             raise ValueError(f"{inst_id} missing OHLCV columns: {missing_ohlcv}")
@@ -290,7 +296,13 @@ class DataGapHandler:
             raise ValueError(f"{inst_id} {MISSING_REQUIRED_STRUCTURE_COLUMNS}: {null_metadata}")
 
         checked["is_closed"] = self._coerce_closed_series(checked["is_closed"])
-        if not checked["is_closed"].all():
+        if not checked["is_closed"].all() and allow_existing_open_tail:
+            ordered = checked.sort_values("ts").reset_index(drop=True)
+            open_mask = ~ordered["is_closed"]
+            first_open_idx = int(open_mask[open_mask].index.min())
+            if first_open_idx != len(ordered) - 1:
+                raise ValueError(f"{inst_id} open candles cannot be saved by gap backfill")
+        elif not checked["is_closed"].all():
             raise ValueError(f"{inst_id} open candles cannot be saved by gap backfill")
 
         symbol_mismatch = checked["symbol"].astype("string").str.strip() != inst_id
@@ -306,6 +318,8 @@ class DataGapHandler:
         inst_id: str,
         new_data: pd.DataFrame,
         mode: str = "append",
+        *,
+        allow_existing_open_tail: bool = False,
     ) -> bool:
         """
         合并并保存数据
@@ -324,7 +338,11 @@ class DataGapHandler:
                 df = new_data
             else:
                 existing = read_parquet_with_retry(path)
-                existing = self._validate_merge_frame(existing, inst_id)
+                existing = self._validate_merge_frame(
+                    existing,
+                    inst_id,
+                    allow_existing_open_tail=allow_existing_open_tail,
+                )
 
                 if mode == "append":
                     df = pd.concat([existing, new_data], ignore_index=True)
@@ -334,14 +352,22 @@ class DataGapHandler:
                 df = df.drop_duplicates(subset=["ts"], keep="last")
                 df = df.sort_values("ts").reset_index(drop=True)
 
-            df = self._validate_merge_frame(df, inst_id)
+            df = self._validate_merge_frame(
+                df,
+                inst_id,
+                allow_existing_open_tail=allow_existing_open_tail,
+            )
 
             write_parquet_atomic(df, path)
             log.info(f"Saved {len(df)} bars for {inst_id}")
             return True
 
         except Exception as e:
-            log.error(f"Save error for {inst_id}: {e}")
+            message = str(e)
+            if "open candles cannot be saved by gap backfill" in message:
+                log.info("Skipped open-candle gap backfill rows for %s: %s", inst_id, message)
+            else:
+                log.error(f"Save error for {inst_id}: {e}")
             return False
 
     def sync_symbol(self, inst_id: str) -> SyncResult:

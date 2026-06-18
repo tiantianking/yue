@@ -78,7 +78,7 @@ def test_release_version_sources_stay_consistent() -> None:
     gui_text = _read("gui.py")
     start_text = _read("start.bat")
 
-    assert package_version == "3.56.0"
+    assert package_version == "3.56.1"
     assert pyproject["project"]["version"] == package_version
     assert APPROVED_STRATEGY_VERSION == package_version
     assert f"Version: {package_version}" in pkg_info
@@ -134,6 +134,15 @@ def test_dashboard_reads_approved_manifest_before_legacy_selected_params() -> No
     assert server_data.index(manifest_ref) < server_data.index(legacy_ref)
     assert "selectedParamsFromManifest(approvedManifest)" in server_data
     assert "`outputs/runtime/approved_strategy_manifest.json`" in readme
+
+
+def test_dashboard_payload_prefers_live_runtime_status() -> None:
+    server_data = _read("dashboard/src/lib/server-data.ts")
+
+    assert "generated_at: new Date().toISOString()" in server_data
+    assert "latestScanSymbols(enrichedLatestScan)" in server_data
+    assert "...configuredSymbols, ...scanSymbols, ...closedSymbols, ...backfillSymbols" in server_data
+    assert "push_allowed: Boolean(enrichedLatestScan?.push_allowed ?? quality.push_allowed)" in server_data
 
 
 def test_env_example_is_signal_only_and_has_no_private_okx_keys() -> None:

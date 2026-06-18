@@ -198,7 +198,7 @@ def _repair_internal_gaps(
         new_data = handler.backfill_gap(gap)
         if new_data is None or new_data.empty:
             continue
-        if handler.merge_and_save(inst_id, new_data, mode="merge"):
+        if handler.merge_and_save(inst_id, new_data, mode="merge", allow_existing_open_tail=True):
             repaired += 1
     return repaired
 
@@ -297,7 +297,7 @@ def sync_latest_closed_symbol(
             expected_latest_closed=expected,
         )
         if not latest.empty:
-            if not handler.merge_and_save(inst_id, latest, mode="merge"):
+            if not handler.merge_and_save(inst_id, latest, mode="merge", allow_existing_open_tail=True):
                 raise PermissionError(f"refusing to write closed backfill data dir: {handler.data_dir}")
             existing = _read_existing(path)
 

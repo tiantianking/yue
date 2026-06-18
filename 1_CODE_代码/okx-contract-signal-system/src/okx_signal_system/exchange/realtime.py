@@ -938,6 +938,11 @@ class LiveSignalMonitor:
         self._auto_close_enabled = False
         self._running = False
         self._monitor_task: asyncio.Task | None = None
+        self._outbox_task: asyncio.Task | None = None
+        self._outbox_interval_seconds = max(
+            5.0,
+            float(os.environ.get("LIFECYCLE_OUTBOX_DRAIN_INTERVAL_SECONDS", "15")),
+        )
 
         # --- 风控模型 ---
         initial_equity = float(os.environ.get("INITIAL_EQUITY", 10000))
@@ -1033,6 +1038,7 @@ class LiveSignalMonitor:
 
         # 启动后台持久化任务
         self._monitor_task = asyncio.create_task(self._monitor_loop())
+        self._outbox_task = asyncio.create_task(self._lifecycle_outbox_loop())
         return True
 
     @staticmethod
@@ -1149,6 +1155,18 @@ class LiveSignalMonitor:
 
     def _run_lifecycle_outbox_once(self) -> dict[str, int]:
         return self._lifecycle_outbox_worker.run_once()
+
+    async def _lifecycle_outbox_loop(self) -> None:
+        while self._running:
+            try:
+                summary = await asyncio.to_thread(self._run_lifecycle_outbox_once)
+                if summary.get("sent") or summary.get("failed") or summary.get("dead_letter"):
+                    log.info("Lifecycle outbox drained: %s", summary)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log.warning("Lifecycle outbox drain failed: %s", exc)
+            await asyncio.sleep(self._outbox_interval_seconds)
 
     async def _publish_tiered_candidates(
         self,
@@ -1292,6 +1310,8 @@ class LiveSignalMonitor:
         self._running = False
         if self._monitor_task:
             self._monitor_task.cancel()
+        if self._outbox_task:
+            self._outbox_task.cancel()
         log.info("Live signal monitor stopped")
 
     async def _check_exit_conditions(self, position: Position, market: MarketData):
@@ -1356,8 +1376,9 @@ class LiveSignalMonitor:
     async def monitor_forever(self):
         """等待监控循环结束（兼容 main.py CLI 模式）"""
         try:
-            if self._monitor_task:
-                await self._monitor_task
+            tasks = [task for task in (self._monitor_task, self._outbox_task) if task is not None]
+            if tasks:
+                await asyncio.gather(*tasks)
         except asyncio.CancelledError:
             pass
 

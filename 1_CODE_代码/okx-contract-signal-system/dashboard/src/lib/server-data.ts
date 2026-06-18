@@ -134,6 +134,17 @@ function toSymbolRow(symbol: string, backfill?: BackfillRow): SymbolRow {
   };
 }
 
+function latestScanSymbols(latestScan: LatestScanStatus | null): string[] {
+  const rows = Array.isArray(latestScan?.symbols) ? latestScan.symbols : [];
+  return rows
+    .map((row) => row.symbol)
+    .filter((symbol): symbol is string => typeof symbol === "string" && symbol.length > 0);
+}
+
+function closedBackfillMap(status: ClosedBackfillStatus | null) {
+  return new Map((status?.symbols ?? []).map((row) => [row.inst_id, row]));
+}
+
 async function readActualHistory(symbols: string[]) {
   if (symbols.length === 0) {
     return new Map<string, Partial<SymbolRow>>();
@@ -236,31 +247,42 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
     ? (dataConfig.symbols.filter((item) => typeof item === "string") as string[])
     : [];
   const backfillSymbols = backfill.map((row) => row.inst_id);
-  const symbols = [...new Set([...configuredSymbols, ...backfillSymbols])];
-  const backfillBySymbol = new Map(backfill.map((row) => [row.inst_id, row]));
-  const actualBySymbol = await readActualHistory(symbols);
   const enrichedLatestScan = enrichLatestScan(latestScan);
+  const scanSymbols = latestScanSymbols(enrichedLatestScan);
+  const closedSymbols = (closedBackfill?.symbols ?? []).map((row) => row.inst_id);
+  const symbols = [...new Set([...configuredSymbols, ...scanSymbols, ...closedSymbols, ...backfillSymbols])];
+  const backfillBySymbol = new Map(backfill.map((row) => [row.inst_id, row]));
+  const closedBySymbol = closedBackfillMap(closedBackfill);
+  const actualBySymbol = await readActualHistory(symbols);
   const effectiveLatestSignal = enrichedLatestScan
     ? enrichedLatestScan.last_signal ?? null
     : latestSignal;
   const symbolRows = symbols.map((symbol) => {
+    const closed = closedBySymbol.get(symbol);
     const row = toSymbolRow(symbol, backfillBySymbol.get(symbol));
     const actual = actualBySymbol.get(symbol);
-    if (!actual) {
-      return row;
-    }
-    return {
+    const merged = {
       ...row,
-      ...actual,
-      age_minutes: minutesSince(actual.last_ts ?? row.last_ts),
+      ...(closed
+        ? {
+            status: closed.status,
+            rows_after: Number(closed.rows_after ?? row.rows_after),
+            added_rows: Number(closed.added_rows ?? row.added_rows),
+            first_ts: closed.first_ts ?? row.first_ts,
+            last_ts: closed.last_ts ?? row.last_ts,
+            error: closed.error ?? row.error,
+          }
+        : {}),
+      ...(actual ?? {}),
+    };
+    return {
+      ...merged,
+      age_minutes: minutesSince(merged.last_ts),
     };
   });
 
   return {
-    generated_at:
-      typeof quality.generated_at === "string"
-        ? quality.generated_at
-        : new Date().toISOString(),
+    generated_at: new Date().toISOString(),
     project_root: projectRoot,
     signal_timeframe:
       String(quality.signal_timeframe ?? dataConfig.timeframe ?? "15m"),
@@ -270,7 +292,7 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
     symbols: symbolRows,
     quality: {
       status: String(quality.status ?? "unknown"),
-      push_allowed: Boolean(quality.push_allowed),
+      push_allowed: Boolean(enrichedLatestScan?.push_allowed ?? quality.push_allowed),
       reasons: Array.isArray(quality.reasons)
         ? quality.reasons.map(String)
         : [],

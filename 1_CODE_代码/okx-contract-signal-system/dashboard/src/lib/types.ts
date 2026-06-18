@@ -65,6 +65,7 @@ export type LatestSignal = {
 
 export type LatestScanStatus = {
   generated_at?: string;
+  generated_at_beijing?: string;
   status?: string;
   runtime_status?: "online" | "stale" | "offline" | "error" | string;
   runtime_reason?: string;
@@ -114,6 +115,9 @@ export type LatestScanStatus = {
     breakout_gap_pct?: number | null;
   }>;
   quality_model?: QualityModelShadow | null;
+  lifecycle_summary?: JsonRecord | null;
+  manifest_status?: JsonRecord | null;
+  selected_params?: StrategyParams;
   last_signal?: LatestSignal | null;
 };
 
@@ -152,6 +156,9 @@ export type ClosedBackfillStatus = {
   symbols?: Array<{
     inst_id: string;
     status: string;
+    rows_before?: number;
+    rows_after?: number;
+    first_ts?: string;
     last_ts?: string;
     expected_latest_closed?: string;
     missing_closed_bars?: number;

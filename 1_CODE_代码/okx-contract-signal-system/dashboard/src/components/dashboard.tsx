@@ -263,16 +263,20 @@ function SignalPanel({ data }: { data: DashboardPayload }) {
 function RuntimePanel({ data }: { data: DashboardPayload }) {
   const scan = data.latest_scan;
   const ws = scan?.websocket;
-  const modules = scan?.modules ?? {};
+  const closed15m = data.closed_backfills?.["15m"] ?? data.closed_backfill;
+  const closed5m = data.closed_backfills?.["5m"];
   const scanAge = scan?.age_minutes ?? minutesSince(scan?.generated_at);
   const runtimeStatus = String(scan?.runtime_status ?? "offline");
   const runtimeOnline = runtimeStatus === "online";
   const wsHealthy = Boolean(runtimeOnline && ws?.running && ws?.connected && !ws?.degraded);
-  const closedHealthy = modules.closed_kline_backfill?.status === "healthy";
-  const signalGateHealthy = modules.signal_closed_bar_gate?.status === "healthy";
-  const learningStatus = String(modules.daily_learning_review?.status ?? "-");
-  const learningHealthy = ["healthy", "checking", "disabled"].includes(learningStatus);
-  const tone = runtimeOnline && closedHealthy && signalGateHealthy && learningHealthy ? "green" : "red";
+  const closedHealthy = Boolean(closed15m?.all_complete);
+  const dashboard5mHealthy = Boolean(closed5m?.all_complete);
+  const signalGateHealthy = runtimeOnline && (scan?.status ?? "running") === "running" && !scan?.error;
+  const learningStatus = String(data.learning_review?.status ?? "-");
+  const learningHealthy = ["healthy", "checking", "disabled", "-"].includes(learningStatus);
+  const tone = runtimeOnline && closedHealthy && dashboard5mHealthy && signalGateHealthy ? "green" : "red";
+  const first15mIssue = closed15m?.symbols?.find((row) => row.status !== "passed")?.status ?? "-";
+  const first5mIssue = closed5m?.symbols?.find((row) => row.status !== "passed")?.status ?? "-";
   const runtimeLabel =
     runtimeStatus === "online" ? "正常" : runtimeStatus === "stale" ? "过期" : runtimeStatus === "error" ? "错误" : "离线";
   return (
@@ -289,9 +293,10 @@ function RuntimePanel({ data }: { data: DashboardPayload }) {
         <MetricTile label="扫描刷新" value={ageText(scanAge)} tone={runtimeOnline ? "green" : "red"} />
         <MetricTile label="重连次数" value={integerText(ws?.reconnect_count)} tone={(ws?.reconnect_count ?? 0) === 0 ? "green" : "amber"} />
         <MetricTile label="检查币种" value={integerText(scan?.symbols_checked)} />
-        <MetricTile label="闭合K线" value={closedHealthy ? "已补齐" : String(modules.closed_kline_backfill?.status ?? "-")} tone={closedHealthy ? "green" : "red"} />
-        <MetricTile label="信号门禁" value={signalGateHealthy ? "通过" : String(modules.signal_closed_bar_gate?.status ?? "-")} tone={signalGateHealthy ? "green" : "red"} />
-        <MetricTile label="学习复盘" value={learningStatus} tone={learningHealthy ? "green" : "amber"} />
+        <MetricTile label="15m闭合K" value={closedHealthy ? "已补齐" : first15mIssue} tone={closedHealthy ? "green" : "red"} />
+        <MetricTile label="5m面板K" value={dashboard5mHealthy ? "已补齐" : first5mIssue} tone={dashboard5mHealthy ? "green" : "amber"} />
+        <MetricTile label="信号门禁" value={signalGateHealthy ? "通过" : String(scan?.status ?? "-")} tone={signalGateHealthy ? "green" : "red"} />
+        <MetricTile label="学习复盘" value={learningStatus} tone={learningHealthy ? "green" : "neutral"} />
       </div>
       {ws?.last_error || scan?.error ? (
         <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-700">

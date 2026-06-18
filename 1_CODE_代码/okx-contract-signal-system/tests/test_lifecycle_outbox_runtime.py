@@ -138,6 +138,25 @@ def test_live_monitor_loop_does_not_drain_lifecycle_outbox_after_scan(monkeypatc
     assert calls == []
 
 
+def test_live_monitor_outbox_loop_drains_independently(monkeypatch) -> None:
+    from okx_signal_system.exchange import realtime
+
+    calls: list[str] = []
+    monitor = realtime.LiveSignalMonitor.__new__(realtime.LiveSignalMonitor)
+    monitor._running = True
+    monitor._outbox_interval_seconds = 5
+    monitor._run_lifecycle_outbox_once = lambda: calls.append("run_once") or {"sent": 1, "failed": 0}
+
+    async def stop_after_first_sleep(_delay):
+        monitor._running = False
+
+    monkeypatch.setattr(realtime.asyncio, "sleep", stop_after_first_sleep)
+
+    asyncio.run(monitor._lifecycle_outbox_loop())
+
+    assert calls == ["run_once"]
+
+
 def test_formal_a_tier_runtime_paths_do_not_call_feishu_signal_senders() -> None:
     calls = _runtime_calls(RUNTIME_NOTIFICATION_FILES)
 

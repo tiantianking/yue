@@ -437,6 +437,84 @@ def test_closed_backfill_service_writes_runtime_cache_without_mutating_history(t
     assert history_path.stat().st_mtime_ns == before_mtime
 
 
+def test_closed_backfill_allows_runtime_cache_open_tail(tmp_path, monkeypatch) -> None:
+    expected = pd.Timestamp("2026-06-15T18:15:00Z")
+    timestamps = pd.date_range("2026-06-15T17:30:00Z", periods=4, freq="15min", tz="UTC")
+    frame = _closed_backfill_frame(timestamps)
+    open_tail = _closed_backfill_frame([pd.Timestamp("2026-06-15T18:30:00Z")])
+    open_tail["is_closed"] = False
+    pd.concat([frame, open_tail], ignore_index=True).to_parquet(
+        tmp_path / "BTC_USDT_USDT_15m.parquet",
+        index=False,
+    )
+
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.latest_closed_candle_start",
+        lambda *args, **kwargs: expected.to_pydatetime(),
+    )
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.seconds_until_next_closed_run",
+        lambda *args, **kwargs: 60.0,
+    )
+
+    def fake_get_candles(*_args, **_kwargs):
+        return [
+            [
+                str(int(expected.timestamp() * 1000)),
+                "100",
+                "101",
+                "99",
+                "100.5",
+                "10",
+                "1000",
+                "1000",
+                "1",
+            ]
+        ]
+
+    monkeypatch.setattr("okx_signal_system.data.closed_backfill.get_candles", fake_get_candles)
+
+    service = ClosedCandleBackfillService(
+        ["BTC-USDT-SWAP"],
+        timeframe="15m",
+        dataset="okx_15m_extended",
+        data_dir=tmp_path,
+        output_path=tmp_path / "status.json",
+        required_history_bars=4,
+        minimum_continuous_tail_bars=4,
+    )
+    status = service.run_once()
+    row = status.symbols[0]
+
+    assert status.all_complete
+    assert row.status == "passed"
+    assert row.missing_closed_bars == 0
+    saved = pd.read_parquet(tmp_path / "BTC_USDT_USDT_15m.parquet")
+    saved["ts"] = pd.to_datetime(saved["ts"], utc=True)
+    assert saved[saved["ts"] == expected].iloc[0]["is_closed"]
+    assert not bool(saved[saved["ts"] == pd.Timestamp("2026-06-15T18:30:00Z")].iloc[0]["is_closed"])
+
+
+def test_gap_merge_allows_only_single_runtime_open_tail(tmp_path) -> None:
+    frame = _closed_backfill_frame(
+        [
+            pd.Timestamp("2026-06-15T18:00:00Z"),
+            pd.Timestamp("2026-06-15T18:15:00Z"),
+            pd.Timestamp("2026-06-15T18:30:00Z"),
+        ]
+    )
+    frame.loc[1, "is_closed"] = False
+    frame.to_parquet(tmp_path / "BTC_USDT_USDT_15m.parquet", index=False)
+
+    handler = DataGapHandler(tmp_path, timeframe="15m")
+    assert not handler.merge_and_save(
+        "BTC-USDT-SWAP",
+        _closed_backfill_frame([pd.Timestamp("2026-06-15T18:45:00Z")]),
+        mode="merge",
+        allow_existing_open_tail=True,
+    )
+
+
 @pytest.mark.parametrize("gap_bars", [1, 2, 10, 180, 500])
 def test_closed_backfill_service_blocks_all_complete_on_internal_gaps(tmp_path, monkeypatch, gap_bars) -> None:
     expected = pd.Timestamp("2026-06-15T18:00:00Z")

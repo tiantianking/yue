@@ -33,12 +33,13 @@ export function dateTimeText(value?: string | null) {
     return value;
   }
   return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
-  }).format(date);
+  }).format(date) + " 北京时间";
 }
 
 export function ageText(minutes?: number | null) {
