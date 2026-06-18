@@ -1107,3 +1107,169 @@ def test_sync_error_summary_shortens_dns_errors() -> None:
         "Caused by NameResolutionError(\"Failed to resolve 'www.okx.com'\")"
     )
     assert summarize_sync_error(raw) == "OKX REST DNS解析失败：www.okx.com；已继续使用本地历史数据和WebSocket"
+
+
+def test_closed_backfill_treats_existing_open_tail_as_runtime_cache_state(tmp_path, monkeypatch) -> None:
+    expected = pd.Timestamp("2026-06-18T05:30:00Z")
+    timestamps = pd.date_range(end=expected, periods=4, freq="15min", tz="UTC")
+    frame = _closed_backfill_frame(timestamps)
+    open_tail = _closed_backfill_frame([expected + pd.Timedelta(minutes=15)])
+    open_tail["is_closed"] = False
+    combined = pd.concat([frame, open_tail], ignore_index=True)
+    path = tmp_path / "BTC_USDT_USDT_15m.parquet"
+    combined.to_parquet(path, index=False)
+    before_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.latest_closed_candle_start",
+        lambda *args, **kwargs: expected.to_pydatetime(),
+    )
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.seconds_until_next_closed_run",
+        lambda *args, **kwargs: 60.0,
+    )
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.get_candles",
+        lambda *args, **kwargs: [
+            [
+                str(int(ts.timestamp() * 1000)),
+                "100",
+                "101",
+                "99",
+                "100.5",
+                "10",
+                "1000",
+                "1000",
+                "1",
+            ]
+            for ts in timestamps
+        ],
+    )
+
+    service = ClosedCandleBackfillService(
+        ["BTC-USDT-SWAP"],
+        timeframe="15m",
+        dataset="okx_15m_extended",
+        data_dir=tmp_path,
+        output_path=tmp_path / "status.json",
+        required_history_bars=4,
+        minimum_continuous_tail_bars=4,
+    )
+    status = service.run_once()
+    row = status.symbols[0]
+
+    assert status.all_complete
+    assert row.status == "passed"
+    assert row.data_complete is True
+    assert row.write_attempted is False
+    assert row.write_succeeded is True
+    assert row.write_error == ""
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == before_hash
+
+
+def test_closed_backfill_converts_same_timestamp_open_tail_to_confirmed_closed(tmp_path, monkeypatch) -> None:
+    expected = pd.Timestamp("2026-06-18T05:30:00Z")
+    timestamps = pd.date_range(end=expected, periods=4, freq="15min", tz="UTC")
+    frame = _closed_backfill_frame(timestamps)
+    frame.loc[frame.index[-1], "is_closed"] = False
+    frame.to_parquet(tmp_path / "BTC_USDT_USDT_15m.parquet", index=False)
+
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.latest_closed_candle_start",
+        lambda *args, **kwargs: expected.to_pydatetime(),
+    )
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.seconds_until_next_closed_run",
+        lambda *args, **kwargs: 60.0,
+    )
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.get_candles",
+        lambda *args, **kwargs: [[
+            str(int(expected.timestamp() * 1000)),
+            "100",
+            "101",
+            "99",
+            "100.5",
+            "10",
+            "1000",
+            "1000",
+            "1",
+        ]],
+    )
+
+    service = ClosedCandleBackfillService(
+        ["BTC-USDT-SWAP"],
+        timeframe="15m",
+        dataset="okx_15m_extended",
+        data_dir=tmp_path,
+        output_path=tmp_path / "status.json",
+        required_history_bars=4,
+        minimum_continuous_tail_bars=4,
+    )
+    status = service.run_once()
+    row = status.symbols[0]
+    saved = pd.read_parquet(tmp_path / "BTC_USDT_USDT_15m.parquet")
+
+    assert status.all_complete
+    assert row.write_attempted is True
+    assert row.write_succeeded is True
+    assert bool(saved.loc[pd.to_datetime(saved["ts"], utc=True) == expected, "is_closed"].iloc[0]) is True
+
+
+def test_closed_backfill_keeps_data_complete_when_nonessential_write_fails(tmp_path, monkeypatch) -> None:
+    expected = pd.Timestamp("2026-06-18T05:30:00Z")
+    timestamps = pd.date_range(end=expected, periods=4, freq="15min", tz="UTC")
+    frame = _closed_backfill_frame(timestamps)
+    frame.to_parquet(tmp_path / "BTC_USDT_USDT_15m.parquet", index=False)
+
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.latest_closed_candle_start",
+        lambda *args, **kwargs: expected.to_pydatetime(),
+    )
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.seconds_until_next_closed_run",
+        lambda *args, **kwargs: 60.0,
+    )
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.get_candles",
+        lambda *args, **kwargs: [[
+            str(int(expected.timestamp() * 1000)),
+            "100",
+            "101",
+            "99",
+            "999.0",
+            "10",
+            "1000",
+            "1000",
+            "1",
+        ]],
+    )
+
+    def fail_write(self, inst_id, new_data, mode="merge"):
+        self.last_merge_error = "simulated_runtime_cache_write_failure"
+        return False
+
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.DataGapHandler.merge_and_save",
+        fail_write,
+    )
+
+    service = ClosedCandleBackfillService(
+        ["BTC-USDT-SWAP"],
+        timeframe="15m",
+        dataset="okx_15m_extended",
+        data_dir=tmp_path,
+        output_path=tmp_path / "status.json",
+        required_history_bars=4,
+        minimum_continuous_tail_bars=4,
+    )
+    status = service.run_once()
+    row = status.symbols[0]
+
+    assert status.all_complete
+    assert status.write_failures == 1
+    assert row.status == "passed"
+    assert row.data_complete is True
+    assert row.write_attempted is True
+    assert row.write_succeeded is False
+    assert row.write_error == "simulated_runtime_cache_write_failure"

@@ -16,11 +16,10 @@ import type {
   SymbolRow,
 } from "./types";
 import { dashboardExecTimeoutMs, historyScriptArgs, pythonPath } from "./runtime-paths";
+import { enrichLatestScan } from "./runtime-health";
+import { buildSymbolRows } from "./symbol-rows";
 
 const execFileAsync = promisify(execFile);
-const SCAN_STALE_MINUTES = 20;
-const WS_STALE_MINUTES = 10;
-const CLOSED_BACKFILL_GRACE_MINUTES = 5;
 
 export const projectRoot = path.resolve(
   process.env.OKX_SIGNAL_ROOT ?? path.join(process.cwd(), ".."),
@@ -58,10 +57,6 @@ function asRecord(value: unknown): JsonRecord {
     : {};
 }
 
-function selectedParamsFromManifest(manifest: JsonRecord): StrategyParams {
-  return asRecord(manifest.selected_params) as StrategyParams;
-}
-
 function minutesSince(value?: string) {
   if (!value) {
     return null;
@@ -73,106 +68,9 @@ function minutesSince(value?: string) {
   return Math.max(0, (Date.now() - ts) / 60000);
 }
 
-function timestampMs(value?: string) {
-  if (!value) {
-    return null;
-  }
-  const ts = new Date(value).getTime();
-  return Number.isNaN(ts) ? null : ts;
-}
-
-function minutesSinceEpochSeconds(value?: number | null) {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    return null;
-  }
-  return Math.max(0, (Date.now() - value * 1000) / 60000);
-}
-
-function isClosedBackfillFresh(status?: ClosedBackfillStatus | null): boolean {
-  if (!status?.all_complete) {
-    return false;
-  }
-  const nextRunAt = timestampMs(status.next_run_at);
-  if (nextRunAt !== null) {
-    return Date.now() <= nextRunAt + CLOSED_BACKFILL_GRACE_MINUTES * 60000;
-  }
-  const generatedAge = minutesSince(status.generated_at);
-  return typeof generatedAge === "number" && generatedAge <= SCAN_STALE_MINUTES;
-}
-
-function enrichLatestScan(
-  latestScan: LatestScanStatus | null,
-  closedBackfill?: ClosedBackfillStatus | null,
-  closedBackfill5m?: ClosedBackfillStatus | null,
-): LatestScanStatus | null {
-  if (!latestScan) {
-    return null;
-  }
-  const ageMinutes = minutesSince(latestScan.generated_at);
-  const ws = latestScan.websocket ?? null;
-  const wsMessageAge = minutesSinceEpochSeconds(ws?.last_message_at);
-  const closedBackfillFresh = isClosedBackfillFresh(closedBackfill) || isClosedBackfillFresh(closedBackfill5m);
-  let runtimeStatus = "online";
-  let runtimeReason = "live_status_fresh";
-
-  if (latestScan.error) {
-    runtimeStatus = "error";
-    runtimeReason = "scan_error";
-  } else if (typeof ageMinutes === "number" && ageMinutes > SCAN_STALE_MINUTES) {
-    runtimeStatus = "stale";
-    runtimeReason = "scan_status_stale";
-  } else if (!ws?.running || !ws?.connected) {
-    runtimeStatus = "offline";
-    runtimeReason = "websocket_offline";
-  } else if (ws?.degraded) {
-    runtimeStatus = "stale";
-    runtimeReason = "websocket_degraded";
-  } else if (typeof wsMessageAge === "number" && wsMessageAge > WS_STALE_MINUTES) {
-    if (closedBackfillFresh) {
-      runtimeReason = "closed_backfill_fresh_ws_quiet";
-    } else {
-      runtimeStatus = "stale";
-      runtimeReason = "websocket_message_stale";
-    }
-  }
-
-  return {
-    ...latestScan,
-    runtime_status: runtimeStatus,
-    runtime_reason: runtimeReason,
-    age_minutes: ageMinutes,
-    websocket: ws
-      ? {
-          ...ws,
-          last_message_age_minutes: wsMessageAge,
-        }
-      : ws,
-  };
-}
-
-function toSymbolRow(symbol: string, backfill?: BackfillRow): SymbolRow {
-  return {
-    inst_id: symbol,
-    base: symbol.replace("-USDT-SWAP", ""),
-    status: backfill?.status ?? "unknown",
-    rows_after: Number(backfill?.rows_after ?? 0),
-    added_rows: Number(backfill?.added_rows ?? 0),
-    first_ts: backfill?.first_ts ?? "",
-    last_ts: backfill?.last_ts ?? "",
-    age_minutes: minutesSince(backfill?.last_ts),
-    error: backfill?.error ?? "",
-  };
-}
-
-function latestScanSymbols(latestScan: LatestScanStatus | null): string[] {
-  const rows = Array.isArray(latestScan?.symbols) ? latestScan.symbols : [];
-  return rows
-    .map((row) => row.symbol)
-    .filter((symbol): symbol is string => typeof symbol === "string" && symbol.length > 0);
-}
-
-function closedBackfillMap(status: ClosedBackfillStatus | null) {
-  return new Map((status?.symbols ?? []).map((row) => [row.inst_id, row]));
+function secondsSince(value?: string) {
+  const minutes = minutesSince(value);
+  return typeof minutes === "number" ? minutes * 60 : null;
 }
 
 async function readActualHistory(symbols: string[]) {
@@ -219,8 +117,6 @@ async function readActualHistory(symbols: string[]) {
 export async function loadDashboardData(): Promise<DashboardPayload> {
   const [
     quality,
-    approvedManifest,
-    legacySelectedParams,
     latestSignal,
     latestScan,
     backfill,
@@ -235,11 +131,6 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
         path.join(outputsDir, "startup_quality_gate.json"),
         {},
       ),
-      readJson<JsonRecord>(
-        path.join(outputsDir, "runtime", "approved_strategy_manifest.json"),
-        {},
-      ),
-      readJson<StrategyParams>(path.join(outputsDir, "selected_params.json"), {}),
       readJson<LatestSignal | null>(
         path.join(outputsDir, "latest_signal.json"),
         null,
@@ -269,66 +160,97 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
     ]);
 
   const dataConfig = asRecord(baseConfig.data);
-  const selectedParams = {
-    ...legacySelectedParams,
-    ...selectedParamsFromManifest(approvedManifest),
-  };
   const configuredSymbols = Array.isArray(dataConfig.symbols)
     ? (dataConfig.symbols.filter((item) => typeof item === "string") as string[])
     : [];
-  const backfillSymbols = backfill.map((row) => row.inst_id);
-  const enrichedLatestScan = enrichLatestScan(latestScan, closedBackfill, closedBackfill5m);
-  const scanSymbols = latestScanSymbols(enrichedLatestScan);
-  const closedSymbols = (closedBackfill?.symbols ?? []).map((row) => row.inst_id);
-  const symbols = [...new Set([...configuredSymbols, ...scanSymbols, ...closedSymbols, ...backfillSymbols])];
-  const backfillBySymbol = new Map(backfill.map((row) => [row.inst_id, row]));
-  const closedBySymbol = closedBackfillMap(closedBackfill);
+  const closedRows = Array.isArray(closedBackfill?.symbols)
+    ? closedBackfill.symbols.map((row) => ({ ...row, inst_id: String(row.inst_id) } as BackfillRow))
+    : [];
+  const scanSymbols = Array.isArray(latestScan?.symbols)
+    ? latestScan.symbols
+        .map((row) => (typeof row.symbol === "string" ? row.symbol : ""))
+        .filter(Boolean)
+    : [];
+  const symbols = [
+    ...new Set([
+      ...configuredSymbols,
+      ...closedRows.map((row) => row.inst_id),
+      ...scanSymbols,
+      ...backfill.map((row) => row.inst_id),
+    ]),
+  ];
   const actualBySymbol = await readActualHistory(symbols);
+  const enrichedLatestScan = enrichLatestScan(latestScan, closedBackfill, closedBackfill5m);
+  const runtimeManifestStatus = asRecord(enrichedLatestScan?.manifest_status);
+  const runtimeParams = asRecord(enrichedLatestScan?.selected_params) as StrategyParams;
+  const runtimeOperational = enrichedLatestScan?.runtime_status === "online";
+  const runtimePushAllowed = runtimeOperational && enrichedLatestScan?.push_allowed === true;
+  const manifestReason =
+    typeof runtimeManifestStatus.reason === "string"
+      ? runtimeManifestStatus.reason
+      : runtimePushAllowed
+        ? "approved_manifest_valid"
+        : enrichedLatestScan
+          ? "runtime_manifest_not_approved"
+          : "runtime_status_missing";
+  const runtimeBlockingReasons = runtimePushAllowed
+    ? []
+    : [
+        runtimeOperational
+          ? manifestReason
+          : enrichedLatestScan?.runtime_reason ?? "runtime_not_online",
+      ];
   const effectiveLatestSignal = enrichedLatestScan
     ? enrichedLatestScan.last_signal ?? null
     : latestSignal;
-  const symbolRows = symbols.map((symbol) => {
-    const closed = closedBySymbol.get(symbol);
-    const row = toSymbolRow(symbol, backfillBySymbol.get(symbol));
-    const actual = actualBySymbol.get(symbol);
-    const merged = {
-      ...row,
-      ...(closed
-        ? {
-            status: closed.status,
-            rows_after: Number(closed.rows_after ?? row.rows_after),
-            added_rows: Number(closed.added_rows ?? row.added_rows),
-            first_ts: closed.first_ts ?? row.first_ts,
-            last_ts: closed.last_ts ?? row.last_ts,
-            error: closed.error ?? row.error,
-          }
-        : {}),
-      ...(actual ?? {}),
-    };
-    return {
-      ...merged,
-      age_minutes: minutesSince(merged.last_ts),
-    };
+  const symbolRows = buildSymbolRows({
+    configuredSymbols,
+    closedRows,
+    scanSymbols,
+    legacyRows: backfill,
+    actualBySymbol,
   });
 
   return {
     generated_at: new Date().toISOString(),
+    runtime_mode: runtimePushAllowed ? "formal_push" : "research_observation",
+    runtime_status_source: enrichedLatestScan
+      ? "latest_scan_status.json"
+      : "latest_scan_status_missing",
+    latest_scan_age_seconds: secondsSince(enrichedLatestScan?.generated_at),
+    backfill_status_age_seconds: secondsSince(closedBackfill?.generated_at),
     project_root: projectRoot,
-    signal_timeframe:
-      String(quality.signal_timeframe ?? dataConfig.timeframe ?? "15m"),
-    trend_timeframe:
-      String(quality.trend_timeframe ?? dataConfig.trend_timeframe ?? "1h"),
-    dataset: String(quality.dataset ?? dataConfig.historical_dataset ?? "-"),
+    signal_timeframe: String(
+      enrichedLatestScan?.signal_timeframe ?? quality.signal_timeframe ?? dataConfig.timeframe ?? "15m",
+    ),
+    trend_timeframe: String(
+      enrichedLatestScan?.trend_timeframe ?? quality.trend_timeframe ?? dataConfig.trend_timeframe ?? "1h",
+    ),
+    dataset: String(
+      enrichedLatestScan?.dataset ?? quality.dataset ?? dataConfig.historical_dataset ?? "-",
+    ),
     symbols: symbolRows,
     quality: {
-      status: String(quality.status ?? "unknown"),
-      push_allowed: Boolean(enrichedLatestScan?.push_allowed ?? quality.push_allowed),
+      status: runtimePushAllowed ? "runtime_approved" : "runtime_blocked",
+      push_allowed: runtimePushAllowed,
+      manifest_reason: manifestReason,
+      params_source:
+        Object.keys(runtimeParams).length === 0
+          ? "none"
+          : runtimeManifestStatus.ok === true
+            ? "approved_runtime_manifest"
+            : "blocked_runtime_snapshot",
       reasons: Array.isArray(quality.reasons)
         ? quality.reasons.map(String)
         : [],
-      push_blocking_reasons: Array.isArray(quality.push_blocking_reasons)
-        ? quality.push_blocking_reasons.map(String)
-        : [],
+      push_blocking_reasons: [
+        ...new Set([
+          ...(Array.isArray(quality.push_blocking_reasons)
+            ? quality.push_blocking_reasons.map(String)
+            : []),
+          ...runtimeBlockingReasons,
+        ]),
+      ],
       stale_symbols: Array.isArray(quality.stale_symbols)
         ? quality.stale_symbols.map(String)
         : [],
@@ -336,10 +258,7 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
     train_summary: asRecord(quality.train_summary) as SummaryMetrics,
     valid_summary: asRecord(quality.valid_summary) as SummaryMetrics,
     stress_checks: asRecord(quality.stress_checks),
-    selected_params: {
-      ...selectedParams,
-      ...(asRecord(quality.selected_params) as StrategyParams),
-    },
+    selected_params: runtimeParams,
     risk_config: asRecord(riskConfig.risk),
     latest_signal: effectiveLatestSignal,
     latest_scan: enrichedLatestScan,

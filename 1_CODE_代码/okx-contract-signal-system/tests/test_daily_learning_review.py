@@ -54,10 +54,11 @@ def _write_approved_params(tmp_path, params: StrategyParams) -> None:
     candidate = {
         "artifact_type": "strict_research_candidate",
         "generated_at": "2026-01-01T00:00:00+00:00",
+        "research_run_id": "unit-research-run",
         "dataset": "unit",
         "signal_timeframe": "15m",
         "trend_timeframe": "1h",
-        "research_version": "unit",
+        "research_version": "v3.56-strict",
         "research_mode": "FORMAL",
         "promotion_eligible": True,
         "candidate_params": candidate_params,
@@ -65,7 +66,21 @@ def _write_approved_params(tmp_path, params: StrategyParams) -> None:
             json.dumps(candidate_params, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest(),
         "artifact_hashes": {},
-        "research_metadata": {},
+        "research_metadata": {
+            "dataset": "unit",
+            "signal_timeframe": "15m",
+            "trend_timeframe": "1h",
+            "research_version": "v3.56-strict",
+            "research_mode": "FORMAL",
+            "promotion_eligible": True,
+            "blind_commitment_verified": True,
+            "expected_parameter_combinations": 1,
+            "completed_parameter_combinations": 1,
+            "expected_parameter_cells": 1,
+            "completed_parameter_cells": 1,
+            "blind_lock_status": "BLIND_SEALED_PASS",
+            "blind_evaluation": {"status": "BLIND_SEALED_PASS", "passed": True},
+        },
     }
     manifest = build_approved_manifest(candidate, approved_at="2026-01-01T01:00:00+00:00")
     write_approved_manifest_atomic(manifest, tmp_path / "runtime" / "approved_strategy_manifest.json")
@@ -245,7 +260,7 @@ def test_daily_learning_review_writes_report_with_closed_frames(tmp_path, monkey
     assert report.symbols_checked == 1
     assert report.frame_checks["closed_bars_only"]
     assert (tmp_path / "daily_learning_review.json").exists()
-    assert (tmp_path / "candidate_params.json").exists()
+    assert (tmp_path / daily_learning.DAILY_LEARNING_CANDIDATE_FILENAME).exists()
 
 
 def test_daily_learning_report_never_marks_candidate_promotion_eligible(tmp_path, monkeypatch) -> None:
@@ -320,12 +335,13 @@ def test_daily_learning_report_never_marks_candidate_promotion_eligible(tmp_path
         ),
     )
 
-    candidate_payload = json.loads((tmp_path / "candidate_params.json").read_text(encoding="utf-8"))
+    candidate_payload = json.loads((tmp_path / daily_learning.DAILY_LEARNING_CANDIDATE_FILENAME).read_text(encoding="utf-8"))
     assert report.candidate_gate_passed
     assert report.auto_promote_enabled is False
     assert report.promotion_eligible is False
     assert report.promotion_allowed is False
     assert "daily_learning_auto_promotion_disabled" in report.reasons
     assert "strict_research_pipeline_required" in report.reasons
+    assert candidate_payload["artifact_type"] == "experimental_daily_learning_candidate"
     assert candidate_payload["promotion_eligible"] is False
     assert candidate_payload["promotion_allowed"] is False

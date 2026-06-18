@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
 
-from okx_signal_system.config import project_paths
 from okx_signal_system.research.approved_strategy_manifest import (
     ApprovedManifestStatus,
     load_approved_manifest_status,
@@ -21,20 +19,6 @@ class RuntimeStrategyManifestError(RuntimeError):
 
 def params_from_dict(data: dict) -> StrategyParams:
     return strategy_params_from_dict(data)
-
-
-def load_candidate_strategy_params(output_dir: str | Path | None = None) -> StrategyParams:
-    out = Path(output_dir) if output_dir else project_paths().output_dir
-    path = out / "candidate_params.json"
-    if not path.exists():
-        return StrategyParams()
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        return StrategyParams()
-    raw = data.get("candidate_params", data)
-    if not isinstance(raw, dict):
-        return StrategyParams()
-    return params_from_dict(raw)
 
 
 def load_selected_strategy_params_status(output_dir: str | Path | None = None) -> ApprovedManifestStatus:
@@ -91,7 +75,6 @@ __all__ = [
     "RuntimeStrategyManifestError",
     "is_latest_bar_fresh",
     "latest_bar_age_hours",
-    "load_candidate_strategy_params",
     "load_selected_strategy_params",
     "load_selected_strategy_params_status",
     "load_runtime_strategy_config",

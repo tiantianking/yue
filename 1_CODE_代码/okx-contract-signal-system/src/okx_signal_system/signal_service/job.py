@@ -33,7 +33,18 @@ def latest_signal_payload(
     signal_timeframe = timeframe_spec(signal_timeframe).key
     trend_timeframe = timeframe_spec(trend_timeframe).key
     manifest_status = load_selected_strategy_params_status()
+    explicit_params = params
     params = params or manifest_status.params
+    params_match_manifest = explicit_params is None or explicit_params == manifest_status.params
+    quality_gate_allows_push = bool(manifest_status.ok and params_match_manifest)
+    manifest_payload = manifest_status.as_dict()
+    if manifest_status.ok and not params_match_manifest:
+        manifest_payload = {
+            **manifest_payload,
+            "ok": False,
+            "push_allowed": False,
+            "reason": "explicit_params_do_not_match_approved_manifest",
+        }
 
     async def candle_loader(_inst_id: str, limit: int):
         data = load_symbol_file(find_lightweight_history(dataset) / symbol_file)
@@ -50,7 +61,7 @@ def latest_signal_payload(
         strategy_params=params,
         risk_config=load_runtime_config().risk_config(),
         ledger=Ledger(inst_id, init_capital=10000, equity=10000),
-        quality_gate_allows_push=bool(manifest_status.ok),
+        quality_gate_allows_push=quality_gate_allows_push,
         min_vote_approval_rate=0.4,
         mode="signal_only",
         min_history_bars=50,
@@ -68,8 +79,8 @@ def latest_signal_payload(
             "dataset": dataset,
             "signal_timeframe": signal_timeframe,
             "trend_timeframe": trend_timeframe,
-            "quality_gate_allows_push": bool(manifest_status.ok),
-            "manifest_status": manifest_status.as_dict(),
+            "quality_gate_allows_push": quality_gate_allows_push,
+            "manifest_status": manifest_payload,
             "selected_params": {
                 "fast_ema": params.fast_ema,
                 "slow_ema": params.slow_ema,

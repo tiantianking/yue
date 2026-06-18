@@ -31,6 +31,10 @@ class ClosedBackfillSymbolStatus:
     expected_latest_closed: str
     missing_closed_bars: int
     error: str = ""
+    data_complete: bool = False
+    write_attempted: bool = False
+    write_succeeded: bool = True
+    write_error: str = ""
     internal_gap_count: int = 0
     max_gap_bars: int = 0
     continuous_tail_bars: int = 0
@@ -50,6 +54,7 @@ class ClosedBackfillCycleStatus:
     all_complete: bool
     symbols_checked: int
     symbols: list[ClosedBackfillSymbolStatus] = field(default_factory=list)
+    write_failures: int = 0
 
 
 def latest_closed_candle_start(
@@ -137,6 +142,58 @@ def _confirmed_frame(
     return frame.sort_values("ts").drop_duplicates("ts", keep="last").reset_index(drop=True)
 
 
+def _closed_merge_required(existing: pd.DataFrame, latest: pd.DataFrame) -> bool:
+    """Return True only when confirmed REST rows would change the cache."""
+    if latest.empty:
+        return False
+    if existing.empty:
+        return True
+
+    current = existing.copy()
+    current["ts"] = pd.to_datetime(current["ts"], utc=True)
+    confirmed = _closed_existing(
+        current,
+        expected_latest_closed=pd.to_datetime(latest["ts"], utc=True).max().to_pydatetime(),
+    )
+    if confirmed.empty:
+        return True
+    current_by_ts = confirmed.set_index("ts", drop=False)
+    compare_columns = [
+        column
+        for column in ("open", "high", "low", "close", "volume", "quote_volume", "symbol", "timeframe", "is_closed")
+        if column in latest.columns
+    ]
+    for _, row in latest.iterrows():
+        ts = pd.Timestamp(row["ts"])
+        if ts.tzinfo is None:
+            ts = ts.tz_localize("UTC")
+        else:
+            ts = ts.tz_convert("UTC")
+        if ts not in current_by_ts.index:
+            return True
+        existing_row = current_by_ts.loc[ts]
+        if isinstance(existing_row, pd.DataFrame):
+            existing_row = existing_row.iloc[-1]
+        for column in compare_columns:
+            left = existing_row.get(column)
+            right = row.get(column)
+            if pd.isna(left) and pd.isna(right):
+                continue
+            if column in {"open", "high", "low", "close", "volume", "quote_volume"}:
+                try:
+                    if abs(float(left) - float(right)) <= 1e-12:
+                        continue
+                except (TypeError, ValueError):
+                    pass
+            elif column == "is_closed":
+                if _is_closed_value(left) == _is_closed_value(right):
+                    continue
+            elif str(left) == str(right):
+                continue
+            return True
+    return False
+
+
 def _missing_closed_bars(last_ts: str, expected_latest_closed: datetime, timeframe: str) -> int:
     if not last_ts:
         return 0
@@ -198,7 +255,7 @@ def _repair_internal_gaps(
         new_data = handler.backfill_gap(gap)
         if new_data is None or new_data.empty:
             continue
-        if handler.merge_and_save(inst_id, new_data, mode="merge", allow_existing_open_tail=True):
+        if handler.merge_and_save(inst_id, new_data, mode="merge"):
             repaired += 1
     return repaired
 
@@ -283,10 +340,22 @@ def sync_latest_closed_symbol(
     dataset_name = dataset or f"okx_{spec.file_suffix}_extended"
     expected = expected_latest_closed or latest_closed_candle_start(spec.key)
     resolved_data_dir = data_dir or find_runtime_cache_root(dataset_name)
-    handler = DataGapHandler(resolved_data_dir, timeframe=spec.key, dataset=dataset_name)
+    handler = DataGapHandler(
+        resolved_data_dir,
+        timeframe=spec.key,
+        dataset=dataset_name,
+        read_only=False,
+        allow_existing_open_candles=True,
+    )
     path = handler.data_dir / handler._inst_to_filename(inst_id)
     existing = _read_existing(path)
     rows_before = len(existing)
+    write_attempted = False
+    write_succeeded = True
+    write_error = ""
+    sync_error = ""
+    repair_attempted = False
+    internal_gaps_repaired = 0
 
     try:
         raw_bars = get_candles(inst_id, bar=spec.key, limit=limit)
@@ -296,74 +365,60 @@ def sync_latest_closed_symbol(
             timeframe=spec.key,
             expected_latest_closed=expected,
         )
-        if not latest.empty:
-            if not handler.merge_and_save(inst_id, latest, mode="merge", allow_existing_open_tail=True):
-                raise PermissionError(f"refusing to write closed backfill data dir: {handler.data_dir}")
-            existing = _read_existing(path)
+        if _closed_merge_required(existing, latest):
+            write_attempted = True
+            write_succeeded = handler.merge_and_save(inst_id, latest, mode="merge")
+            if write_succeeded:
+                existing = _read_existing(path)
+            else:
+                write_error = handler.last_merge_error or f"closed backfill cache write failed: {handler.data_dir}"
 
         closed_existing = _closed_existing(existing, expected_latest_closed=expected)
         repair_attempted = _gap_summary(closed_existing, timeframe=spec.key)[0] > 0
-        internal_gaps_repaired = 0
         if repair_attempted:
+            write_attempted = True
             internal_gaps_repaired = _repair_internal_gaps(handler, inst_id, closed_existing, timeframe=spec.key)
             if internal_gaps_repaired:
                 existing = _read_existing(path)
-
-        rows_after = len(existing)
-        closed_existing = _closed_existing(existing, expected_latest_closed=expected)
-        status = _status_from_closed_frame(
-            closed_existing,
-            expected_latest_closed=expected,
-            timeframe=spec.key,
-            required_history_bars=required_history_bars,
-            minimum_continuous_tail=minimum_continuous_tail,
-        )
-        return ClosedBackfillSymbolStatus(
-            inst_id=inst_id,
-            status=str(status["status"]),
-            rows_before=rows_before,
-            rows_after=rows_after,
-            added_rows=max(0, rows_after - rows_before),
-            first_ts=str(status["first_ts"]),
-            last_ts=str(status["last_ts"]),
-            expected_latest_closed=expected.isoformat(),
-            missing_closed_bars=int(status["missing_closed_bars"]),
-            internal_gap_count=int(status["internal_gap_count"]),
-            max_gap_bars=int(status["max_gap_bars"]),
-            continuous_tail_bars=int(status["continuous_tail_bars"]),
-            minimum_continuous_tail=int(status["minimum_continuous_tail"]),
-            required_history_bars=int(status["required_history_bars"]),
-            repair_attempted=repair_attempted,
-            internal_gaps_repaired=internal_gaps_repaired,
-        )
+            elif handler.last_merge_error:
+                write_succeeded = False
+                write_error = handler.last_merge_error
     except Exception as exc:
-        closed_existing = _closed_existing(existing, expected_latest_closed=expected)
-        status = _status_from_closed_frame(
-            closed_existing,
-            expected_latest_closed=expected,
-            timeframe=spec.key,
-            required_history_bars=required_history_bars,
-            minimum_continuous_tail=minimum_continuous_tail,
-        )
-        return ClosedBackfillSymbolStatus(
-            inst_id=inst_id,
-            status="failed",
-            rows_before=rows_before,
-            rows_after=len(existing),
-            added_rows=0,
-            first_ts=str(status["first_ts"]),
-            last_ts=str(status["last_ts"]),
-            expected_latest_closed=expected.isoformat(),
-            missing_closed_bars=int(status["missing_closed_bars"]),
-            error=summarize_sync_error(str(exc)),
-            internal_gap_count=int(status["internal_gap_count"]),
-            max_gap_bars=int(status["max_gap_bars"]),
-            continuous_tail_bars=int(status["continuous_tail_bars"]),
-            minimum_continuous_tail=int(status["minimum_continuous_tail"]),
-            required_history_bars=int(status["required_history_bars"]),
-            repair_attempted=False,
-            internal_gaps_repaired=0,
-        )
+        sync_error = summarize_sync_error(str(exc))
+
+    rows_after = len(existing)
+    closed_existing = _closed_existing(existing, expected_latest_closed=expected)
+    status = _status_from_closed_frame(
+        closed_existing,
+        expected_latest_closed=expected,
+        timeframe=spec.key,
+        required_history_bars=required_history_bars,
+        minimum_continuous_tail=minimum_continuous_tail,
+    )
+    data_complete = str(status["status"]) == "passed"
+    return ClosedBackfillSymbolStatus(
+        inst_id=inst_id,
+        status=str(status["status"]),
+        rows_before=rows_before,
+        rows_after=rows_after,
+        added_rows=max(0, rows_after - rows_before),
+        first_ts=str(status["first_ts"]),
+        last_ts=str(status["last_ts"]),
+        expected_latest_closed=expected.isoformat(),
+        missing_closed_bars=int(status["missing_closed_bars"]),
+        error=sync_error,
+        data_complete=data_complete,
+        write_attempted=write_attempted,
+        write_succeeded=write_succeeded,
+        write_error=write_error,
+        internal_gap_count=int(status["internal_gap_count"]),
+        max_gap_bars=int(status["max_gap_bars"]),
+        continuous_tail_bars=int(status["continuous_tail_bars"]),
+        minimum_continuous_tail=int(status["minimum_continuous_tail"]),
+        required_history_bars=int(status["required_history_bars"]),
+        repair_attempted=repair_attempted,
+        internal_gaps_repaired=internal_gaps_repaired,
+    )
 
 
 class ClosedCandleBackfillService:
@@ -427,9 +482,10 @@ class ClosedCandleBackfillService:
             dataset=self.dataset,
             expected_latest_closed=expected.isoformat(),
             next_run_at=self.next_run_at().isoformat(),
-            all_complete=all(row.status == "passed" for row in rows),
+            all_complete=all(row.data_complete for row in rows),
             symbols_checked=len(rows),
             symbols=rows,
+            write_failures=sum(1 for row in rows if row.write_attempted and not row.write_succeeded),
         )
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         self.output_path.write_text(
@@ -437,10 +493,11 @@ class ClosedCandleBackfillService:
             encoding="utf-8",
         )
         log.info(
-            "closed candle backfill complete: timeframe=%s complete=%s symbols=%s",
+            "closed candle backfill complete: timeframe=%s complete=%s symbols=%s write_failures=%s",
             self.timeframe,
             payload.all_complete,
             len(rows),
+            payload.write_failures,
         )
         return payload
 

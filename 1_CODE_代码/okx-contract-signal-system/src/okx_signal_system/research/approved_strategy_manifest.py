@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import getpass
 import json
 import os
 import threading
@@ -19,7 +20,8 @@ RESEARCH_RUNS_DIRNAME = "research_runs"
 MANIFEST_SCHEMA_VERSION = 1
 MANIFEST_TYPE = "approved_strategy_params"
 STRICT_RESEARCH_CANDIDATE_TYPE = "strict_research_candidate"
-APPROVED_STRATEGY_VERSION = "3.56.3"
+APPROVED_STRATEGY_VERSION = "3.56.4"
+APPROVED_RESEARCH_VERSION = "v3.56-strict"
 BLIND_SEALED_PASS = "BLIND_SEALED_PASS"
 
 PARAM_FIELDS = tuple(StrategyParams.__dataclass_fields__.keys())
@@ -150,6 +152,64 @@ def _parse_time(value: Any) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def _normalise_blind_status(value: Any) -> str:
+    return {
+        "locked": "BLIND_LOCKED",
+        "unlocked": "BLIND_OPENED",
+        "sealed_pass": BLIND_SEALED_PASS,
+        "sealed_fail": "BLIND_SEALED_FAIL",
+    }.get(str(value), str(value))
+
+
+def _candidate_blind_evidence(candidate: dict[str, Any]) -> tuple[str, bool]:
+    metadata = candidate.get("research_metadata", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    evaluation = metadata.get("blind_evaluation", {})
+    if not isinstance(evaluation, dict):
+        evaluation = {}
+    status = _normalise_blind_status(
+        candidate.get("blind_status")
+        or evaluation.get("status")
+        or metadata.get("blind_lock_status", "")
+    )
+    return status, bool(evaluation.get("passed", False))
+
+
+def _research_semantic_error(payload: dict[str, Any]) -> str | None:
+    metadata = payload.get("research_metadata")
+    if not isinstance(metadata, dict):
+        return "research_metadata_missing"
+    if str(payload.get("research_version", "")) != APPROVED_RESEARCH_VERSION:
+        return "research_version_mismatch"
+    if str(metadata.get("research_version", "")) != APPROVED_RESEARCH_VERSION:
+        return "metadata_research_version_mismatch"
+    if str(metadata.get("research_mode", "")) != "FORMAL":
+        return "metadata_research_mode_invalid"
+    if metadata.get("promotion_eligible") is not True:
+        return "metadata_promotion_not_eligible"
+    if metadata.get("blind_commitment_verified") is not True:
+        return "blind_commitment_not_verified"
+    for field in ("dataset", "signal_timeframe", "trend_timeframe"):
+        if not str(payload.get(field, "")).strip():
+            return f"{field}_missing"
+        if str(metadata.get(field, "")) != str(payload.get(field, "")):
+            return f"metadata_{field}_mismatch"
+    coverage_pairs = (
+        ("expected_parameter_combinations", "completed_parameter_combinations"),
+        ("expected_parameter_cells", "completed_parameter_cells"),
+    )
+    for expected_field, completed_field in coverage_pairs:
+        try:
+            expected = int(metadata.get(expected_field, 0))
+            completed = int(metadata.get(completed_field, 0))
+        except (TypeError, ValueError):
+            return "research_grid_coverage_invalid"
+        if expected <= 0 or completed != expected:
+            return "research_grid_coverage_incomplete"
+    return None
+
+
 def _manifest_hash_payload(manifest: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in manifest.items() if key not in {"manifest_hash", "manifest_sha256"}}
 
@@ -172,6 +232,16 @@ def validate_research_candidate(candidate: dict[str, Any], *, candidate_path: Pa
         raise CandidatePromotionError("CANDIDATE_NOT_FORMAL_RESEARCH")
     if not bool(candidate.get("promotion_eligible", False)):
         raise CandidatePromotionError("PROMOTION_NOT_ELIGIBLE")
+    semantic_error = _research_semantic_error(candidate)
+    if semantic_error is not None:
+        raise CandidatePromotionError(f"CANDIDATE_{semantic_error.upper()}")
+    blind_status, blind_passed = _candidate_blind_evidence(candidate)
+    if blind_status != BLIND_SEALED_PASS or not blind_passed:
+        raise CandidatePromotionError("CANDIDATE_BLIND_NOT_SEALED_PASS")
+    if not str(candidate.get("research_run_id", "")).strip():
+        raise CandidatePromotionError("CANDIDATE_RUN_ID_MISSING")
+    if _parse_time(candidate.get("generated_at")) is None:
+        raise CandidatePromotionError("CANDIDATE_GENERATED_AT_INVALID")
     params = _candidate_params(candidate)
     expected_params_hash = str(candidate.get("candidate_params_sha256", ""))
     actual_params_hash = canonical_sha256(params)
@@ -214,7 +284,7 @@ def build_approved_manifest(
     candidate_generated_at = str(candidate.get("generated_at") or "")
     approved_time = approved_at or _utc_now_text()
     research_metadata = candidate.get("research_metadata", {}) if isinstance(candidate.get("research_metadata", {}), dict) else {}
-    blind_evaluation = research_metadata.get("blind_evaluation", {}) if isinstance(research_metadata.get("blind_evaluation", {}), dict) else {}
+    blind_status, _blind_passed = _candidate_blind_evidence(candidate)
     source_parent = source_path.parent.name if source_path is not None else ""
     manifest = {
         "schema_version": MANIFEST_SCHEMA_VERSION,
@@ -222,7 +292,7 @@ def build_approved_manifest(
         "strategy_version": APPROVED_STRATEGY_VERSION,
         "approved_at": approved_time,
         "promotion_approved_at": approved_time,
-        "operator": operator or "",
+        "operator": (operator or getpass.getuser()).strip(),
         "source_candidate_path": str(source_path) if source_path is not None else "",
         "source_candidate_sha256": source_hash,
         "candidate_generated_at": candidate_generated_at,
@@ -230,7 +300,7 @@ def build_approved_manifest(
         "dataset_identity_hash": str(candidate.get("dataset_identity_hash") or candidate.get("dataset_hash") or research_metadata.get("dataset_identity_hash", "")),
         "config_hash": str(candidate.get("config_hash") or research_metadata.get("config_hash", "")),
         "source_hash": str(candidate.get("source_hash") or research_metadata.get("source_hash") or source_hash),
-        "blind_status": str(candidate.get("blind_status") or blind_evaluation.get("status") or research_metadata.get("blind_lock_status", "")),
+        "blind_status": blind_status,
         "dataset": str(candidate.get("dataset", "")),
         "signal_timeframe": str(candidate.get("signal_timeframe", "")),
         "trend_timeframe": str(candidate.get("trend_timeframe", "")),
@@ -254,6 +324,33 @@ def validate_approved_manifest(manifest: dict[str, Any]) -> StrategyParams:
         raise ManifestValidationError("runtime_manifest_schema_unsupported")
     if manifest.get("manifest_type") != MANIFEST_TYPE:
         raise ManifestValidationError("runtime_manifest_type_invalid")
+    if str(manifest.get("strategy_version", "")) != APPROVED_STRATEGY_VERSION:
+        raise ManifestValidationError("runtime_manifest_strategy_version_mismatch")
+    if str(manifest.get("research_mode", "")) != "FORMAL":
+        raise ManifestValidationError("runtime_manifest_research_mode_invalid")
+    if manifest.get("promotion_eligible") is not True:
+        raise ManifestValidationError("runtime_manifest_promotion_not_eligible")
+    if not str(manifest.get("operator", "")).strip():
+        raise ManifestValidationError("runtime_manifest_operator_missing")
+    if not str(manifest.get("source_candidate_sha256", "")).strip():
+        raise ManifestValidationError("runtime_manifest_source_hash_missing")
+    semantic_error = _research_semantic_error(manifest)
+    if semantic_error is not None:
+        raise ManifestValidationError(f"runtime_manifest_{semantic_error}")
+    blind_status, blind_passed = _candidate_blind_evidence(manifest)
+    if blind_status != BLIND_SEALED_PASS or not blind_passed:
+        raise ManifestValidationError("runtime_manifest_blind_not_sealed_pass")
+    if not str(manifest.get("research_run_id", "")).strip():
+        raise ManifestValidationError("runtime_manifest_run_id_missing")
+    candidate_time = _parse_time(manifest.get("candidate_generated_at"))
+    approved_time = _parse_time(manifest.get("approved_at"))
+    promotion_time = _parse_time(manifest.get("promotion_approved_at"))
+    if candidate_time is None:
+        raise ManifestValidationError("runtime_manifest_candidate_time_invalid")
+    if approved_time is None or promotion_time is None:
+        raise ManifestValidationError("runtime_manifest_approval_time_invalid")
+    if approved_time < candidate_time or promotion_time < candidate_time:
+        raise ManifestValidationError("runtime_manifest_approval_precedes_candidate")
     expected_manifest_hash = str(manifest.get("manifest_sha256") or manifest.get("manifest_hash", ""))
     actual_manifest_hash = canonical_sha256(_manifest_hash_payload(manifest))
     if not expected_manifest_hash or actual_manifest_hash != expected_manifest_hash:

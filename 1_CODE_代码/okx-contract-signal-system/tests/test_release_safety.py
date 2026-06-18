@@ -20,6 +20,7 @@ RELEASE_TEXT_FILES = [
     "docs/RELEASE_SAFETY.md",
     "docs/RUNTIME_VERIFICATION.md",
     "docs/SYSTEM_ARCHITECTURE.md",
+    "docs/V3.56.4_RUNTIME_OBSERVATION_CN.md",
     "src/okx_signal_system/reporting/report_builder.py",
     "src/okx_signal_system/signal_service/app.py",
     "src/okx_signal_system/notify/feishu.py",
@@ -70,7 +71,7 @@ def test_release_tests_package_can_import_integration_helpers() -> None:
 
 
 def test_release_version_sources_stay_consistent() -> None:
-    from okx_signal_system.research.approved_strategy_manifest import APPROVED_STRATEGY_VERSION
+    from okx_signal_system.research.approved_strategy_manifest import APPROVED_RESEARCH_VERSION, APPROVED_STRATEGY_VERSION
 
     pyproject = tomllib.loads(_read("pyproject.toml"))
     package_version = okx_signal_system.__version__
@@ -79,7 +80,7 @@ def test_release_version_sources_stay_consistent() -> None:
     gui_text = _read("gui.py")
     start_text = _read("start.bat")
 
-    assert package_version == "3.56.3"
+    assert package_version == "3.56.4"
     assert pyproject["project"]["version"] == package_version
     assert APPROVED_STRATEGY_VERSION == package_version
     assert f"Version: {package_version}" in pkg_info
@@ -97,11 +98,13 @@ def test_release_version_sources_stay_consistent() -> None:
 
 def test_strict_research_default_version_matches_cli_release() -> None:
     from okx_signal_system.backtest import research
+    from okx_signal_system.research.approved_strategy_manifest import APPROVED_RESEARCH_VERSION
 
     cli_text = _read("src/okx_signal_system/backtest/research_cli.py")
     default_version = research.run_dataset_research_artifacts.__kwdefaults__["research_version"]
 
     assert default_version == "v3.56-strict"
+    assert APPROVED_RESEARCH_VERSION == default_version
     assert f'parser.add_argument("--research-version", default="{default_version}")' in cli_text
 
 
@@ -124,31 +127,27 @@ def test_research_package_is_in_distribution_sources() -> None:
         assert path in sources
 
 
-def test_dashboard_reads_approved_manifest_before_legacy_selected_params() -> None:
+def test_dashboard_uses_validated_runtime_snapshot_and_never_legacy_param_overrides() -> None:
     server_data = _read("dashboard/src/lib/server-data.ts")
     readme = _read("dashboard/README.md")
 
-    manifest_ref = 'path.join(outputsDir, "runtime", "approved_strategy_manifest.json")'
-    legacy_ref = 'path.join(outputsDir, "selected_params.json")'
-    assert manifest_ref in server_data
-    assert legacy_ref in server_data
-    assert server_data.index(manifest_ref) < server_data.index(legacy_ref)
-    assert "selectedParamsFromManifest(approvedManifest)" in server_data
+    assert 'path.join(outputsDir, "latest_scan_status.json")' in server_data
+    assert "enrichedLatestScan?.selected_params" in server_data
+    assert "enrichedLatestScan?.push_allowed === true" in server_data
+    assert 'path.join(outputsDir, "selected_params.json")' not in server_data
+    assert "quality.selected_params" not in server_data
+    assert "Boolean(quality.push_allowed)" not in server_data
     assert "`outputs/runtime/approved_strategy_manifest.json`" in readme
 
 
-def test_dashboard_payload_prefers_live_runtime_status() -> None:
-    server_data = _read("dashboard/src/lib/server-data.ts")
-    types = _read("dashboard/src/lib/types.ts")
+def test_experimental_daily_learning_candidate_cannot_shadow_formal_research_candidate() -> None:
+    daily_learning = _read("src/okx_signal_system/training/daily_learning.py")
+    runtime_loader = _read("src/okx_signal_system/signal_service/runtime.py")
 
-    assert "generated_at: new Date().toISOString()" in server_data
-    assert "latestScanSymbols(enrichedLatestScan)" in server_data
-    assert "...configuredSymbols, ...scanSymbols, ...closedSymbols, ...backfillSymbols" in server_data
-    assert "push_allowed: Boolean(enrichedLatestScan?.push_allowed ?? quality.push_allowed)" in server_data
-    assert "closed_backfill_fresh_ws_quiet" in server_data
-    assert "isClosedBackfillFresh(closedBackfill)" in server_data
-    assert "closed_backfill_5m: closedBackfill5m" in server_data
-    assert "closed_backfill_5m?: ClosedBackfillStatus | null" in types
+    assert 'DAILY_LEARNING_CANDIDATE_FILENAME = "daily_learning_candidate.json"' in daily_learning
+    assert '"artifact_type": "experimental_daily_learning_candidate"' in daily_learning
+    assert 'out / "candidate_params.json"' not in daily_learning
+    assert "candidate_params.json" not in runtime_loader
 
 
 def test_env_example_is_signal_only_and_has_no_private_okx_keys() -> None:
@@ -246,16 +245,31 @@ def test_release_zip_denylist_filters_explicit_paths(tmp_path: Path) -> None:
     safe_file = tmp_path / "src" / "safe.py"
     env_file = tmp_path / ".env"
     db_file = tmp_path / "runtime.sqlite"
+    node_file = tmp_path / "dashboard" / "node_modules" / "pkg" / "index.js"
+    next_file = tmp_path / "dashboard" / ".next" / "server" / "page.js"
+    tsbuild_file = tmp_path / "dashboard" / "tsconfig.tsbuildinfo"
+    next_env_file = tmp_path / "dashboard" / "next-env.d.ts"
     safe_file.parent.mkdir(parents=True)
     safe_file.write_text("print('safe')", encoding="utf-8")
     env_file.write_text("FEISHU_WEBHOOK_URL=secret", encoding="utf-8")
     db_file.write_text("sqlite", encoding="utf-8")
+    for generated in [node_file, next_file, tsbuild_file, next_env_file]:
+        generated.parent.mkdir(parents=True, exist_ok=True)
+        generated.write_text("generated", encoding="utf-8")
     output_zip = tmp_path / "release.zip"
 
     build_release_zip(
         tmp_path,
         output_zip,
-        paths=[safe_file.relative_to(tmp_path), env_file.relative_to(tmp_path), db_file.relative_to(tmp_path)],
+        paths=[
+            safe_file.relative_to(tmp_path),
+            env_file.relative_to(tmp_path),
+            db_file.relative_to(tmp_path),
+            node_file.relative_to(tmp_path),
+            next_file.relative_to(tmp_path),
+            tsbuild_file.relative_to(tmp_path),
+            next_env_file.relative_to(tmp_path),
+        ],
     )
 
     with ZipFile(output_zip) as archive:
@@ -275,6 +289,10 @@ def test_release_zip_denylist_filters_git_tracked_sensitive_paths(tmp_path: Path
         "outputs/report.csv",
         "__pycache__/module.pyc",
         "build.log",
+        "dashboard/node_modules/pkg/index.js",
+        "dashboard/.next/server/page.js",
+        "dashboard/tsconfig.tsbuildinfo",
+        "dashboard/next-env.d.ts",
     ]
     for path in tracked_paths:
         target = tmp_path / path
@@ -310,6 +328,10 @@ def test_release_zip_denylist_filters_non_git_fallback(tmp_path: Path, monkeypat
         "runtime.sqlite3-wal",
         "runtime.db",
         "build.log",
+        "dashboard/node_modules/pkg/index.js",
+        "dashboard/.next/server/page.js",
+        "dashboard/tsconfig.tsbuildinfo",
+        "dashboard/next-env.d.ts",
     ]
     for path in paths:
         target = tmp_path / path

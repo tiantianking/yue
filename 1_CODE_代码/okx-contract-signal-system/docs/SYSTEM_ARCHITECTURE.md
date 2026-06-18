@@ -438,3 +438,22 @@ src/okx_signal_system/
 - `SignalLifecycleStore` tracks setup state and outcome state, while terminal TP/SL/TIMEOUT outcomes are read from `SignalOutcomeSimulator` instead of being recalculated independently in lifecycle.
 - Runtime signal risk output is signal-scoring oriented: `expected_move_pct`, `failure_probability`, and `volatility_adjusted_score` are exposed for notification/ranking context. Execution/account fields stay unset in formal signal payloads.
 - ML and shadow trading are observation-only. Live score adjustment and live leverage adjustment return neutral values; offline methods keep historical analysis for research reports.
+
+## v3.56.3 runtime-cache integration closure
+
+- v3.56.2 runtime-cache stability changes are retained: candle de-duplication prefers confirmed closed bars, an existing single realtime open tail may remain in runtime cache, and REST-confirmed closed data replaces an open row at the same timestamp.
+- Closed-candle health and cache-write health are separate. A complete closed-bar tail remains `data_complete=true` and may keep cycle `all_complete=true` even when a nonessential cache refresh fails; `write_attempted`, `write_succeeded`, `write_error`, and cycle `write_failures` expose the storage issue independently.
+- Approved runtime manifests are hash-and-semantic validated. Formal mode, strict research version, complete grid coverage, verified blind sealed pass, operator identity, source/run identity, and approval chronology are required.
+- Scheduler and single-job explicit parameters must exactly match the approved manifest. Missing, invalid, or mismatched manifests fail closed; no scheduler path hardcodes push permission.
+- Daily learning writes only `daily_learning_candidate.json` as an experimental sidecar and cannot overwrite strict research `candidate_params.json` or feed runtime parameter loading.
+- GUI, realtime monitor, and scheduler drain the durable lifecycle outbox; scheduler also drains during the interval between scans. Dashboard exposes pending, failed, dead-letter, and sent counts.
+- Dashboard runtime aggregation treats `latest_scan_status.json` and the latest closed-backfill status as authoritative. Legacy research/backfill snapshots are fallback-only and cannot override live runtime parameters or symbol health.
+- Windows launcher and Dashboard API explicitly preserve UTF-8. Dashboard responses are no-store, and displayed timestamps use Asia/Shanghai time.
+
+
+## v3.56.4 duplicate-package reconciliation
+
+- Uses the accepted v3.56.3 strict runtime/security package as the release baseline.
+- Keeps SQLite outbox claim/lease/backoff behavior and now closes every SQLite connection deterministically.
+- Treats a fresh, complete closed-candle backfill as market-data liveness evidence when the WebSocket is connected but quiet between candle events; this does not override scan staleness, disconnection, degradation, or scan errors.
+- Rejects regressions found in the re-uploaded same-name archive: hard-coded scheduler push approval, hash-only manifests, daily-learning writes to the formal candidate path, loss of continuous outbox draining, and dashboard observability removal.

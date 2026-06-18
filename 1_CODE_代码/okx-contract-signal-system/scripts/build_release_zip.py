@@ -8,8 +8,8 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 
 _ENV_TEMPLATE_ALLOWLIST = {".env.example"}
-_DENIED_FILE_NAMES = {"build.log"}
-_DENIED_FILE_SUFFIXES = {".pyc", ".pyo", ".pyd", ".sqlite", ".sqlite3", ".db"}
+_DENIED_FILE_NAMES = {"build.log", "next-env.d.ts"}
+_DENIED_FILE_SUFFIXES = {".pyc", ".pyo", ".pyd", ".sqlite", ".sqlite3", ".db", ".tsbuildinfo"}
 _DENIED_SQLITE_SIDE_SUFFIXES = (
     ".db-journal",
     ".db-shm",
@@ -27,8 +27,13 @@ _DENIED_DIR_NAMES = {
     ".mypy_cache",
     ".pytest_cache",
     ".ruff_cache",
+    ".next",
+    ".turbo",
     "__pycache__",
     "cache",
+    "coverage",
+    "dist",
+    "node_modules",
     "output",
     "outputs",
 }

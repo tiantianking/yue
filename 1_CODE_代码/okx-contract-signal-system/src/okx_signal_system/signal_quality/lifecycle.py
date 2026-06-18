@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import sqlite3
 from contextlib import closing
 from collections import Counter
@@ -39,6 +41,9 @@ DEFAULT_LIFECYCLE_OUTBOX_MAX_ATTEMPTS = 3
 DEFAULT_LIFECYCLE_OUTBOX_LEASE_SECONDS = 300
 DEFAULT_LIFECYCLE_OUTBOX_RETRY_DELAY_SECONDS = 60
 MAX_LIFECYCLE_OUTBOX_RETRY_DELAY_SECONDS = 3600
+DEFAULT_LIFECYCLE_OUTBOX_POLL_SECONDS = 5.0
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -1196,6 +1201,25 @@ class LifecycleOutboxWorker:
                 self._mark_failed(item, "send_lifecycle_event_returned_false", summary)
         return summary
 
+    async def run_forever(
+        self,
+        *,
+        interval_seconds: float = DEFAULT_LIFECYCLE_OUTBOX_POLL_SECONDS,
+        limit: int = 100,
+    ) -> None:
+        """Continuously drain the durable notification outbox until cancelled."""
+        delay = max(1.0, float(interval_seconds))
+        while True:
+            try:
+                summary = await asyncio.to_thread(self.run_once, limit=limit)
+                if summary.get("failed") or summary.get("dead_letter"):
+                    log.warning("notification outbox worker summary: %s", summary)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("notification outbox worker cycle failed")
+            await asyncio.sleep(delay)
+
     def _mark_failed(self, item: dict[str, Any], error: str, summary: dict[str, int]) -> None:
         outbox_id = str(item["outbox_id"])
         attempt_count = int(item.get("attempt_count") or 0)
@@ -1210,6 +1234,7 @@ class LifecycleOutboxWorker:
 __all__ = [
     "LifecycleStatus",
     "DEFAULT_LIFECYCLE_OUTBOX_MAX_ATTEMPTS",
+    "DEFAULT_LIFECYCLE_OUTBOX_POLL_SECONDS",
     "LifecycleOutboxWorker",
     "SignalLifecycleRecord",
     "SignalLifecycleStore",

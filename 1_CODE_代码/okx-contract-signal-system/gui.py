@@ -28,6 +28,7 @@ if str(_src_path) not in sys.path:
 log = logging.getLogger(__name__)
 
 from okx_signal_system import __version__ as _PACKAGE_VERSION
+from okx_signal_system.io_atomic import write_text_atomic
 
 APP_VERSION = f"v{_PACKAGE_VERSION}"
 DASHBOARD_HOST = "127.0.0.1"
@@ -171,6 +172,7 @@ class OKXSignalGUI:
         self._trained_params = None
         self._startup_quality_report = None
         self._quality_gate_allows_push = False
+        self._runtime_manifest_status: dict = {}
         self._last_candidate_health_report_ts = 0.0
         self._lifecycle_store = None
         self._notification_dispatcher_instance = None
@@ -301,6 +303,10 @@ class OKXSignalGUI:
             lifecycle_summary = self._signal_lifecycle_store().summary()
             quality_model = self._quality_model_shadow_scorer().status()
             generated_at = datetime.now(timezone.utc)
+            try:
+                selected_params = asdict(params) if params is not None else {}
+            except TypeError:
+                selected_params = {}
             payload = {
                 "generated_at": generated_at.isoformat(),
                 "generated_at_beijing": _format_beijing_time(generated_at, "%Y-%m-%d %H:%M:%S 北京时间"),
@@ -310,7 +316,8 @@ class OKXSignalGUI:
                 "signal_timeframe": self.api.timeframe.key if self.api else None,
                 "trend_timeframe": self.api.trend_timeframe.key if self.api else None,
                 "push_allowed": self._quality_gate_allows_push,
-                "selected_params": asdict(params),
+                "manifest_status": self._runtime_manifest_status,
+                "selected_params": selected_params,
                 "websocket": ws_status,
                 "lifecycle_summary": lifecycle_summary,
                 "quality_model": quality_model,
@@ -320,13 +327,10 @@ class OKXSignalGUI:
                 "symbols": items,
                 "last_signal": None,
             }
-            path.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = path.with_name(f"{path.stem}.{os.getpid()}.tmp{path.suffix}")
-            tmp_path.write_text(
+            write_text_atomic(
                 json.dumps(payload, ensure_ascii=False, indent=2, default=self._json_default),
-                encoding="utf-8",
+                path,
             )
-            tmp_path.replace(path)
         except Exception as exc:
             log.warning("Failed to write GUI latest scan status: %s", exc)
 
@@ -892,6 +896,7 @@ class OKXSignalGUI:
                 from okx_signal_system.signal_service.runtime import load_selected_strategy_params_status
 
                 manifest_status = load_selected_strategy_params_status()
+                self._runtime_manifest_status = manifest_status.as_dict()
                 runtime_params = manifest_status.params
                 self._update_runtime_module_status(
                     "approved_strategy_manifest",
@@ -936,6 +941,12 @@ class OKXSignalGUI:
                     )))
             except Exception as e:
                 self._quality_gate_allows_push = False
+                self._runtime_manifest_status = {
+                    "ok": False,
+                    "push_allowed": False,
+                    "reason": f"runtime_manifest_load_failed:{e}",
+                    "selected_params": {},
+                }
                 self._update_runtime_module_status("approved_strategy_manifest", "failed", error=str(e))
                 self.message_queue.put(('log', (f"运行时参数加载异常，使用默认参数: {e}", "WARNING")))
 

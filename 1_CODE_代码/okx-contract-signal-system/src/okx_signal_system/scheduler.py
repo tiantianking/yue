@@ -18,6 +18,7 @@ from okx_signal_system.signal_quality.lifecycle import LifecycleOutboxWorker, Si
 from okx_signal_system.signal_quality.selector import TieredSelection
 from okx_signal_system.signal_service import SignalScanContext, SignalScanService
 from okx_signal_system.signal_service.regime import AdaptiveParamsManager
+from okx_signal_system.signal_service.runtime import load_selected_strategy_params_status
 from okx_signal_system.signal_runtime import (
     DEFAULT_MAX_SIGNAL_LAG_MINUTES,
     parameter_hash,
@@ -123,6 +124,7 @@ def run_scan_cycle(
     trend_timeframe: str = DEFAULT_TREND_TIMEFRAME,
     lifecycle_store: SignalLifecycleStore | None = None,
     include_selection: bool = False,
+    quality_gate_allows_push: bool = False,
 ) -> tuple[list[dict], Ledger] | tuple[list[dict], Ledger, TieredSelection]:
     """Execute one scan cycle."""
     signal_timeframe = timeframe_spec(signal_timeframe).key
@@ -148,7 +150,7 @@ def run_scan_cycle(
         strategy_params=params,
         risk_config=load_runtime_config().risk_config(initial_equity=GLOBAL_INITIAL_EQUITY),
         ledger=ledger,
-        quality_gate_allows_push=True,
+        quality_gate_allows_push=bool(quality_gate_allows_push),
         min_vote_approval_rate=0.4,
         mode="scheduler_signal_only",
         min_history_bars=100,
@@ -237,7 +239,6 @@ class SignalScheduler:
     ):
         default_dataset, default_signal_timeframe, default_trend_timeframe = _data_defaults()
         self.dataset = dataset or default_dataset
-        self.params = params or StrategyParams()
         self.signal_timeframe = timeframe_spec(signal_timeframe or default_signal_timeframe).key
         self.trend_timeframe = timeframe_spec(trend_timeframe or default_trend_timeframe).key
         self.status_callback = status_callback
@@ -248,6 +249,23 @@ class SignalScheduler:
             init_capital=GLOBAL_INITIAL_EQUITY,
             equity=GLOBAL_INITIAL_EQUITY,
         )
+        self._runtime_manifest_status = load_selected_strategy_params_status()
+        if params is None:
+            self.params = self._runtime_manifest_status.params
+            self._quality_gate_allows_push = bool(self._runtime_manifest_status.ok)
+        else:
+            self.params = params
+            self._quality_gate_allows_push = bool(
+                self._runtime_manifest_status.ok and params == self._runtime_manifest_status.params
+            )
+        if not self._quality_gate_allows_push:
+            log.warning(
+                "scheduler formal notifications blocked by approved manifest: %s",
+                self._runtime_manifest_status.reason
+                if not self._runtime_manifest_status.ok
+                else "explicit_params_do_not_match_approved_manifest",
+            )
+
         self._lifecycle_store = SignalLifecycleStore()
         self._notification_dispatcher = NotificationDispatcher(self._lifecycle_store)
         self._lifecycle_outbox_worker = LifecycleOutboxWorker(self._lifecycle_store, self._notification_dispatcher)
@@ -282,6 +300,7 @@ class SignalScheduler:
             trend_timeframe=self.trend_timeframe,
             lifecycle_store=self._lifecycle_store,
             include_selection=True,
+            quality_gate_allows_push=self._quality_gate_allows_push,
         )
 
         total_formal_candidates = len(selection.tier_a) + len(selection.tier_b)
@@ -325,6 +344,8 @@ class SignalScheduler:
                 last_signal_count=sum(1 for r in results if r.get("candidate") and r["candidate"].tier == "A"),
             )
 
+        self._drain_outbox()
+
         if self.status_callback:
             msg = format_status_message(self._ledger, self._cycle)
             try:
@@ -332,6 +353,16 @@ class SignalScheduler:
             except Exception as e:
                 log.error("status callback failed: %s", e)
         return results
+
+    def _drain_outbox(self) -> dict[str, int]:
+        try:
+            summary = self._lifecycle_outbox_worker.run_once()
+            if summary.get("failed") or summary.get("dead_letter"):
+                log.warning("scheduler notification outbox summary: %s", summary)
+            return summary
+        except Exception as exc:
+            log.exception("scheduler notification outbox drain failed: %s", exc)
+            return {"sent": 0, "failed": 1}
 
     def run_forever(self):
         """Run scheduler until stopped."""
@@ -352,7 +383,13 @@ class SignalScheduler:
                 break
             next_run = _now_utc().timestamp() + SCAN_INTERVAL_SECONDS
             log.info("next scan: %s UTC", datetime.fromtimestamp(next_run, tz=timezone.utc).strftime("%H:%M:%S"))
-            self._stop_event.wait(timeout=SCAN_INTERVAL_SECONDS)
+            remaining = float(SCAN_INTERVAL_SECONDS)
+            while remaining > 0 and not self._stop_event.is_set():
+                wait_seconds = min(5.0, remaining)
+                if self._stop_event.wait(timeout=wait_seconds):
+                    break
+                remaining -= wait_seconds
+                self._drain_outbox()
 
     def run_once(self) -> list[dict]:
         """Run one scheduler cycle."""

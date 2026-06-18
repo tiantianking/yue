@@ -53,7 +53,7 @@ def _runtime_calls(paths: list[Path]) -> list[tuple[Path, int, str]]:
     return calls
 
 
-def test_scheduler_run_cycle_does_not_drain_lifecycle_outbox(monkeypatch) -> None:
+def test_scheduler_run_cycle_drains_lifecycle_outbox(monkeypatch) -> None:
     from okx_signal_system import scheduler
 
     calls: list[str] = []
@@ -80,7 +80,7 @@ def test_scheduler_run_cycle_does_not_drain_lifecycle_outbox(monkeypatch) -> Non
     instance = scheduler.SignalScheduler()
 
     assert instance.run_once() == []
-    assert calls == []
+    assert calls == ["run_once"]
 
 
 @dataclass(frozen=True)
@@ -97,7 +97,7 @@ class _ScanServiceStub:
         )
 
 
-def test_live_monitor_loop_does_not_drain_lifecycle_outbox_after_scan(monkeypatch) -> None:
+def test_live_monitor_loop_drains_lifecycle_outbox_after_scan(monkeypatch) -> None:
     from okx_signal_system.exchange import realtime
 
     calls: list[str] = []
@@ -134,25 +134,6 @@ def test_live_monitor_loop_does_not_drain_lifecycle_outbox_after_scan(monkeypatc
     monkeypatch.setattr(realtime.asyncio, "sleep", stop_after_scan)
 
     asyncio.run(monitor._monitor_loop())
-
-    assert calls == []
-
-
-def test_live_monitor_outbox_loop_drains_independently(monkeypatch) -> None:
-    from okx_signal_system.exchange import realtime
-
-    calls: list[str] = []
-    monitor = realtime.LiveSignalMonitor.__new__(realtime.LiveSignalMonitor)
-    monitor._running = True
-    monitor._outbox_interval_seconds = 5
-    monitor._run_lifecycle_outbox_once = lambda: calls.append("run_once") or {"sent": 1, "failed": 0}
-
-    async def stop_after_first_sleep(_delay):
-        monitor._running = False
-
-    monkeypatch.setattr(realtime.asyncio, "sleep", stop_after_first_sleep)
-
-    asyncio.run(monitor._lifecycle_outbox_loop())
 
     assert calls == ["run_once"]
 
@@ -391,3 +372,38 @@ def test_repeated_failed_mark_is_idempotent_for_attempt_count(tmp_path) -> None:
     assert failed["status"] == "FAILED"
     assert failed["attempt_count"] == 1
     assert failed["last_error"] == "first"
+
+
+def test_lifecycle_outbox_worker_run_forever_drains_without_new_scan(monkeypatch, tmp_path) -> None:
+    from okx_signal_system.signal_quality import LifecycleOutboxWorker, SignalLifecycleStore
+    from okx_signal_system.signal_quality import lifecycle as lifecycle_module
+
+    store = SignalLifecycleStore(tmp_path / "lifecycle.sqlite3")
+    store.enqueue_notification(
+        "status:test",
+        signal_id=None,
+        event_type="STATUS",
+        payload={"text": "ok"},
+    )
+
+    sent: list[str] = []
+
+    class Dispatcher:
+        def send_lifecycle_event(self, item):
+            sent.append(str(item["outbox_id"]))
+            return True
+
+    async def stop_after_first_cycle(_delay):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(lifecycle_module.asyncio, "sleep", stop_after_first_cycle)
+    worker = LifecycleOutboxWorker(store, Dispatcher())
+
+    try:
+        asyncio.run(worker.run_forever(interval_seconds=1))
+    except asyncio.CancelledError:
+        pass
+
+    assert sent == ["status:test"]
+    assert store.outbox_summary()["pending"] == 0
+    assert store.outbox_summary()["sent"] == 1

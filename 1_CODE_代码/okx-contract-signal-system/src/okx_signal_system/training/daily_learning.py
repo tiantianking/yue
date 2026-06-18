@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import math
-import os
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +13,7 @@ import pandas as pd
 
 from okx_signal_system.backtest.runner import run_backtest, split_train_valid, summarize_trades, validate_backtest_result
 from okx_signal_system.config import load_config, project_paths
+from okx_signal_system.io_atomic import write_json_atomic
 from okx_signal_system.data.loader import SymbolData, closed_bars, load_all_symbols
 from okx_signal_system.ml.shadow_trading import ShadowTradingLedger
 from okx_signal_system.strategy.trend_breakout import StrategyParams
@@ -29,6 +29,8 @@ from okx_signal_system.training.startup_quality import (
 )
 
 log = logging.getLogger(__name__)
+
+DAILY_LEARNING_CANDIDATE_FILENAME = "daily_learning_candidate.json"
 
 PARAM_FIELDS = (
     "fast_ema",
@@ -829,31 +831,25 @@ def run_daily_learning_review(
     )
 
     serializable = _json_safe(asdict(report))
-    (out / "daily_learning_review.json").write_text(
-        json.dumps(serializable, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    (out / "candidate_params.json").write_text(
-        json.dumps(
-            _json_safe(
-                {
-                    "generated_at": report.generated_at,
-                    "dataset": report.dataset,
-                    "signal_timeframe": report.signal_timeframe,
-                    "trend_timeframe": report.trend_timeframe,
-                    "candidate_params": report.candidate_params,
-                    "candidate_gate_passed": report.candidate_gate_passed,
-                    "auto_promote_enabled": report.auto_promote_enabled,
-                    "promotion_eligible": report.promotion_eligible,
-                    "promotion_allowed": report.promotion_allowed,
-                    "reasons": report.reasons,
-                    "overfit_checks": report.overfit_checks,
-                }
-            ),
-            ensure_ascii=False,
-            indent=2,
+    write_json_atomic(serializable, out / "daily_learning_review.json")
+    write_json_atomic(
+        _json_safe(
+            {
+                "artifact_type": "experimental_daily_learning_candidate",
+                "generated_at": report.generated_at,
+                "dataset": report.dataset,
+                "signal_timeframe": report.signal_timeframe,
+                "trend_timeframe": report.trend_timeframe,
+                "candidate_params": report.candidate_params,
+                "candidate_gate_passed": report.candidate_gate_passed,
+                "auto_promote_enabled": report.auto_promote_enabled,
+                "promotion_eligible": report.promotion_eligible,
+                "promotion_allowed": report.promotion_allowed,
+                "reasons": report.reasons,
+                "overfit_checks": report.overfit_checks,
+            }
         ),
-        encoding="utf-8",
+        out / DAILY_LEARNING_CANDIDATE_FILENAME,
     )
     log.info(
         "daily learning review complete: gate=%s promotion=%s symbols=%s",
@@ -915,10 +911,7 @@ class DailyLearningReviewService:
             "reasons": [reason],
             "train_grid_meta": {"status": status, "reason": reason},
         }
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        tmp_path = self.output_path.with_name(f"{self.output_path.stem}.{os.getpid()}.tmp{self.output_path.suffix}")
-        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp_path.replace(self.output_path)
+        write_json_atomic(payload, self.output_path)
 
     async def run_forever(self) -> None:
         while True:

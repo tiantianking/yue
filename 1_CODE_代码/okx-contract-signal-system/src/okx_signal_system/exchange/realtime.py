@@ -28,7 +28,7 @@ from okx_signal_system.exchange.okx import (
     get_candles,
     test_connection,
 )
-from okx_signal_system.io_atomic import read_parquet_with_retry, write_parquet_atomic
+from okx_signal_system.io_atomic import read_parquet_with_retry, write_parquet_atomic, write_text_atomic
 from okx_signal_system.config import load_runtime_config
 from okx_signal_system.paths import find_lightweight_history, find_runtime_cache_root
 from okx_signal_system.strategy.trend_breakout import TradeSignal, StrategyParams
@@ -161,13 +161,10 @@ def _beijing_text(value: Any) -> str:
 
 
 def _write_json_atomic(payload: dict[str, Any], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(f"{path.stem}.{os.getpid()}.tmp{path.suffix}")
-    tmp_path.write_text(
+    write_text_atomic(
         json.dumps(payload, ensure_ascii=False, indent=2, default=_json_default),
-        encoding="utf-8",
+        path,
     )
-    tmp_path.replace(path)
 
 
 @dataclass
@@ -1293,6 +1290,7 @@ class LiveSignalMonitor:
                 cycle_health = scan_result.cycle_health
 
                 await self._publish_tiered_candidates(scan_result.selection)
+                await asyncio.to_thread(self._run_lifecycle_outbox_once)
                 self.api.persist_data()
                 self._write_latest_scan_status(cycle_health)
                 now_ts = time.time()

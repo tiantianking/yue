@@ -6,5 +6,10 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   const data = await loadDashboardData();
-  return NextResponse.json(data);
+  return NextResponse.json(data, {
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store, max-age=0",
+    },
+  });
 }

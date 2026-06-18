@@ -1,5 +1,8 @@
 @echo off
+chcp 65001 > nul
 setlocal EnableExtensions EnableDelayedExpansion
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
 title OKX Signal Platform
 
 cd /d "%~dp0"

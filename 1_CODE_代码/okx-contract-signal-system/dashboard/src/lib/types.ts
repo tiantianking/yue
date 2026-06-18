@@ -65,7 +65,6 @@ export type LatestSignal = {
 
 export type LatestScanStatus = {
   generated_at?: string;
-  generated_at_beijing?: string;
   status?: string;
   runtime_status?: "online" | "stale" | "offline" | "error" | string;
   runtime_reason?: string;
@@ -75,6 +74,17 @@ export type LatestScanStatus = {
   signal_timeframe?: string;
   trend_timeframe?: string;
   push_allowed?: boolean;
+  manifest_status?: {
+    ok?: boolean;
+    push_allowed?: boolean;
+    reason?: string;
+    selected_params?: StrategyParams;
+    manifest_hash?: string;
+    research_run_id?: string;
+    approved_at?: string;
+    [key: string]: unknown;
+  } | null;
+  selected_params?: StrategyParams;
   symbols_checked?: number;
   ready_count?: number;
   websocket?: {
@@ -115,9 +125,20 @@ export type LatestScanStatus = {
     breakout_gap_pct?: number | null;
   }>;
   quality_model?: QualityModelShadow | null;
-  lifecycle_summary?: JsonRecord | null;
-  manifest_status?: JsonRecord | null;
-  selected_params?: StrategyParams;
+  lifecycle_summary?: {
+    total?: number;
+    active?: number;
+    terminal?: number;
+    outbox?: {
+      pending?: number;
+      sent?: number;
+      failed?: number;
+      in_progress?: number;
+      dead_letter?: number;
+      updated_at?: string | null;
+    };
+    [key: string]: unknown;
+  } | null;
   last_signal?: LatestSignal | null;
 };
 
@@ -143,6 +164,7 @@ export type SymbolRow = {
   last_ts: string;
   age_minutes: number | null;
   error: string;
+  source?: string;
 };
 
 export type ClosedBackfillStatus = {
@@ -153,6 +175,7 @@ export type ClosedBackfillStatus = {
   next_run_at?: string;
   all_complete?: boolean;
   symbols_checked?: number;
+  write_failures?: number;
   symbols?: Array<{
     inst_id: string;
     status: string;
@@ -164,6 +187,10 @@ export type ClosedBackfillStatus = {
     missing_closed_bars?: number;
     added_rows?: number;
     error?: string;
+    data_complete?: boolean;
+    write_attempted?: boolean;
+    write_succeeded?: boolean;
+    write_error?: string;
   }>;
 };
 
@@ -185,6 +212,10 @@ export type DailyLearningReviewStatus = {
 
 export type DashboardPayload = {
   generated_at: string;
+  runtime_mode: "formal_push" | "research_observation";
+  runtime_status_source: string;
+  latest_scan_age_seconds: number | null;
+  backfill_status_age_seconds: number | null;
   project_root: string;
   signal_timeframe: string;
   trend_timeframe: string;
@@ -193,6 +224,8 @@ export type DashboardPayload = {
   quality: {
     status: string;
     push_allowed: boolean;
+    manifest_reason: string;
+    params_source: string;
     reasons: string[];
     push_blocking_reasons: string[];
     stale_symbols: string[];

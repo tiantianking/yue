@@ -49,6 +49,10 @@ const ranges = [
 
 const emptyData: DashboardPayload = {
   generated_at: "",
+  runtime_mode: "research_observation",
+  runtime_status_source: "latest_scan_status_missing",
+  latest_scan_age_seconds: null,
+  backfill_status_age_seconds: null,
   project_root: "",
   signal_timeframe: "15m",
   trend_timeframe: "15m",
@@ -57,6 +61,8 @@ const emptyData: DashboardPayload = {
   quality: {
     status: "loading",
     push_allowed: false,
+    manifest_reason: "runtime_status_missing",
+    params_source: "none",
     reasons: [],
     push_blocking_reasons: [],
     stale_symbols: [],
@@ -128,13 +134,13 @@ function MetricGrid({ data }: { data: DashboardPayload }) {
       <MetricTile
         label="目标 R"
         value={`${numberText(data.selected_params.take_profit_mult, 1)}R`}
-        hint={`止损 ${numberText(data.selected_params.atr_stop_mult, 1)} ATR`}
+        hint={`止损 ${numberText(data.selected_params.atr_stop_mult, 1)} ATR · ${data.quality.params_source}`}
         tone="green"
       />
       <MetricTile
         label="推送状态"
         value={data.quality.push_allowed ? "允许" : "拦截"}
-        hint={data.quality.status}
+        hint={data.quality.manifest_reason}
         tone={data.quality.push_allowed ? "green" : "red"}
       />
     </div>
@@ -243,7 +249,13 @@ function SignalPanel({ data }: { data: DashboardPayload }) {
         <MetricTile
           label="Model R"
           value={qualityModel?.enabled ? numberText(qualityModel.expected_net_r, 2) : "-"}
-          hint={qualityModel?.artifact_path ? "shadow only" : "-"}
+          hint={
+            qualityModel?.artifact_path
+              ? "shadow only"
+              : qualityModel?.reason === "model_artifact_missing"
+                ? "optional / offline"
+                : "-"
+          }
         />
       </div>
 
@@ -273,6 +285,7 @@ function RuntimePanel({ data }: { data: DashboardPayload }) {
   const dashboard5mHealthy = Boolean(closed5m?.all_complete);
   const signalGateHealthy = runtimeOnline && (scan?.status ?? "running") === "running" && !scan?.error;
   const learningStatus = String(data.learning_review?.status ?? "-");
+  const outbox = scan?.lifecycle_summary?.outbox;
   const learningHealthy = ["healthy", "checking", "disabled", "-"].includes(learningStatus);
   const tone = runtimeOnline && closedHealthy && dashboard5mHealthy && signalGateHealthy ? "green" : "red";
   const first15mIssue = closed15m?.symbols?.find((row) => row.status !== "passed")?.status ?? "-";
@@ -297,6 +310,27 @@ function RuntimePanel({ data }: { data: DashboardPayload }) {
         <MetricTile label="5m面板K" value={dashboard5mHealthy ? "已补齐" : first5mIssue} tone={dashboard5mHealthy ? "green" : "amber"} />
         <MetricTile label="信号门禁" value={signalGateHealthy ? "通过" : String(scan?.status ?? "-")} tone={signalGateHealthy ? "green" : "red"} />
         <MetricTile label="学习复盘" value={learningStatus} tone={learningHealthy ? "green" : "neutral"} />
+        <MetricTile
+          label="通知待发送"
+          value={integerText(outbox?.pending)}
+          hint={`处理中 ${integerText(outbox?.in_progress)}`}
+          tone={(outbox?.pending ?? 0) === 0 ? "green" : "amber"}
+        />
+        <MetricTile
+          label="通知失败/死信"
+          value={`${integerText(outbox?.failed)}/${integerText(outbox?.dead_letter)}`}
+          hint={`已发送 ${integerText(outbox?.sent)}`}
+          tone={(outbox?.failed ?? 0) + (outbox?.dead_letter ?? 0) === 0 ? "green" : "red"}
+        />
+        <MetricTile label="扫描源" value={data.runtime_status_source} />
+        <MetricTile
+          label="15m状态刷新"
+          value={
+            typeof data.backfill_status_age_seconds === "number"
+              ? ageText(data.backfill_status_age_seconds / 60)
+              : "-"
+          }
+        />
       </div>
       {ws?.last_error || scan?.error ? (
         <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-700">
@@ -583,6 +617,9 @@ export function Dashboard() {
               <Badge tone="neutral">{data.trend_timeframe}</Badge>
               <Badge tone={data.quality.push_allowed ? "green" : "red"}>
                 {data.quality.push_allowed ? "Push OK" : "Push Blocked"}
+              </Badge>
+              <Badge tone={data.runtime_mode === "formal_push" ? "green" : "amber"}>
+                {data.runtime_mode === "formal_push" ? "正式推送模式" : "研究观察模式"}
               </Badge>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-3 text-sm font-semibold text-zinc-600">

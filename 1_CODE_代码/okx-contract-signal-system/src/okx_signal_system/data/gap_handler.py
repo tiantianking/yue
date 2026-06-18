@@ -104,6 +104,7 @@ class DataGapHandler:
         timeframe: str = "1h",
         dataset: str | None = None,
         read_only: bool | None = None,
+        allow_existing_open_candles: bool = False,
     ):
         self.timeframe = timeframe_spec(timeframe)
         uses_default_history_root = data_dir is None
@@ -115,6 +116,8 @@ class DataGapHandler:
             data_dir = Path(data_dir)
         self.data_dir = data_dir
         self.read_only = _configured_read_only() if read_only is None and uses_default_history_root else bool(read_only)
+        self.allow_existing_open_candles = bool(allow_existing_open_candles)
+        self.last_merge_error: str | None = None
         self._api_unavailable_reason: str | None = None
 
     @staticmethod
@@ -322,7 +325,7 @@ class DataGapHandler:
         new_data: pd.DataFrame,
         mode: str = "append",
         *,
-        allow_existing_open_tail: bool = False,
+        allow_existing_open_tail: bool | None = None,
     ) -> bool:
         """
         合并并保存数据
@@ -330,8 +333,15 @@ class DataGapHandler:
         """
         fname = self._inst_to_filename(inst_id)
         path = self.data_dir / fname
+        self.last_merge_error = None
+        preserve_open_tail = (
+            self.allow_existing_open_candles
+            if allow_existing_open_tail is None
+            else bool(allow_existing_open_tail)
+        )
 
         if self.read_only:
+            self.last_merge_error = f"data directory is read-only: {self.data_dir}"
             log.error("Refusing to write read-only data directory for %s: %s", inst_id, self.data_dir)
             return False
 
@@ -344,8 +354,8 @@ class DataGapHandler:
                 existing = self._validate_merge_frame(
                     existing,
                     inst_id,
-                    allow_existing_open_tail=allow_existing_open_tail,
-                    allow_open_candles=allow_existing_open_tail and mode == "merge",
+                    allow_existing_open_tail=preserve_open_tail,
+                    allow_open_candles=preserve_open_tail and mode == "merge",
                 )
 
                 if mode == "append":
@@ -362,7 +372,7 @@ class DataGapHandler:
             df = self._validate_merge_frame(
                 df,
                 inst_id,
-                allow_existing_open_tail=allow_existing_open_tail,
+                allow_existing_open_tail=preserve_open_tail,
             )
 
             write_parquet_atomic(df, path)
@@ -371,6 +381,7 @@ class DataGapHandler:
 
         except Exception as e:
             message = str(e)
+            self.last_merge_error = summarize_sync_error(message)
             if "open candles cannot be saved by gap backfill" in message:
                 log.info("Skipped open-candle gap backfill rows for %s: %s", inst_id, message)
             else:

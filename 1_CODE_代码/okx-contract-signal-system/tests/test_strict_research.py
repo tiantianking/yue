@@ -805,10 +805,11 @@ def _strict_candidate_payload(
     return {
         "artifact_type": "strict_research_candidate",
         "generated_at": generated_at,
+        "research_run_id": "unit-research-run",
         "dataset": "unit",
         "signal_timeframe": "15m",
         "trend_timeframe": "1h",
-        "research_version": "unit",
+        "research_version": "v3.56-strict",
         "research_mode": research_mode,
         "promotion_eligible": promotion_eligible,
         "candidate_params": candidate_params,
@@ -816,7 +817,21 @@ def _strict_candidate_payload(
             json.dumps(candidate_params, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest(),
         "artifact_hashes": {},
-        "research_metadata": {},
+        "research_metadata": {
+            "dataset": "unit",
+            "signal_timeframe": "15m",
+            "trend_timeframe": "1h",
+            "research_version": "v3.56-strict",
+            "research_mode": "FORMAL",
+            "promotion_eligible": True,
+            "blind_commitment_verified": True,
+            "expected_parameter_combinations": 1,
+            "completed_parameter_combinations": 1,
+            "expected_parameter_cells": 1,
+            "completed_parameter_cells": 1,
+            "blind_lock_status": "BLIND_SEALED_PASS",
+            "blind_evaluation": {"status": "BLIND_SEALED_PASS", "passed": True},
+        },
     }
 
 
@@ -866,6 +881,46 @@ def test_non_formal_smoke_candidate_cannot_promote(tmp_path) -> None:
 
     with pytest.raises(CandidatePromotionError, match="CANDIDATE_NOT_FORMAL_RESEARCH"):
         promote_candidate_manifest(output_dir=tmp_path, candidate_path=candidate_path)
+
+    assert not (tmp_path / "runtime" / "approved_strategy_manifest.json").exists()
+
+
+def test_candidate_without_sealed_blind_pass_cannot_promote(tmp_path) -> None:
+    run_id = "research-no-blind-pass"
+    payload = _strict_candidate_payload(StrategyParams(fast_ema=20))
+    payload["research_metadata"]["blind_lock_status"] = "BLIND_SEALED_FAIL"
+    payload["research_metadata"]["blind_evaluation"] = {
+        "status": "BLIND_SEALED_FAIL",
+        "passed": False,
+    }
+    _write_strict_candidate(tmp_path, run_id, payload)
+
+    with pytest.raises(CandidatePromotionError, match="CANDIDATE_BLIND_NOT_SEALED_PASS"):
+        promote_candidate_manifest(output_dir=tmp_path, run_id=run_id)
+
+    assert not (tmp_path / "runtime" / "approved_strategy_manifest.json").exists()
+
+
+def test_old_research_version_candidate_cannot_promote(tmp_path) -> None:
+    run_id = "research-old-version"
+    payload = _strict_candidate_payload(StrategyParams(fast_ema=20))
+    payload["research_version"] = "v3.55-strict"
+    _write_strict_candidate(tmp_path, run_id, payload)
+
+    with pytest.raises(CandidatePromotionError, match="CANDIDATE_RESEARCH_VERSION_MISMATCH"):
+        promote_candidate_manifest(output_dir=tmp_path, run_id=run_id)
+
+    assert not (tmp_path / "runtime" / "approved_strategy_manifest.json").exists()
+
+
+def test_incomplete_research_grid_candidate_cannot_promote(tmp_path) -> None:
+    run_id = "research-incomplete-grid"
+    payload = _strict_candidate_payload(StrategyParams(fast_ema=20))
+    payload["research_metadata"]["completed_parameter_cells"] = 0
+    _write_strict_candidate(tmp_path, run_id, payload)
+
+    with pytest.raises(CandidatePromotionError, match="CANDIDATE_RESEARCH_GRID_COVERAGE_INCOMPLETE"):
+        promote_candidate_manifest(output_dir=tmp_path, run_id=run_id)
 
     assert not (tmp_path / "runtime" / "approved_strategy_manifest.json").exists()
 
@@ -949,7 +1004,7 @@ def test_research_artifacts_write_candidate_not_runtime_manifest(tmp_path) -> No
         "research_metadata": {
             "dataset": "unit",
             "research_mode": "FORMAL",
-            "research_version": "unit",
+            "research_version": "v3.56-strict",
             "signal_timeframe": "15m",
             "trend_timeframe": "1h",
             "promotion_eligible": False,

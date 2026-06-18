@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pandas as pd
 
 from okx_signal_system.notify.signal_dedupe import SignalNotificationStore, signal_notification_key
@@ -99,3 +101,51 @@ def test_sqlite_signal_notification_store_persists_across_restart(tmp_path) -> N
     reloaded = SignalNotificationStore(path)
     assert reloaded.has(key)
     assert not reloaded.mark(key, {"symbol": signal.inst_id, "side": signal.side, "kline_time": signal.ts.isoformat()})
+
+
+def test_latest_signal_payload_blocks_explicit_params_outside_approved_manifest(monkeypatch) -> None:
+    from okx_signal_system.signal_service import job
+    from okx_signal_system.risk.model import RiskConfig
+
+    approved = StrategyParams(fast_ema=120)
+    explicit = StrategyParams(fast_ema=96)
+    captured = {}
+
+    class FakeService:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def scan_cycle(self, _symbols, context):
+            captured["gate"] = context.quality_gate_allows_push
+            captured["params"] = context.strategy_params
+            return SimpleNamespace(
+                ready_candidates=[],
+                cycle_health=[{"reason": "quality_gate_blocked"}],
+            )
+
+    monkeypatch.setattr(
+        job,
+        "load_selected_strategy_params_status",
+        lambda: SimpleNamespace(
+            ok=True,
+            params=approved,
+            as_dict=lambda: {"ok": True, "push_allowed": True, "reason": "approved_manifest_valid"},
+        ),
+    )
+    monkeypatch.setattr(job, "SignalScanService", FakeService)
+    monkeypatch.setattr(
+        job,
+        "load_runtime_config",
+        lambda: SimpleNamespace(risk_config=lambda: RiskConfig()),
+    )
+
+    payload = job.latest_signal_payload(
+        dataset="unit",
+        symbol_file="unused.parquet",
+        inst_id="BTC-USDT-SWAP",
+        params=explicit,
+    )
+
+    assert captured == {"gate": False, "params": explicit}
+    assert payload["quality_gate_allows_push"] is False
+    assert payload["manifest_status"]["reason"] == "explicit_params_do_not_match_approved_manifest"

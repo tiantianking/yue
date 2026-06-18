@@ -5,7 +5,11 @@ import pandas as pd
 import pytest
 
 from okx_signal_system.exchange.candles import okx_candles_to_frame
-from okx_signal_system.research.approved_strategy_manifest import build_approved_manifest, write_approved_manifest_atomic
+from okx_signal_system.research.approved_strategy_manifest import (
+    build_approved_manifest,
+    canonical_sha256,
+    write_approved_manifest_atomic,
+)
 from okx_signal_system.training.startup_quality import (
     _anti_future_checks,
     _select_symbols,
@@ -21,10 +25,11 @@ def _strict_candidate(params: dict, *, generated_at: str = "2026-01-01T00:00:00+
     return {
         "artifact_type": "strict_research_candidate",
         "generated_at": generated_at,
+        "research_run_id": "unit-research-run",
         "dataset": "unit",
         "signal_timeframe": "15m",
         "trend_timeframe": "1h",
-        "research_version": "unit",
+        "research_version": "v3.56-strict",
         "research_mode": "FORMAL",
         "promotion_eligible": True,
         "candidate_params": params,
@@ -32,8 +37,30 @@ def _strict_candidate(params: dict, *, generated_at: str = "2026-01-01T00:00:00+
             json.dumps(params, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest(),
         "artifact_hashes": {},
-        "research_metadata": {},
+        "research_metadata": {
+            "dataset": "unit",
+            "signal_timeframe": "15m",
+            "trend_timeframe": "1h",
+            "research_version": "v3.56-strict",
+            "research_mode": "FORMAL",
+            "promotion_eligible": True,
+            "blind_commitment_verified": True,
+            "expected_parameter_combinations": 1,
+            "completed_parameter_combinations": 1,
+            "expected_parameter_cells": 1,
+            "completed_parameter_cells": 1,
+            "blind_lock_status": "BLIND_SEALED_PASS",
+            "blind_evaluation": {"status": "BLIND_SEALED_PASS", "passed": True},
+        },
     }
+
+
+def _rehash_manifest(payload: dict) -> dict:
+    body = {key: value for key, value in payload.items() if key not in {"manifest_hash", "manifest_sha256"}}
+    digest = canonical_sha256(body)
+    payload["manifest_hash"] = digest
+    payload["manifest_sha256"] = digest
+    return payload
 
 
 def test_okx_candles_to_frame_accepts_nine_and_ten_field_rows() -> None:
@@ -144,3 +171,97 @@ def test_same_timeframe_trend_has_no_incomplete_higher_bar_failure() -> None:
     checks = _anti_future_checks(signal_timeframe="15m", trend_timeframe="15m")
     assert checks["prior_breakout_excludes_current_bar"]
     assert checks["incomplete_trend_not_tradable"]
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected_reason"),
+    [
+        ("strategy_version", "0.0.0", "runtime_manifest_strategy_version_mismatch"),
+        ("research_version", "v3.55-strict", "runtime_manifest_research_version_mismatch"),
+        ("research_mode", "NON_FORMAL_SMOKE", "runtime_manifest_research_mode_invalid"),
+        ("promotion_eligible", False, "runtime_manifest_promotion_not_eligible"),
+        ("operator", "", "runtime_manifest_operator_missing"),
+        ("blind_status", "BLIND_SEALED_FAIL", "runtime_manifest_blind_not_sealed_pass"),
+    ],
+)
+def test_semantically_invalid_runtime_manifest_is_rejected_even_with_valid_hash(
+    tmp_path, field, value, expected_reason
+) -> None:
+    params = {
+        "fast_ema": 10,
+        "slow_ema": 80,
+        "breakout_window": 60,
+        "atr_stop_mult": 1.5,
+        "take_profit_mult": 3.5,
+        "max_hold_bars": 24,
+        "atr_window": 14,
+    }
+    payload = build_approved_manifest(
+        _strict_candidate(params),
+        approved_at="2026-01-02T00:00:00+00:00",
+    )
+    payload[field] = value
+    _rehash_manifest(payload)
+    path = tmp_path / "runtime" / "approved_strategy_manifest.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    status = load_selected_strategy_params_status(tmp_path)
+
+    assert status.ok is False
+    assert status.reason == expected_reason
+    assert status.params == StrategyParams()
+
+
+def test_runtime_manifest_rejects_false_blind_evidence_even_after_rehash(tmp_path) -> None:
+    params = {
+        "fast_ema": 10,
+        "slow_ema": 80,
+        "breakout_window": 60,
+        "atr_stop_mult": 1.5,
+        "take_profit_mult": 3.5,
+        "max_hold_bars": 24,
+        "atr_window": 14,
+    }
+    payload = build_approved_manifest(
+        _strict_candidate(params),
+        approved_at="2026-01-02T00:00:00+00:00",
+    )
+    payload["research_metadata"]["blind_evaluation"]["passed"] = False
+    _rehash_manifest(payload)
+    path = tmp_path / "runtime" / "approved_strategy_manifest.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    status = load_selected_strategy_params_status(tmp_path)
+
+    assert status.ok is False
+    assert status.reason == "runtime_manifest_blind_not_sealed_pass"
+    assert status.params == StrategyParams()
+
+
+def test_runtime_manifest_rejects_incomplete_research_grid_even_after_rehash(tmp_path) -> None:
+    params = {
+        "fast_ema": 10,
+        "slow_ema": 80,
+        "breakout_window": 60,
+        "atr_stop_mult": 1.5,
+        "take_profit_mult": 3.5,
+        "max_hold_bars": 24,
+        "atr_window": 14,
+    }
+    payload = build_approved_manifest(
+        _strict_candidate(params),
+        approved_at="2026-01-02T00:00:00+00:00",
+    )
+    payload["research_metadata"]["completed_parameter_cells"] = 0
+    _rehash_manifest(payload)
+    path = tmp_path / "runtime" / "approved_strategy_manifest.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    status = load_selected_strategy_params_status(tmp_path)
+
+    assert status.ok is False
+    assert status.reason == "runtime_manifest_research_grid_coverage_incomplete"
+    assert status.params == StrategyParams()
