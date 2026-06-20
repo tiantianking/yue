@@ -1,0 +1,19 @@
+{
+  "schema": "okx_signal_shadow_candidate_v1",
+  "candidate_id": "v357-4h-donchian-n24-rs50-slow",
+  "status": "SHADOW_A_MINUS_RESEARCH_ONLY",
+  "blind_data_opened": false,
+  "signal_rules": {
+    "source_timeframe": "4h_from_closed_15m",
+    "ema_fast": 10,
+    "ema_slow": 50,
+    "donchian_lookback": 24,
+    "relative_strength_lookback_4h": 42,
+    "rs_long_min": 0.5,
+    "rs_short_max": 0.5,
+    "volume_ratio_min": 0.8,
+    "initial_stop_atr": 2.5,
+    "trailing_stop_atr": 4.0,
+    "max_hold_bars": 42
+  }
+}

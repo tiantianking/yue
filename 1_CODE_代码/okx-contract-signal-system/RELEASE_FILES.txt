@@ -8,7 +8,10 @@ assets/icon.ico
 assets/icon.png
 config/base.yaml
 config/fees.yaml
+config/research_candidates/v357_4h_donchian_shadow_candidate.json
+config/research_candidates/v357_shadow_ensemble_candidate.json
 config/risk.yaml
+config/shadow_ensemble.yaml
 dashboard/.gitignore
 dashboard/README.md
 dashboard/eslint.config.mjs
@@ -45,6 +48,7 @@ dashboard/tsconfig.test.json
 docs/RELEASE_SAFETY.md
 docs/RUNTIME_VERIFICATION.md
 docs/SYSTEM_ARCHITECTURE.md
+docs/V3.56.7_DESKTOP_RUNTIME_FIX_CN.md
 docs/V3.56.3_RUNTIME_CACHE_INTEGRATION_CN.md
 docs/V3.56.4_ACCEPTANCE_CN.md
 docs/V3.56.4_DUPLICATE_PACKAGE_RECONCILIATION_CN.md
@@ -54,8 +58,10 @@ docs/V3.56.6_RUNTIME_OBSERVATION_CN.md
 docs/V3.56.6_STALE_SYMBOL_AUDIT_CN.md
 docs/V3.56.7_DASHBOARD_HEALTH_GUARD_CN.md
 docs/V3.56.7_FULL_SOURCE_PACKAGE_OPERATIONS_CN.md
+docs/V3.56.7_SHADOW_ENSEMBLE_LOCAL_INTEGRATION_CN.md
 docs/V3.56.7_SOURCE_PACKAGE_SAFETY_AUDIT_CN.md
 docs/V3.56.7_UPDATE_PACKAGE_README_CN.md
+docs/V3.56.8_RELEASE_CN.md
 gui.py
 hooks/hook-setuptools.py
 hooks/pyi_rth_custom.py
@@ -66,8 +72,10 @@ pyproject.toml
 requirements.lock
 requirements.txt
 rthook_disable_pkg_resources.py
+scripts/backfill_5m_history_range.py
 scripts/backfill_recent_history.py
 scripts/build_release_zip.py
+scripts/check_shadow_ensemble_local.py
 scripts/run_data_audit.ps1
 src/okx_contract_signal_system.egg-info/PKG-INFO
 src/okx_contract_signal_system.egg-info/SOURCES.txt
@@ -124,6 +132,7 @@ src/okx_signal_system/risk/__init__.py
 src/okx_signal_system/risk/costs.py
 src/okx_signal_system/risk/model.py
 src/okx_signal_system/scheduler.py
+src/okx_signal_system/shadow_ensemble.py
 src/okx_signal_system/signal_quality/__init__.py
 src/okx_signal_system/signal_quality/candidate.py
 src/okx_signal_system/signal_quality/correlation.py
@@ -172,6 +181,7 @@ tests/test_realtime_research_isolation.py
 tests/test_release_safety.py
 tests/test_reporting_signal.py
 tests/test_scheduler_notifications.py
+tests/test_shadow_ensemble_runtime.py
 tests/test_shadow_trading.py
 tests/test_signal_lifecycle.py
 tests/test_signal_quality.py

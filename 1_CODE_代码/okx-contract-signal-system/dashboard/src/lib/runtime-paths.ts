@@ -1,6 +1,11 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 
+export type PythonCommand = {
+  executable: string;
+  prefixArgs: string[];
+};
+
 function workspacePythonPath() {
   const executable = process.platform === "win32" ? "python.exe" : "python";
   return path.resolve(
@@ -15,12 +20,41 @@ function workspacePythonPath() {
   );
 }
 
-export function pythonPath() {
+function pythonCommandFromEnv(value: string | undefined): PythonCommand | null {
+  const raw = value?.trim();
+  if (!raw) return null;
+
+  const launcher = raw.match(/^py(?:\.exe)?\s+(-3(?:\.\d+)?)$/i);
+  if (launcher) {
+    return { executable: "py", prefixArgs: [launcher[1]] };
+  }
+
+  const unquoted =
+    raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"')
+      ? raw.slice(1, -1)
+      : raw;
+  return { executable: unquoted, prefixArgs: [] };
+}
+
+export function pythonCommand(): PythonCommand {
+  const explicit = pythonCommandFromEnv(process.env.OKX_DASHBOARD_PYTHON);
+  if (explicit) return explicit;
+
   const workspacePython = workspacePythonPath();
-  return process.env.OKX_DASHBOARD_PYTHON
-    ?? (existsSync(workspacePython) ? workspacePython : undefined)
-    ?? process.env.PYTHON
-    ?? "python";
+  if (existsSync(workspacePython)) {
+    return { executable: workspacePython, prefixArgs: [] };
+  }
+
+  return (
+    pythonCommandFromEnv(process.env.PYTHON) ?? {
+      executable: "python",
+      prefixArgs: [],
+    }
+  );
+}
+
+export function pythonPath() {
+  return pythonCommand().executable;
 }
 
 function datasetName(timeframe: string) {

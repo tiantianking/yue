@@ -11,11 +11,12 @@ import type {
   JsonRecord,
   LatestScanStatus,
   LatestSignal,
+  ShadowEnsembleStatus,
   StrategyParams,
   SummaryMetrics,
   SymbolRow,
 } from "./types";
-import { dashboardExecTimeoutMs, historyScriptArgs, pythonPath } from "./runtime-paths";
+import { dashboardExecTimeoutMs, historyScriptArgs, pythonCommand } from "./runtime-paths";
 import { enrichLatestScan, isClosedBackfillFresh } from "./runtime-health";
 import {
   resolveManifestReason,
@@ -95,9 +96,10 @@ async function readActualHistory(symbols: string[]) {
   }
   try {
     const script = path.join(process.cwd(), "scripts", "read-history-summary.py");
+    const python = pythonCommand();
     const { stdout } = await execFileAsync(
-      pythonPath(),
-      [script, "--timeframe", "15m", ...historyScriptArgs("15m"), ...symbols],
+      python.executable,
+      [...python.prefixArgs, script, "--timeframe", "15m", ...historyScriptArgs("15m"), ...symbols],
       {
         maxBuffer: 1024 * 1024 * 8,
         windowsHide: true,
@@ -131,6 +133,7 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
     closedBackfill,
     closedBackfill5m,
     learningReview,
+    shadowEnsemble,
     baseConfig,
     riskConfig,
   ] =
@@ -161,6 +164,10 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
       ),
       readJson<DailyLearningReviewStatus | null>(
         path.join(outputsDir, "daily_learning_review.json"),
+        null,
+      ),
+      readJson<ShadowEnsembleStatus | null>(
+        path.join(outputsDir, "shadow_ensemble_status.json"),
         null,
       ),
       readYaml<JsonRecord>(path.join(configDir, "base.yaml"), {}),
@@ -309,5 +316,6 @@ export async function loadDashboardData(): Promise<DashboardPayload> {
       "5m": closedBackfill5m,
     },
     learning_review: learningReview,
+    shadow_ensemble: shadowEnsemble,
   };
 }

@@ -1,0 +1,30 @@
+shadow_ensemble:
+  enabled: true
+  research_only: true
+  candidate_file: config/research_candidates/v357_shadow_ensemble_candidate.json
+  donchian_candidate_file: config/research_candidates/v357_4h_donchian_shadow_candidate.json
+  source_timeframe: 15m
+  evaluation_timeframe: 4h
+  minimum_cross_section_symbols: 12
+  reference_symbols:
+    - BTC-USDT-SWAP
+    - ETH-USDT-SWAP
+    - SOL-USDT-SWAP
+    - XRP-USDT-SWAP
+    - BCH-USDT-SWAP
+    - LINK-USDT-SWAP
+    - LTC-USDT-SWAP
+    - UNI-USDT-SWAP
+    - ARB-USDT-SWAP
+    - ETC-USDT-SWAP
+    - APT-USDT-SWAP
+    - ATOM-USDT-SWAP
+  history_limit_15m: 3500
+  atr_window: 14
+  atr_percentile_lookback: 180
+  volume_ratio_lookback: 20
+  relative_strength_lookback_4h: 42
+  status_file: shadow_ensemble_status.json
+  sqlite_file: shadow_ensemble.sqlite3
+  desktop_display_enabled: true
+  research_notification_enabled: false

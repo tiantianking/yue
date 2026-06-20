@@ -1,0 +1,18 @@
+{
+  "schema": "okx_shadow_ensemble_candidate_v1",
+  "candidate_id": "v357-shadow-donchian-slow-plus-vcb-a",
+  "status": "RESEARCH_ONLY",
+  "blind_data_opened": false,
+  "volatility_compression": {
+    "donchian_lookback": 12,
+    "previous_atr_percentile_max": 0.35,
+    "current_atr_must_expand": true,
+    "rs_long_min": 0.6,
+    "rs_short_max": 0.4,
+    "same_direction_breadth_min": 0.55,
+    "volume_ratio_min": 1.0,
+    "initial_stop_atr": 2.0,
+    "trailing_stop_atr": 3.0,
+    "max_hold_bars": 24
+  }
+}

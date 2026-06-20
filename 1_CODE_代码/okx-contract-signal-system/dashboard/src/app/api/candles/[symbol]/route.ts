@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
 import { NextRequest, NextResponse } from "next/server";
-import { dashboardExecTimeoutMs, historyScriptArgs, pythonPath } from "@/lib/runtime-paths";
+import { dashboardExecTimeoutMs, historyScriptArgs, pythonCommand } from "@/lib/runtime-paths";
 
 const execFileAsync = promisify(execFile);
 const CANDLE_CACHE_TTL_MS = 10_000;
@@ -44,9 +44,11 @@ export async function GET(
   }
 
   try {
+    const python = pythonCommand();
     const { stdout } = await execFileAsync(
-      pythonPath(),
+      python.executable,
       [
+        ...python.prefixArgs,
         script,
         decodedSymbol,
         "--limit",

@@ -481,3 +481,13 @@ src/okx_signal_system/
 - Realtime candle merging uses an ordered fast path for append/same-bar replacement while retaining the strict sort/deduplicate fallback for anomalous input; closed bars cannot be downgraded by later open updates.
 - Package metadata and visible launcher displays are synchronized to `3.56.7`.
 
+## v3.56.8 shadow ensemble and desktop runtime closure
+
+- The frozen 4h shadow ensemble consumes only closed 15m candles and accepts a 4h bar only when all sixteen consecutive 15m bars are present and closed.
+- Shadow observations are isolated in `shadow_ensemble.sqlite3` and `shadow_ensemble_status.json`; the module does not import the formal lifecycle, notification, account, or order paths.
+- The frozen reference universe, research candidates, parameter values, closed-bar protocol, and disabled research notification setting are validated at startup. Missing or misaligned reference data pauses only the shadow channel.
+- GUI and Dashboard show the shadow channel separately from formal A-tier output. Shadow scan failures are recorded as research errors and do not change formal push permission.
+- Dashboard subprocess execution separates the Python executable from launcher prefix arguments, supporting Windows `py -3.x` and quoted interpreter paths safely.
+- The 5m range backfill utility preserves canonical metadata, merges by timestamp, validates the requested target range, and writes an explicit per-symbol report.
+- Package metadata, GUI/launcher displays, and approved strategy version are synchronized to `3.56.8`; strict research identity remains `v3.56-strict`.
+

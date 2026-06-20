@@ -210,6 +210,51 @@ export type DailyLearningReviewStatus = {
   candidate_params?: StrategyParams;
 };
 
+export type ShadowEnsembleObservation = {
+  observation_id?: string;
+  member?: string;
+  symbol?: string;
+  side?: string;
+  signal_time?: string;
+  detected_at?: string;
+  reference_close?: number;
+  relative_strength_percentile?: number;
+  volume_ratio?: number;
+  breadth?: number;
+  tier?: string;
+  research_only?: boolean;
+};
+
+export type ShadowEnsembleStatus = {
+  generated_at?: string;
+  status?: string;
+  candidate_id?: string;
+  candidate_sha256?: string;
+  protocol_version?: string;
+  research_only?: boolean;
+  isolated_from_formal_runtime?: boolean;
+  source_timeframe?: string;
+  evaluation_timeframe?: string;
+  latest_closed_4h?: string | null;
+  eligible_symbols?: number;
+  skipped_symbols?: string[];
+  new_signal_count?: number;
+  new_signals?: ShadowEnsembleObservation[];
+  pending_entry_count?: number;
+  active_count?: number;
+  closed_count?: number;
+  summary?: {
+    total?: number;
+    pending_entry?: number;
+    active?: number;
+    closed?: number;
+    estimated_net_r?: number;
+    estimated_profit_factor?: number | null;
+    latest_observations?: Array<Record<string, unknown>>;
+    [key: string]: unknown;
+  };
+};
+
 export type DashboardPayload = {
   generated_at: string;
   runtime_mode: "formal_push" | "research_observation";
@@ -243,6 +288,7 @@ export type DashboardPayload = {
   closed_backfill_5m?: ClosedBackfillStatus | null;
   closed_backfills?: Record<string, ClosedBackfillStatus | null>;
   learning_review: DailyLearningReviewStatus | null;
+  shadow_ensemble: ShadowEnsembleStatus | null;
 };
 
 export type Candle = {

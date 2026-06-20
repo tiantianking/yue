@@ -608,3 +608,20 @@
 - Bumped shared package and approved strategy version metadata to v3.56.7.
 ### Scope
 - Dashboard health aggregation, realtime in-memory candle merge performance, release metadata, tests, and documentation. Strategy, scan decisions, runtime-cache storage boundaries, manifest semantic validation, lifecycle outbox, and notification delivery were not changed.
+
+## 2026-06-20 - Task: v3.56.8 shadow ensemble and desktop runtime release
+### What was done
+- Integrated the frozen 4h Donchian plus volatility-compression shadow ensemble into the desktop runtime and Dashboard as an isolated research-only channel.
+- Added strict closed-15m-to-4h resampling, frozen reference-universe checks, candidate/protocol validation, isolated SQLite persistence, status JSON output, and local cache smoke verification.
+- Fixed Dashboard Python subprocess invocation for Windows `py -3.x` launchers and quoted interpreter paths; GUI now passes its active Python interpreter and strips inherited insecure TLS overrides before starting the Dashboard.
+- Added the 5m target-range historical backfill utility and included all new runtime, config, candidate, test, script, and documentation files in the release list.
+- Bumped package, GUI/launcher, and approved strategy version metadata to `3.56.8`; strict research identity remains `v3.56-strict`.
+### Testing
+- `git diff --check` -> passed with LF-to-CRLF normalization warnings only.
+- `py -3.12 -m compileall -q src main.py gui.py tests scripts/backfill_5m_history_range.py scripts/check_shadow_ensemble_local.py` -> passed.
+- `py -3.12 -m pytest` -> `352 passed, 18 skipped` before the version/documentation sync.
+- `npm run check` in `dashboard` -> lint, typecheck, 21 Node tests, and production build passed.
+- `py -3.12 scripts/check_shadow_ensemble_local.py` -> `running`, 21 eligible symbols, 0 skipped symbols.
+### Notes
+- The shadow channel does not enter the formal lifecycle, notification outbox, approved manifest, account, or order paths.
+- Because approved strategy version remains synchronized with the package version, a `3.56.7` manifest fails closed under `3.56.8` and must be re-promoted from valid strict-research artifacts.

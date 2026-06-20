@@ -178,6 +178,8 @@ class OKXSignalGUI:
         self._lifecycle_store = None
         self._notification_dispatcher_instance = None
         self._quality_model_shadow = None
+        self._shadow_ensemble_service = None
+        self._shadow_ensemble_status: dict = {}
         self._runtime_modules: dict[str, dict] = {}
         self._background_tasks: list[asyncio.Task] = []
         self.dashboard_process = None
@@ -322,6 +324,7 @@ class OKXSignalGUI:
                 "websocket": ws_status,
                 "lifecycle_summary": lifecycle_summary,
                 "quality_model": quality_model,
+                "shadow_ensemble": self._shadow_ensemble_status,
                 "modules": self._runtime_modules,
                 "symbols_checked": len(items),
                 "ready_count": sum(1 for item in items if item.get("would_push")),
@@ -728,6 +731,15 @@ class OKXSignalGUI:
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 creationflags = subprocess.CREATE_NO_WINDOW
 
+            dashboard_env = os.environ.copy()
+            dashboard_env.pop("NODE_TLS_REJECT_UNAUTHORIZED", None)
+            if (
+                not dashboard_env.get("OKX_DASHBOARD_PYTHON")
+                and not getattr(sys, "frozen", False)
+                and Path(sys.executable).is_file()
+            ):
+                dashboard_env["OKX_DASHBOARD_PYTHON"] = str(Path(sys.executable).resolve())
+
             self.dashboard_process = subprocess.Popen(
                 [npm_cmd, "run", "dev:local"],
                 cwd=dashboard_dir,
@@ -736,6 +748,7 @@ class OKXSignalGUI:
                 stdin=subprocess.DEVNULL,
                 startupinfo=startupinfo,
                 creationflags=creationflags,
+                env=dashboard_env,
             )
             self.log("正在启动面板...", "INFO")
             self.root.after(2500, lambda: webbrowser.open(DASHBOARD_URL))
@@ -1130,6 +1143,55 @@ class OKXSignalGUI:
             cycle_health = scan_result.cycle_health
             ready_candidates = scan_result.ready_candidates
             candidate_history = scan_result.candidate_history
+
+            try:
+                from okx_signal_system.shadow_ensemble import ShadowEnsembleService
+
+                if self._shadow_ensemble_service is None:
+                    async def _load_shadow_candles(inst_id: str, limit: int) -> pd.DataFrame:
+                        return await self.api.get_candles(inst_id, bar="15m", limit=limit)
+
+                    self._shadow_ensemble_service = ShadowEnsembleService(
+                        candle_loader=_load_shadow_candles,
+                    )
+                shadow_result = await self._shadow_ensemble_service.scan(self._watched_symbols)
+                self._shadow_ensemble_status = {
+                    "status": shadow_result.status,
+                    "candidate_id": self._shadow_ensemble_service.candidate_id,
+                    "latest_closed_4h": shadow_result.latest_closed_4h,
+                    "eligible_symbols": shadow_result.eligible_symbols,
+                    "new_signal_count": len(shadow_result.new_observations),
+                    "active_count": shadow_result.active_count,
+                    "pending_entry_count": shadow_result.pending_entry_count,
+                    "closed_count": shadow_result.closed_count,
+                    "research_only": True,
+                    "formal_runtime_impact": "none",
+                }
+                for shadow_item in shadow_result.new_observations:
+                    if self._shadow_ensemble_service.config.desktop_display_enabled:
+                        self.message_queue.put(("signal", {
+                            "time": f"{_format_beijing_time(shadow_item.detected_at)} 北京时间",
+                            "symbol": shadow_item.symbol,
+                            "type": f"SHADOW A- {shadow_item.member} {shadow_item.side.upper()}",
+                            "price": f"{shadow_item.reference_close:.4f}",
+                            "confidence": "研究影子",
+                        }))
+                    self.message_queue.put(("log", (
+                        f"影子A-已记录（不影响正式主链）: {shadow_item.member} "
+                        f"{shadow_item.symbol} {shadow_item.side.upper()}",
+                        "INFO",
+                    )))
+            except Exception as shadow_exc:
+                self._shadow_ensemble_status = {
+                    "status": "scan_error",
+                    "error": str(shadow_exc),
+                    "research_only": True,
+                    "formal_runtime_impact": "none",
+                }
+                self.message_queue.put(("log", (
+                    f"影子组合扫描异常，不影响正式主链: {shadow_exc}",
+                    "WARNING",
+                )))
 
             signal_closed_bar_blocked = any(item.get("reason") == "missing_latest_closed_bar" for item in cycle_health)
             self._update_runtime_module_status(

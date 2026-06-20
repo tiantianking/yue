@@ -79,6 +79,7 @@ const emptyData: DashboardPayload = {
   closed_backfill: null,
   closed_backfills: {},
   learning_review: null,
+  shadow_ensemble: null,
 };
 
 function sideText(side?: string) {
@@ -471,6 +472,51 @@ function BackfillPanel({
   );
 }
 
+function ShadowEnsemblePanel({ data }: { data: DashboardPayload }) {
+  const shadow = data.shadow_ensemble;
+  const summary = shadow?.summary ?? {};
+  const latest = Array.isArray(shadow?.new_signals) ? shadow.new_signals.slice(0, 3) : [];
+  const healthy = shadow?.status === "running" || shadow?.status === "disabled";
+
+  return (
+    <div className="rounded-lg border border-violet-200 bg-violet-50/70 p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm font-bold text-zinc-900">
+          <Activity className="h-4 w-4 text-violet-700" />
+          4h影子组合
+        </div>
+        <Badge tone={healthy ? "green" : "amber"}>{shadow?.status ?? "未运行"}</Badge>
+      </div>
+      <div className="mt-2 text-xs font-semibold text-violet-800">
+        SHADOW A− · 只做研究记录，与正式主链隔离
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <MetricTile label="本轮新观察" value={integerText(shadow?.new_signal_count)} />
+        <MetricTile
+          label="待入场/活动"
+          value={`${integerText(shadow?.pending_entry_count)}/${integerText(shadow?.active_count)}`}
+        />
+        <MetricTile label="已闭合" value={integerText(shadow?.closed_count)} />
+        <MetricTile
+          label="估算 PF"
+          value={numberText(Number(summary.estimated_profit_factor ?? 0), 3)}
+          hint={`净R ${numberText(Number(summary.estimated_net_r ?? 0), 2)}`}
+        />
+      </div>
+      <div className="mt-4 rounded-lg border border-violet-200 bg-white/70 p-3 text-xs font-semibold text-zinc-600">
+        <div>候选：{shadow?.candidate_id ?? "-"}</div>
+        <div className="mt-1">最新完整4h：{dateTimeText(shadow?.latest_closed_4h ?? undefined)}</div>
+        <div className="mt-1">横截面币种：{integerText(shadow?.eligible_symbols)}</div>
+        {latest.map((item) => (
+          <div key={item.observation_id ?? `${item.member}-${item.symbol}-${item.signal_time}`} className="mt-2 text-violet-800">
+            {item.member ?? "shadow"} · {item.symbol ?? "-"} · {sideText(item.side)}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function LearningPanel({ data }: { data: DashboardPayload }) {
   const review = data.learning_review;
   const shadow = review?.shadow_summary ?? {};
@@ -708,6 +754,7 @@ export function Dashboard() {
               candleMeta={candleMeta}
               timeframe={timeframe}
             />
+            <ShadowEnsemblePanel data={data} />
             <LearningPanel data={data} />
           </aside>
         </section>

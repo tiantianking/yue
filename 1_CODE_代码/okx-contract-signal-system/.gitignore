@@ -25,3 +25,4 @@ logs/
 *.db-shm
 *.db-journal
 okx_signal.lock
+/codex_write_test.txt
