@@ -1,0 +1,14 @@
+[Unit]
+Description=OKX Signal Runtime Health Check
+After=okx-signal.service
+
+[Service]
+Type=oneshot
+User=okxsignal
+Group=okxsignal
+WorkingDirectory=/opt/okx-signal/app
+EnvironmentFile=/etc/okx-signal/okx-signal.env
+ExecStart=/opt/okx-signal/venv/bin/python scripts/runtime_healthcheck.py
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true

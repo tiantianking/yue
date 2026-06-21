@@ -1,0 +1,10 @@
+/opt/okx-signal/app/logs/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    su okxsignal okxsignal
+}

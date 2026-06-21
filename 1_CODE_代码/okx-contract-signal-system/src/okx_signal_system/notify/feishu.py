@@ -10,6 +10,8 @@ from typing import Any
 
 import pandas as pd
 
+from okx_signal_system.config import feishu_notifications_enabled
+
 log = logging.getLogger(__name__)
 
 FEISHU_WEBHOOK_URL = os.environ.get("FEISHU_WEBHOOK_URL", "")
@@ -105,6 +107,9 @@ def _health_reason_label(reason: str) -> str:
 
 
 def send_text(text: str, webhook_url: str | None = None, max_retries: int = 3) -> bool:
+    if not feishu_notifications_enabled(True):
+        log.info("Feishu notifications are disabled by FEISHU_ENABLED")
+        return False
     try:
         import requests
     except ModuleNotFoundError as exc:

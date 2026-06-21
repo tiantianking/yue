@@ -97,7 +97,7 @@ def test_release_version_sources_stay_consistent() -> None:
     gui_text = _read("gui.py")
     start_text = _read("start.bat")
 
-    assert package_version == "3.56.9"
+    assert package_version == "3.56.10"
     assert pyproject["project"]["version"] == package_version
     assert APPROVED_STRATEGY_VERSION == package_version
     assert f"Version: {package_version}" in pkg_info
@@ -170,7 +170,16 @@ def test_release_file_manifest_is_present_and_self_including() -> None:
 
     assert "RELEASE_FILES.txt" in lines
     assert "scripts/build_release_zip.py" in lines
-    assert "docs/V3.56.9_RELEASE_CN.md" in lines
+    assert "scripts/preflight_check.py" in lines
+    assert "scripts/runtime_healthcheck.py" in lines
+    assert "deployment/install_linux.sh" in lines
+    assert "deployment/systemd/okx-signal.service" in lines
+    assert "deployment/systemd/okx-signal-health.service" in lines
+    assert "deployment/systemd/okx-signal-health.timer" in lines
+    assert "deployment/logrotate/okx-signal" in lines
+    assert "deployment/okx-signal.env.example" in lines
+    assert "docs/DEPLOYMENT_CHECKLIST_CN.md" in lines
+    assert "docs/V3.56.10_RELEASE_CN.md" in lines
     assert len(lines) == len(set(lines))
     assert all("\\" not in line and not line.startswith("/") and ".." not in Path(line).parts for line in lines)
 
@@ -203,7 +212,7 @@ def test_env_example_is_signal_only_and_has_no_private_okx_keys() -> None:
 
     assert "SIGNAL_ONLY=true" in text
     assert "DATA_READ_ONLY=true" in text
-    assert "FEISHU_ENABLED=true" in text
+    assert "FEISHU_ENABLED=false" in text
     assert "FEISHU_WEBHOOK_URL=" in text
     assert "OKX_AUTO_CLOSE_ENABLED=true" not in text
     for token in PRIVATE_OKX_TOKENS:

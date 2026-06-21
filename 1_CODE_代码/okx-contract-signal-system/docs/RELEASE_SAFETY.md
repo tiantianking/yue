@@ -49,10 +49,13 @@ v3.54 release boundary:
 - Lifecycle storage must preserve separate setup and outcome state fields for auditability and old SQLite stores must migrate forward without losing existing status.
 
 v3.56 release boundary:
-- Package metadata, launcher display, GUI display, and strict research artifact defaults are synchronized to `3.56.9` / `v3.56-strict`.
+- Package metadata, launcher display, GUI display, and strict research artifact defaults are synchronized to `3.56.10` / `v3.56-strict`.
 - The realtime signal chain must not import or start `backtest`, `training`, or ML decision modules. Daily learning and strict research remain offline sidecar flows.
 - All runtime notifications use `notification_outbox` plus `LifecycleOutboxWorker`: A-tier signals, B-tier summaries, candidate health reports, status reports, startup notices, and lifecycle events.
 - Formal history, runtime cache, research, and runtime frames fail fast on missing metadata or missing `is_closed`; only explicit raw ingestion may synthesize canonical metadata from confirmed OKX candles.
 - Runtime risk payloads are signal-scoring payloads, not trade-execution payloads. `expected_move_pct`, `failure_probability`, and `volatility_adjusted_score` are allowed. Account balances, live positions, order quantities, margin mode, liquidation prices, and exchange execution instructions must not be release-facing signal text.
 - A normalized `advisory_only` leverage suggestion may be release-facing only when it is independent of credentials, balances, positions, order APIs, and exchange maximum leverage. It must be constrained by effective stop distance, a fixed normalized risk budget, reward/risk, formal tier, and calibrated quality evidence; global cap is 5x, A-minus is capped at 1x, B-tier emits no suggestion, and missing quality calibration falls back to 1x.
 - ML/shadow scoring must remain observation-only in live paths. Legacy runtime leverage-adjustment methods remain neutral; only the deterministic signal-only leverage-advice module may produce the normalized manual-review suggestion.
+- Linux deployment must run under the dedicated `okxsignal` user, execute preflight checks before startup, use systemd restart policy, run periodic health checks, and rotate file logs.
+- `FEISHU_ENABLED` is the emergency notification switch and overrides the YAML notification default on every send path.
+- `DEPLOYMENT_MODE=production` requires a valid current-version approved manifest; observation mode may run market-data validation while formal push remains fail-closed.

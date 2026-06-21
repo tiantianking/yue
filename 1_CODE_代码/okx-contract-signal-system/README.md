@@ -25,3 +25,10 @@ Run checks:
 ```powershell
 D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest
 ```
+
+Linux deployment:
+- Run `deployment/install_linux.sh` from a reviewed release package.
+- Start with `DEPLOYMENT_MODE=observation` and `FEISHU_ENABLED=false`.
+- Run `scripts/preflight_check.py` before startup and `scripts/runtime_healthcheck.py` during operation.
+- Switch to production only after a legitimate current-version approved manifest exists.
+- See `docs/DEPLOYMENT_CHECKLIST_CN.md` for the complete procedure.

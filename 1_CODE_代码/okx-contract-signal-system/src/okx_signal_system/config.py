@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -125,17 +126,44 @@ def _float_value(mapping: dict[str, Any], key: str, default: float, *, aliases: 
         return float(default)
 
 
-def _bool_value(mapping: dict[str, Any], key: str, default: bool) -> bool:
-    value = mapping.get(key, default)
+TRUE_VALUES = {"true", "1", "yes", "y", "on"}
+FALSE_VALUES = {"false", "0", "no", "n", "off"}
+
+
+def parse_bool(value: Any, default: bool) -> bool:
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
         lowered = value.strip().lower()
-        if lowered in {"true", "1", "yes", "y", "on"}:
+        if lowered in TRUE_VALUES:
             return True
-        if lowered in {"false", "0", "no", "n", "off"}:
+        if lowered in FALSE_VALUES:
             return False
     return bool(default)
+
+
+def env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return bool(default)
+    return parse_bool(value, default)
+
+
+def feishu_notifications_enabled(config_enabled: bool = True) -> bool:
+    """Resolve the emergency switch over YAML; invalid explicit values fail closed."""
+    value = os.environ.get("FEISHU_ENABLED")
+    if value is None:
+        return bool(config_enabled)
+    lowered = value.strip().lower()
+    if lowered in TRUE_VALUES:
+        return True
+    if lowered in FALSE_VALUES:
+        return False
+    return False
+
+
+def _bool_value(mapping: dict[str, Any], key: str, default: bool) -> bool:
+    return parse_bool(mapping.get(key, default), default)
 
 
 def _tuple_of_dicts(value: Any, default: tuple[dict[str, float], ...]) -> tuple[dict[str, float], ...]:

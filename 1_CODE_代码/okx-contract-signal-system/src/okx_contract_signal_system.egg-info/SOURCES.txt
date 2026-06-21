@@ -10,6 +10,7 @@ config/research_candidates/v357_4h_donchian_shadow_candidate.json
 config/research_candidates/v357_shadow_ensemble_candidate.json
 config/risk.yaml
 config/shadow_ensemble.yaml
+docs/DEPLOYMENT_CHECKLIST_CN.md
 docs/RELEASE_SAFETY.md
 docs/RUNTIME_VERIFICATION.md
 docs/SYSTEM_ARCHITECTURE.md
@@ -28,6 +29,7 @@ docs/V3.56.7_SOURCE_PACKAGE_SAFETY_AUDIT_CN.md
 docs/V3.56.7_UPDATE_PACKAGE_README_CN.md
 docs/V3.56.8_RELEASE_CN.md
 docs/V3.56.9_RELEASE_CN.md
+docs/V3.56.10_RELEASE_CN.md
 pyproject.toml
 requirements.lock
 requirements.txt
@@ -124,6 +126,7 @@ tests/test_config.py
 tests/test_costs.py
 tests/test_daily_learning_review.py
 tests/test_data_layer.py
+tests/test_deployment_readiness.py
 tests/test_desktop_runtime.py
 tests/test_features.py
 tests/test_feishu_notify.py

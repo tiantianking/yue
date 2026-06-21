@@ -425,3 +425,7 @@ def run_live_scan():
             print("no valid signals")
     else:
         scheduler.run_forever()
+
+
+if __name__ == "__main__":
+    run_live_scan()

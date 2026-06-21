@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodic OKX signal health check
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=okx-signal-health.service
+
+[Install]
+WantedBy=timers.target

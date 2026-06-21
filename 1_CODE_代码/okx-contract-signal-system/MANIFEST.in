@@ -1,8 +1,11 @@
 include README.md
 include requirements.txt
 include requirements.lock
+include scripts/preflight_check.py
+include scripts/runtime_healthcheck.py
 recursive-include config *.yaml *.json
 recursive-include docs *.md
+recursive-include deployment *
 recursive-include assets icon.ico icon.png
 recursive-include src *.py
 global-exclude .env .env.*

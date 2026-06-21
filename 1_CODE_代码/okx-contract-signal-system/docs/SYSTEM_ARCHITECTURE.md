@@ -500,3 +500,12 @@ src/okx_signal_system/
 - The leverage module remains downstream of the formal signal gate and therefore cannot increase signal frequency, promote a strategy, or weaken the approved-manifest boundary.
 - Package metadata, GUI/launcher displays, and approved strategy version are synchronized to `3.56.9`; strict research identity remains `v3.56-strict`.
 
+## v3.56.10 deployment-readiness closure
+
+- `FEISHU_ENABLED` is evaluated dynamically on every send path and overrides the YAML default, providing a real emergency notification kill switch.
+- The scheduler module has a working headless module entrypoint for one-shot and continuous operation.
+- Linux deployment assets include a low-privilege systemd service, restart policy, startup preflight, periodic health timer, log rotation, and an installation script that preserves runtime data.
+- Observation mode validates public market data while formal push stays fail-closed. Production mode requires a valid current-version approved manifest and complete Feishu configuration.
+- Runtime health checks cover status freshness, WebSocket state, closed-candle backfill, runtime errors, outbox dead letters, and production push permission.
+- Package metadata, GUI/launcher displays, and approved strategy version are synchronized to `3.56.10`; strict research identity remains `v3.56-strict`.
+

@@ -743,7 +743,13 @@ class SignalLifecycleStore:
         event_type: str,
         payload: dict[str, Any] | None = None,
         channel: str = "feishu",
-    ) -> None:
+    ) -> bool:
+        if channel == "feishu":
+            from okx_signal_system.config import feishu_notifications_enabled
+
+            if not feishu_notifications_enabled(True):
+                log.info("Feishu outbox enqueue suppressed by FEISHU_ENABLED: %s", outbox_id)
+                return False
         payload = payload or {}
         now = _now_text()
         with closing(self._connect()) as conn, conn:
@@ -792,6 +798,7 @@ class SignalLifecycleStore:
                     now,
                 ),
             )
+        return True
 
     def mark_notification_sent(self, outbox_id: str) -> None:
         now = _now_text()
@@ -1187,6 +1194,10 @@ class LifecycleOutboxWorker:
 
     def run_once(self, *, limit: int = 100) -> dict[str, int]:
         summary = {"sent": 0, "failed": 0}
+        from okx_signal_system.config import feishu_notifications_enabled
+
+        if not feishu_notifications_enabled(True):
+            return summary
         for item in self.store.claim_pending_notifications(limit=limit):
             outbox_id = str(item["outbox_id"])
             try:

@@ -45,6 +45,13 @@ dashboard/src/lib/types.ts
 dashboard/src/lib/utils.ts
 dashboard/tsconfig.json
 dashboard/tsconfig.test.json
+deployment/install_linux.sh
+deployment/logrotate/okx-signal
+deployment/okx-signal.env.example
+deployment/systemd/okx-signal-health.service
+deployment/systemd/okx-signal-health.timer
+deployment/systemd/okx-signal.service
+docs/DEPLOYMENT_CHECKLIST_CN.md
 docs/RELEASE_SAFETY.md
 docs/RUNTIME_VERIFICATION.md
 docs/SYSTEM_ARCHITECTURE.md
@@ -63,6 +70,7 @@ docs/V3.56.7_SOURCE_PACKAGE_SAFETY_AUDIT_CN.md
 docs/V3.56.7_UPDATE_PACKAGE_README_CN.md
 docs/V3.56.8_RELEASE_CN.md
 docs/V3.56.9_RELEASE_CN.md
+docs/V3.56.10_RELEASE_CN.md
 gui.py
 hooks/hook-setuptools.py
 hooks/pyi_rth_custom.py
@@ -77,7 +85,9 @@ scripts/backfill_5m_history_range.py
 scripts/backfill_recent_history.py
 scripts/build_release_zip.py
 scripts/check_shadow_ensemble_local.py
+scripts/preflight_check.py
 scripts/run_data_audit.ps1
+scripts/runtime_healthcheck.py
 src/okx_contract_signal_system.egg-info/PKG-INFO
 src/okx_contract_signal_system.egg-info/SOURCES.txt
 src/okx_contract_signal_system.egg-info/dependency_links.txt
@@ -172,6 +182,7 @@ tests/test_config.py
 tests/test_costs.py
 tests/test_daily_learning_review.py
 tests/test_data_layer.py
+tests/test_deployment_readiness.py
 tests/test_desktop_runtime.py
 tests/test_features.py
 tests/test_feishu_notify.py

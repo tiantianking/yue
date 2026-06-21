@@ -213,7 +213,7 @@ class NotificationDispatcher:
     ) -> bool:
         if self._lifecycle_store is None or not candidates:
             return False
-        self._lifecycle_store.enqueue_notification(
+        return self._lifecycle_store.enqueue_notification(
             outbox_id,
             signal_id=None,
             event_type="B_TIER_SUMMARY",
@@ -224,18 +224,16 @@ class NotificationDispatcher:
                 "trend_timeframe": trend_timeframe,
             },
         )
-        return True
 
     def enqueue_status(self, *, outbox_id: str, cycle_count: int, status: str, last_signal_count: int | None = None) -> bool:
         if self._lifecycle_store is None:
             return False
-        self._lifecycle_store.enqueue_notification(
+        return self._lifecycle_store.enqueue_notification(
             outbox_id,
             signal_id=None,
             event_type="STATUS_REPORT",
             payload={"cycle_count": cycle_count, "status": status, "last_signal_count": last_signal_count},
         )
-        return True
 
     def enqueue_candidate_health_report(
         self,
@@ -247,24 +245,22 @@ class NotificationDispatcher:
     ) -> bool:
         if self._lifecycle_store is None:
             return False
-        self._lifecycle_store.enqueue_notification(
+        return self._lifecycle_store.enqueue_notification(
             outbox_id,
             signal_id=None,
             event_type="CANDIDATE_HEALTH_REPORT",
             payload={"items": items, "push_allowed": push_allowed, "selected_params": selected_params or {}},
         )
-        return True
 
     def enqueue_startup(self, *, outbox_id: str, symbol_count: int, environment: str) -> bool:
         if self._lifecycle_store is None:
             return False
-        self._lifecycle_store.enqueue_notification(
+        return self._lifecycle_store.enqueue_notification(
             outbox_id,
             signal_id=None,
             event_type="STARTUP",
             payload={"symbol_count": symbol_count, "environment": environment},
         )
-        return True
 
     def send_lifecycle_event(self, event: dict[str, Any]) -> bool:
         event_type = event.get("event_type")

@@ -417,10 +417,12 @@ async def main_async() -> None:
                 print("\n正在获取初始 K 线数据...")
                 await asyncio.sleep(3)
 
-                from okx_signal_system.config import load_config
+                from okx_signal_system.config import feishu_notifications_enabled, load_config
                 config = load_config("base.yaml")
                 symbols = config.get('data', {}).get('symbols', ['BTC-USDT-SWAP'])
-                feishu_enabled = config.get('feishu', {}).get('enabled', True)
+                feishu_enabled = feishu_notifications_enabled(
+                    bool(config.get('feishu', {}).get('enabled', True))
+                )
 
                 await signal_detection_loop(api, symbols, feishu_enabled)
 

@@ -640,3 +640,17 @@
 ### Notes
 - This release does not add order placement, cancellation, account balance, live position, or automatic sizing behavior.
 - A valid `3.56.8` approved manifest fails closed under `3.56.9` and must be re-promoted from valid strict-research artifacts.
+
+## 2026-06-21 - Task: v3.56.10 deployment readiness closure
+### What was done
+- Fixed the Feishu emergency environment switch so it overrides YAML and is checked at every send call.
+- Added the missing scheduler module CLI entrypoint.
+- Added deployment preflight and runtime health-check scripts with observation/production modes.
+- Added Linux systemd service, periodic health timer, logrotate policy, low-privilege service user layout, and an installation script that preserves runtime data and copies only the reviewed release allow-list.
+- Converted the dependency lock to UTF-8 Linux format, removed test-only packages, and pinned the runtime WebSocket client.
+- Added the complete Chinese deployment-before/after checklist, incident stop-push rules, upgrade and rollback procedures.
+- Synchronized application, approved strategy, package, documentation, and release metadata to `3.56.10`.
+### Safety boundary
+- Observation deployment is allowed without a manifest, but formal notifications remain fail-closed.
+- Production deployment requires a legitimate current-version strict-research approved manifest; no manifest was fabricated.
+- Private OKX credentials remain prohibited and automatic execution remains disabled.
