@@ -491,3 +491,12 @@ src/okx_signal_system/
 - The 5m range backfill utility preserves canonical metadata, merges by timestamp, validates the requested target range, and writes an explicit per-symbol report.
 - Package metadata, GUI/launcher displays, and approved strategy version are synchronized to `3.56.8`; strict research identity remains `v3.56-strict`.
 
+## v3.56.9 signal-only leverage guidance closure
+
+- Formal A-tier notifications may include a normalized leverage suggestion for manual review, but the calculation never reads API credentials, account equity, balances, live positions, order quantity, margin mode, or exchange execution state.
+- The suggestion is bounded by effective stop distance including a fee/slippage buffer, a fixed normalized loss budget, signal score, reward/risk, and calibrated quality-model evidence.
+- Global guidance is capped at 5x. A-minus shadow observations are capped at 1x, B-tier candidates receive no guidance, and missing or uncalibrated quality evidence falls back to 1x with low confidence.
+- Notification text labels the value as advisory-only and includes the binding constraint. No order, position-size, or account action is generated.
+- The leverage module remains downstream of the formal signal gate and therefore cannot increase signal frequency, promote a strategy, or weaken the approved-manifest boundary.
+- Package metadata, GUI/launcher displays, and approved strategy version are synchronized to `3.56.9`; strict research identity remains `v3.56-strict`.
+

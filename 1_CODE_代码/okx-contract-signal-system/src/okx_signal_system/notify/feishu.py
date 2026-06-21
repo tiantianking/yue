@@ -158,6 +158,7 @@ def send_signal_observation(
     lifecycle_status: str | None = None,
     invalidation_price: float | None = None,
     quality_model: dict[str, Any] | None = None,
+    leverage_advice: dict[str, Any] | None = None,
 ) -> bool:
     direction = "LONG" if side == "long" else "SHORT"
     stop_pct = abs(entry_ref - stop_loss) / entry_ref * 100 if entry_ref else 0.0
@@ -188,6 +189,22 @@ def send_signal_observation(
     quality_line = _quality_model_line(quality_model)
     if quality_line:
         lines.append(quality_line)
+    if isinstance(leverage_advice, dict) and leverage_advice.get("advisory_only", True):
+        recommended = leverage_advice.get("recommended_multiple")
+        margin_fraction = leverage_advice.get("suggested_margin_fraction")
+        estimated_loss = leverage_advice.get("estimated_reference_loss_fraction")
+        constraint = leverage_advice.get("binding_constraint")
+        confidence = leverage_advice.get("confidence")
+        if recommended is not None:
+            lines.append(f"杠杆建议倍数: {int(recommended)}x（仅供人工参考）")
+        if margin_fraction is not None:
+            lines.append(f"建议保证金占比上限: {float(margin_fraction) * 100:.1f}%")
+        if estimated_loss is not None:
+            lines.append(f"标准化止损风险: {float(estimated_loss) * 100:.2f}%")
+        if constraint:
+            lines.append(f"杠杆限制原因: {constraint}")
+        if confidence:
+            lines.append(f"杠杆建议置信度: {confidence}")
     if kline_time:
         lines.append(f"K线时间: {_format_beijing_time(kline_time)}")
     if signal_timeframe:
@@ -225,6 +242,7 @@ def send_signal_alert(
     lifecycle_status: str | None = None,
     invalidation_price: float | None = None,
     quality_model: dict[str, Any] | None = None,
+    leverage_advice: dict[str, Any] | None = None,
 ) -> bool:
     return send_signal_observation(
         inst_id=inst_id,
@@ -246,6 +264,7 @@ def send_signal_alert(
         lifecycle_status=lifecycle_status,
         invalidation_price=invalidation_price,
         quality_model=quality_model,
+        leverage_advice=leverage_advice,
     )
 
 

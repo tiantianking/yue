@@ -12,6 +12,7 @@ from okx_signal_system.notify.feishu import (
     send_status_report,
     send_text,
 )
+from okx_signal_system.risk.leverage_advice import build_leverage_advice
 from okx_signal_system.signal_quality import SignalLifecycleStore, lifecycle_payload
 
 
@@ -107,6 +108,14 @@ class NotificationDispatcher:
             record = self._lifecycle_store.get(notify_key)
             if record is not None:
                 lifecycle = lifecycle_payload(record)
+        leverage_advice = build_leverage_advice(
+            entry_ref=signal.entry_ref or 0,
+            stop_loss=signal.stop_loss or 0,
+            tier=tier,
+            signal_score=decision.signal_score,
+            risk_reward_ratio=decision.risk_reward_ratio,
+            quality_model=quality_model,
+        )
         return send_signal_observation(
             inst_id=signal.inst_id,
             side=signal.side,
@@ -127,6 +136,7 @@ class NotificationDispatcher:
             lifecycle_status=lifecycle_status or (lifecycle or {}).get("status"),
             invalidation_price=invalidation_price,
             quality_model=quality_model,
+            leverage_advice=leverage_advice.as_dict() if leverage_advice else None,
         )
 
     def send_a_tier_signal(self, candidate: Any, *, signal_timeframe: str, trend_timeframe: str) -> bool:
@@ -308,6 +318,15 @@ class NotificationDispatcher:
         lifecycle = payload.get("lifecycle") if isinstance(payload.get("lifecycle"), dict) else {}
         reason_codes = signal.get("reason_codes") or ()
         reason = reason_codes if isinstance(reason_codes, str) else ", ".join(str(code) for code in reason_codes if code)
+        quality_model = payload.get("quality_model") if isinstance(payload.get("quality_model"), dict) else None
+        leverage_advice = build_leverage_advice(
+            entry_ref=float(signal.get("entry_ref") or 0),
+            stop_loss=float(signal.get("stop_loss") or 0),
+            tier=payload.get("tier"),
+            signal_score=float(signal.get("signal_score") or risk.get("signal_score") or 0),
+            risk_reward_ratio=risk.get("risk_reward_ratio") or signal.get("risk_reward_ratio"),
+            quality_model=quality_model,
+        )
         return send_signal_observation(
             inst_id=str(signal.get("inst_id") or payload.get("symbol") or event.get("signal_id") or "-"),
             side=str(signal.get("side") or payload.get("side") or "-"),
@@ -327,7 +346,8 @@ class NotificationDispatcher:
             total_candidates=payload.get("total_candidates") or payload.get("total_formal_candidates"),
             lifecycle_status=lifecycle.get("status") or payload.get("lifecycle_status"),
             invalidation_price=signal.get("invalidation_price") or signal.get("stop_loss"),
-            quality_model=payload.get("quality_model") if isinstance(payload.get("quality_model"), dict) else None,
+            quality_model=quality_model,
+            leverage_advice=leverage_advice.as_dict() if leverage_advice else None,
         )
 
     def _send_b_tier_outbox_event(self, event: dict[str, Any]) -> bool:

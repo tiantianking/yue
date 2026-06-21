@@ -62,6 +62,7 @@ docs/V3.56.7_SHADOW_ENSEMBLE_LOCAL_INTEGRATION_CN.md
 docs/V3.56.7_SOURCE_PACKAGE_SAFETY_AUDIT_CN.md
 docs/V3.56.7_UPDATE_PACKAGE_README_CN.md
 docs/V3.56.8_RELEASE_CN.md
+docs/V3.56.9_RELEASE_CN.md
 gui.py
 hooks/hook-setuptools.py
 hooks/pyi_rth_custom.py
@@ -130,6 +131,7 @@ src/okx_signal_system/research/approved_strategy_manifest.py
 src/okx_signal_system/research/promote.py
 src/okx_signal_system/risk/__init__.py
 src/okx_signal_system/risk/costs.py
+src/okx_signal_system/risk/leverage_advice.py
 src/okx_signal_system/risk/model.py
 src/okx_signal_system/scheduler.py
 src/okx_signal_system/shadow_ensemble.py
@@ -174,6 +176,7 @@ tests/test_desktop_runtime.py
 tests/test_features.py
 tests/test_feishu_notify.py
 tests/test_learning_lock.py
+tests/test_leverage_advice.py
 tests/test_lifecycle_outbox_runtime.py
 tests/test_okx_mapping.py
 tests/test_panel_view.py

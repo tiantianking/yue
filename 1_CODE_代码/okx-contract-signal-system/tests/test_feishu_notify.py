@@ -160,6 +160,40 @@ def test_signal_alert_includes_quality_model(monkeypatch) -> None:
     assert "expected_net_r=1.270" in sent[0]
 
 
+def test_signal_alert_labels_leverage_as_advisory_only(monkeypatch) -> None:
+    sent: list[str] = []
+
+    def fake_send_text(text: str, *args, **kwargs) -> bool:
+        sent.append(text)
+        return True
+
+    monkeypatch.setattr(feishu, "send_text", fake_send_text)
+
+    ok = feishu.send_signal_alert(
+        inst_id="BTC-USDT-SWAP",
+        side="long",
+        entry_ref=100.0,
+        stop_loss=98.0,
+        take_profit=107.0,
+        tier="A",
+        leverage_advice={
+            "recommended_multiple": 2,
+            "suggested_margin_fraction": 0.08,
+            "estimated_reference_loss_fraction": 0.0032,
+            "binding_constraint": "STOP_RISK_LIMIT",
+            "confidence": "HIGH",
+            "advisory_only": True,
+        },
+    )
+
+    assert ok
+    assert "杠杆建议倍数: 2x（仅供人工参考）" in sent[0]
+    assert "建议保证金占比上限: 8.0%" in sent[0]
+    assert "标准化止损风险: 0.32%" in sent[0]
+    assert "杠杆限制原因: STOP_RISK_LIMIT" in sent[0]
+    assert "不包含自动下单指令" in sent[0]
+
+
 def test_candidate_health_report_is_not_a_trade_signal(monkeypatch) -> None:
     sent: list[str] = []
 

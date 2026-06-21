@@ -625,3 +625,18 @@
 ### Notes
 - The shadow channel does not enter the formal lifecycle, notification outbox, approved manifest, account, or order paths.
 - Because approved strategy version remains synchronized with the package version, a `3.56.7` manifest fails closed under `3.56.8` and must be re-promoted from valid strict-research artifacts.
+
+## 2026-06-21 - Task: v3.56.9 signal-only leverage guidance release
+### What was done
+- Added a deterministic `LeverageAdvice` module for formal signal manual review without account, position, credential, order, or private exchange dependencies.
+- Bounded guidance by effective stop distance, a normalized 0.5% loss budget, an 8% reference margin fraction, signal score, reward/risk, and calibrated quality evidence.
+- Enforced a 5x global cap, 1x cap for A-minus shadow signals, no guidance for B-tier signals, and 1x fallback for missing quality calibration.
+- Integrated advisory-only guidance into direct and lifecycle-outbox A-tier notification dispatch while preserving the existing formal signal gate.
+- Added release tests and synchronized package, launcher/GUI, approved strategy, distribution, release manifest, architecture, and safety documentation to `3.56.9`.
+### Testing
+- Targeted leverage/notification/outbox tests passed.
+- Full Python test suite passed after correcting the distribution source list and release-facing advisory label.
+- Dashboard `npm run check` passed: lint, typecheck, 21 Node tests, and production build.
+### Notes
+- This release does not add order placement, cancellation, account balance, live position, or automatic sizing behavior.
+- A valid `3.56.8` approved manifest fails closed under `3.56.9` and must be re-promoted from valid strict-research artifacts.

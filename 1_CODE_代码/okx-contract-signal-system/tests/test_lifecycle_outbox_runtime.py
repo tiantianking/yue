@@ -217,7 +217,10 @@ def test_a_tier_outbox_worker_sends_and_marks_sent_once(monkeypatch, tmp_path) -
             "tier": "A",
             "rank": 1,
             "health_item": {"total_candidates": 1},
-            "payload": {"lifecycle": {"status": "TRIGGERED"}, "quality_model": {}},
+            "payload": {
+                "lifecycle": {"status": "TRIGGERED"},
+                "quality_model": {"expected_net_r": 0.8, "uncertainty": 0.08, "p_sl": 0.18},
+            },
             "invalidation_price": signal.stop_loss,
         },
     )()
@@ -262,6 +265,8 @@ def test_a_tier_outbox_worker_sends_and_marks_sent_once(monkeypatch, tmp_path) -
     assert len(sent_signals) == 1
     assert sent_signals[0]["inst_id"] == "BTC-USDT-SWAP"
     assert sent_signals[0]["tier"] == "A"
+    assert sent_signals[0]["leverage_advice"]["advisory_only"] is True
+    assert 1 <= sent_signals[0]["leverage_advice"]["recommended_multiple"] <= 5
     assert summary == {"sent": 2, "failed": 0}
     assert second_summary == {"sent": 0, "failed": 0}
     assert store.pending_notifications() == []
