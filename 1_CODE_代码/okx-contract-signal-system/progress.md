@@ -654,3 +654,23 @@
 - Observation deployment is allowed without a manifest, but formal notifications remain fail-closed.
 - Production deployment requires a legitimate current-version strict-research approved manifest; no manifest was fabricated.
 - Private OKX credentials remain prohibited and automatic execution remains disabled.
+
+## 2026-06-24 - Task: v3.56.11 21-symbol panel and lightweight system closure
+### What was done
+- Confirmed the live runtime was already scanning and subscribing to all 21 configured OKX swaps; the desktop listbox height of 3 caused the misleading display.
+- Updated the desktop panel to show the configured symbol count, expose up to 10 rows, retain scrolling, and show an explicit degraded title when configuration loading fails.
+- Added hard runtime coverage checks for configuration, scan rows, WebSocket subscriptions, and closed-backfill symbol details.
+- Consolidated source, preflight, runtime, shadow, and research gates into `scripts/system_check.py`; retained small source-only compatibility wrappers while removing them from the release package.
+- Removed obsolete release modules: position monitoring, old ML stack, duplicate notification package, Streamlit app, and daily-learning runtime module.
+- Removed Plotly, Streamlit, and unrelated transitive dependencies from runtime requirements.
+- Updated Linux deployment and documentation to call the unified checker.
+- Preserved one historical June 21 candidate-health dead letter for audit while making only dead letters from the latest 24 hours block current health.
+- Synchronized application, approved strategy, package, documentation, and release metadata to `3.56.11`.
+### Verification
+- Python compileall passed.
+- Full Python suite: `369 passed, 18 skipped`.
+- Dashboard `npm run check` passed: lint, typecheck, 21 tests, and Next.js production build.
+- Unified observation check passed: 21 configured, 21 scan rows, 21 WebSocket subscriptions, 21 closed-backfill rows, shadow eligible 21, skipped 0.
+### Safety boundary
+- SIGNAL_ONLY, data read-only, dry-run, no live order, and no automatic close boundaries remain unchanged.
+- Formal A-grade push remains fail-closed because no legitimate current-version approved manifest exists.

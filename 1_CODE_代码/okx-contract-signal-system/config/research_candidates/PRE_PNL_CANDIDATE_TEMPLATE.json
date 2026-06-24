@@ -1,0 +1,47 @@
+{
+  "schema": "okx_pre_pnl_candidate_v1",
+  "candidate_id": "REPLACE_ME",
+  "status": "RETURN_BLIND_PRE_PNL",
+  "mechanism": {
+    "payer": "Name the party that is expected to pay the premium.",
+    "direction": "State one unique ex-ante long/short direction.",
+    "observable_proxy": "State the point-in-time local field and transformation.",
+    "persistence_reason": "Explain why competition should not immediately remove the effect."
+  },
+  "data": {
+    "exchange": "OKX",
+    "cross_exchange": false,
+    "local_only": true,
+    "fields": [],
+    "start_utc": null,
+    "end_utc": null,
+    "closed_only": true
+  },
+  "freedom": {
+    "continuous_parameters": 0,
+    "discrete_choices": 0,
+    "all_choices_declared_before_pnl": true
+  },
+  "duplicate": {
+    "references_checked": [
+      "14_day_cross_sectional_momentum",
+      "1_day_cross_sectional_reversal",
+      "archived_failed_families"
+    ],
+    "max_abs_weight_correlation": 0.0,
+    "max_same_side_overlap": 0.0
+  },
+  "representation_invariance_passed": false,
+  "measurement_semantics_passed": false,
+  "leakage": {
+    "future_returns_opened": false,
+    "pnl_opened": false,
+    "entry_uses_next_tradable_price": true
+  },
+  "code_files": [],
+  "predeclared_costs": {
+    "round_trip_baseline_bps": 16,
+    "stress_multiplier": 2.0
+  },
+  "decision": "DO_NOT_OPEN_PNL_UNTIL_SYSTEM_CHECK_PASSES"
+}

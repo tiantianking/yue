@@ -152,11 +152,12 @@ def test_linux_deployment_assets_are_signal_only() -> None:
 
     assert "main.py --cli" in service
     assert "Restart=always" in service
-    assert "scripts/preflight_check.py" in service
+    assert "scripts/system_check.py preflight" in service
     assert "SIGNAL_ONLY=true" in env_example
     assert "DATA_READ_ONLY=true" in env_example
     assert "OKX_AUTO_CLOSE_ENABLED=false" in env_example
     assert "OKX_API_KEY=" in env_example
     assert "systemctl enable okx-signal.service okx-signal-health.timer" in installer
     assert 'RELEASE_MANIFEST="${SOURCE_DIR}/RELEASE_FILES.txt"' in installer
+    assert '"${APP_DIR}/scripts/system_check.py" preflight' in installer
     assert 'cp -a "${SOURCE_DIR}/."' not in installer

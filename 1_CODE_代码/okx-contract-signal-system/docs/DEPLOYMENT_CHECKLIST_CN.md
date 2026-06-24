@@ -1,6 +1,6 @@
 # OKX 合约信号系统部署前后完整清单
 
-适用版本：v3.56.10
+适用版本：v3.56.11
 
 本系统是 `SIGNAL_ONLY` 公共行情信号观察系统。部署过程不得配置 OKX 私有 API Key，不得加入下单、撤单、开仓、平仓或真实账户仓位逻辑。
 
@@ -59,7 +59,7 @@ outputs/runtime/approved_strategy_manifest.json
 必须满足：
 
 - [ ] 研究版本是 `v3.56-strict`。
-- [ ] 应用和策略版本是 `3.56.10`。
+- [ ] 应用和策略版本是 `3.56.11`。
 - [ ] validation 与 blind 时间窗严格隔离。
 - [ ] blind 状态为真实 `BLIND_SEALED_PASS`。
 - [ ] 成本压力测试通过。
@@ -138,7 +138,7 @@ deployment/logrotate/okx-signal
 
 ```bash
 sudo -u okxsignal /opt/okx-signal/venv/bin/python \
-  /opt/okx-signal/app/scripts/preflight_check.py \
+  /opt/okx-signal/app/scripts/system_check.py preflight \
   --mode observation \
   --env-file /etc/okx-signal/okx-signal.env
 ```
@@ -147,7 +147,7 @@ sudo -u okxsignal /opt/okx-signal/venv/bin/python \
 
 ```bash
 sudo -u okxsignal /opt/okx-signal/venv/bin/python \
-  /opt/okx-signal/app/scripts/preflight_check.py \
+  /opt/okx-signal/app/scripts/system_check.py preflight \
   --mode production \
   --env-file /etc/okx-signal/okx-signal.env
 ```
@@ -159,8 +159,8 @@ sudo -u okxsignal /opt/okx-signal/venv/bin/python \
 ### 1. 上传并校验发布包
 
 ```bash
-sha256sum okx-contract-signal-system-v3.56.10-final.zip
-unzip okx-contract-signal-system-v3.56.10-final.zip -d /tmp/okx-signal-release
+sha256sum okx-contract-signal-system-v3.56.11-final.zip
+unzip okx-contract-signal-system-v3.56.11-final.zip -d /tmp/okx-signal-release
 cd /tmp/okx-signal-release
 ```
 
@@ -222,7 +222,7 @@ sudo journalctl -u okx-signal.service -f
 
 ```bash
 sudo -u okxsignal /opt/okx-signal/venv/bin/python \
-  /opt/okx-signal/app/scripts/runtime_healthcheck.py --mode observation
+  /opt/okx-signal/app/scripts/system_check.py runtime --mode observation
 ```
 
 ### 6. 切换正式推送
@@ -240,10 +240,10 @@ FEISHU_WEBHOOK_URL=<私密Webhook>
 ```bash
 sudo systemctl restart okx-signal.service
 sudo -u okxsignal /opt/okx-signal/venv/bin/python \
-  /opt/okx-signal/app/scripts/preflight_check.py \
+  /opt/okx-signal/app/scripts/system_check.py preflight \
   --mode production --env-file /etc/okx-signal/okx-signal.env
 sudo -u okxsignal /opt/okx-signal/venv/bin/python \
-  /opt/okx-signal/app/scripts/runtime_healthcheck.py --mode production
+  /opt/okx-signal/app/scripts/system_check.py runtime --mode production
 ```
 
 ## 三、部署后必须做什么

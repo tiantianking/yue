@@ -30,6 +30,7 @@ docs/V3.56.7_UPDATE_PACKAGE_README_CN.md
 docs/V3.56.8_RELEASE_CN.md
 docs/V3.56.9_RELEASE_CN.md
 docs/V3.56.10_RELEASE_CN.md
+docs/V3.56.11_RELEASE_CN.md
 pyproject.toml
 requirements.lock
 requirements.txt

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import subprocess
 from collections.abc import Iterable
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -85,17 +84,6 @@ def _allowed_release_paths(paths: Iterable[Path]) -> list[Path]:
     return allowed
 
 
-def _git_tracked_files(root: Path) -> list[Path]:
-    result = subprocess.run(
-        ["git", "ls-files", "-z", "--cached"],
-        cwd=root,
-        check=True,
-        capture_output=True,
-        text=False,
-    )
-    return [Path(name.decode("utf-8")) for name in result.stdout.split(b"\0") if name]
-
-
 def _manifest_release_files(root: Path) -> list[Path]:
     manifest_path = root / _RELEASE_MANIFEST
     if not manifest_path.is_file():
@@ -117,10 +105,7 @@ def _manifest_release_files(root: Path) -> list[Path]:
 
 def release_file_paths(root: Path, output_zip: Path) -> list[Path]:
     root = root.resolve()
-    try:
-        release_paths = _allowed_release_paths(_git_tracked_files(root))
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        release_paths = _manifest_release_files(root)
+    release_paths = _manifest_release_files(root)
 
     output_zip = output_zip.resolve()
     missing: list[str] = []

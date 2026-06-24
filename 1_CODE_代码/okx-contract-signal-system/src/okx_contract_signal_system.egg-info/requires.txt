@@ -4,5 +4,3 @@ pyarrow
 pyyaml
 requests
 websocket-client
-plotly
-streamlit

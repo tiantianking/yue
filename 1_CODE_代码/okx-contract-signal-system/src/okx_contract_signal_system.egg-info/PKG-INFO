@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: okx-contract-signal-system
-Version: 3.56.10
+Version: 3.56.11
 Summary: Local OKX signal observation, backtest, and manual review platform
 Requires-Python: >=3.11
 Requires-Dist: numpy
@@ -9,5 +9,3 @@ Requires-Dist: pyarrow
 Requires-Dist: pyyaml
 Requires-Dist: requests
 Requires-Dist: websocket-client
-Requires-Dist: plotly
-Requires-Dist: streamlit

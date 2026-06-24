@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import re
-import subprocess
 import tomllib
 from pathlib import Path
-from types import SimpleNamespace
 from zipfile import ZipFile
 
 import okx_signal_system
 import pytest
-import scripts.build_release_zip as release_zip_builder
 from scripts.build_release_zip import build_release_zip, write_sha256_file
 from okx_signal_system.config import load_config
 
@@ -97,7 +94,7 @@ def test_release_version_sources_stay_consistent() -> None:
     gui_text = _read("gui.py")
     start_text = _read("start.bat")
 
-    assert package_version == "3.56.10"
+    assert package_version == "3.56.11"
     assert pyproject["project"]["version"] == package_version
     assert APPROVED_STRATEGY_VERSION == package_version
     assert f"Version: {package_version}" in pkg_info
@@ -170,8 +167,10 @@ def test_release_file_manifest_is_present_and_self_including() -> None:
 
     assert "RELEASE_FILES.txt" in lines
     assert "scripts/build_release_zip.py" in lines
-    assert "scripts/preflight_check.py" in lines
-    assert "scripts/runtime_healthcheck.py" in lines
+    assert "scripts/system_check.py" in lines
+    assert "scripts/preflight_check.py" not in lines
+    assert "scripts/runtime_healthcheck.py" not in lines
+    assert "scripts/check_shadow_ensemble_local.py" not in lines
     assert "deployment/install_linux.sh" in lines
     assert "deployment/systemd/okx-signal.service" in lines
     assert "deployment/systemd/okx-signal-health.service" in lines
@@ -179,7 +178,7 @@ def test_release_file_manifest_is_present_and_self_including() -> None:
     assert "deployment/logrotate/okx-signal" in lines
     assert "deployment/okx-signal.env.example" in lines
     assert "docs/DEPLOYMENT_CHECKLIST_CN.md" in lines
-    assert "docs/V3.56.10_RELEASE_CN.md" in lines
+    assert "docs/V3.56.11_RELEASE_CN.md" in lines
     assert len(lines) == len(set(lines))
     assert all("\\" not in line and not line.startswith("/") and ".." not in Path(line).parts for line in lines)
 
@@ -340,25 +339,22 @@ def test_release_zip_sha256_sidecar_creates_parent_directory(tmp_path: Path) -> 
     assert sha256_file.read_text(encoding="ascii").endswith("  release.zip\n")
 
 
-def test_release_zip_excludes_untracked_files_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_release_zip_uses_manifest_and_excludes_unlisted_files(tmp_path: Path) -> None:
     tracked = tmp_path / "src" / "app.py"
     tracked.parent.mkdir(parents=True)
     tracked.write_text("print('safe')", encoding="utf-8")
     secret = tmp_path / "credentials.txt"
     secret.write_text("TOP-SECRET-TOKEN=abc123", encoding="utf-8")
+    manifest = tmp_path / "RELEASE_FILES.txt"
+    manifest.write_text("RELEASE_FILES.txt\nsrc/app.py\n", encoding="utf-8")
     output_zip = tmp_path / "release.zip"
-
-    def fake_run(*args, **kwargs):
-        return SimpleNamespace(stdout=b"src/app.py\0")
-
-    monkeypatch.setattr(release_zip_builder.subprocess, "run", fake_run)
 
     build_release_zip(tmp_path, output_zip)
 
     with ZipFile(output_zip) as archive:
         names = archive.namelist()
 
-    assert names == ["src/app.py"]
+    assert names == ["RELEASE_FILES.txt", "src/app.py"]
     assert "credentials.txt" not in names
 
 
@@ -404,47 +400,19 @@ def test_release_zip_denylist_filters_explicit_paths(tmp_path: Path) -> None:
     assert names == ["src/safe.py"]
 
 
-def test_release_zip_denylist_filters_git_tracked_sensitive_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    tracked_paths = [
-        "src/safe.py",
-        ".env",
-        ".env.local",
-        ".env.example",
-        "data/runtime.db",
-        "cache/state.json",
-        "outputs/report.csv",
-        "__pycache__/module.pyc",
-        "build.log",
-        "logs/runtime.log",
-        "okx_signal.lock",
-        "dashboard/node_modules/pkg/index.js",
-        "dashboard/.next/server/page.js",
-        "dashboard/tsconfig.tsbuildinfo",
-        "dashboard/next-env.d.ts",
-    ]
-    for path in tracked_paths:
-        target = tmp_path / path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(path, encoding="utf-8")
+def test_release_zip_manifest_refuses_sensitive_paths(tmp_path: Path) -> None:
+    safe_file = tmp_path / "src" / "safe.py"
+    safe_file.parent.mkdir(parents=True)
+    safe_file.write_text("print('safe')", encoding="utf-8")
+    (tmp_path / ".env").write_text("FEISHU_WEBHOOK_URL=secret", encoding="utf-8")
+    manifest = tmp_path / "RELEASE_FILES.txt"
+    manifest.write_text("RELEASE_FILES.txt\nsrc/safe.py\n.env\n", encoding="utf-8")
 
-    def fake_run(*args, **kwargs):
-        stdout = b"\0".join(path.encode("utf-8") for path in tracked_paths) + b"\0"
-        return SimpleNamespace(stdout=stdout)
-
-    monkeypatch.setattr(release_zip_builder.subprocess, "run", fake_run)
-    output_zip = tmp_path / "release.zip"
-
-    build_release_zip(tmp_path, output_zip)
-
-    with ZipFile(output_zip) as archive:
-        names = archive.namelist()
-
-    assert names == [".env.example", "src/safe.py"]
+    with pytest.raises(RuntimeError, match="unsafe release manifest entry"):
+        build_release_zip(tmp_path, tmp_path / "release.zip")
 
 
-def test_release_zip_non_git_fallback_uses_explicit_manifest(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_release_zip_uses_explicit_manifest(tmp_path: Path) -> None:
     safe_file = tmp_path / "src" / "safe.py"
     safe_file.parent.mkdir(parents=True)
     safe_file.write_text("print('safe')", encoding="utf-8")
@@ -453,10 +421,6 @@ def test_release_zip_non_git_fallback_uses_explicit_manifest(
     manifest = tmp_path / "RELEASE_FILES.txt"
     manifest.write_text("RELEASE_FILES.txt\nsrc/safe.py\n", encoding="utf-8")
 
-    def fake_run(*args, **kwargs):
-        raise subprocess.CalledProcessError(1, args[0])
-
-    monkeypatch.setattr(release_zip_builder.subprocess, "run", fake_run)
     output_zip = tmp_path / "release.zip"
 
     build_release_zip(tmp_path, output_zip)
@@ -468,15 +432,8 @@ def test_release_zip_non_git_fallback_uses_explicit_manifest(
     assert "credentials.txt" not in names
 
 
-def test_release_zip_non_git_fallback_refuses_missing_manifest(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_release_zip_refuses_missing_manifest(tmp_path: Path) -> None:
     (tmp_path / "credentials.txt").write_text("TOP-SECRET-TOKEN=abc123", encoding="utf-8")
-
-    def fake_run(*args, **kwargs):
-        raise subprocess.CalledProcessError(1, args[0])
-
-    monkeypatch.setattr(release_zip_builder.subprocess, "run", fake_run)
 
     with pytest.raises(RuntimeError, match="release manifest missing"):
         build_release_zip(tmp_path, tmp_path / "release.zip")

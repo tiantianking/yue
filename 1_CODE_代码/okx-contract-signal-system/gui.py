@@ -68,6 +68,16 @@ def _format_beijing_time(value, fmt: str = "%Y-%m-%d %H:%M") -> str:
     return ts.astimezone(BEIJING_TZ).strftime(fmt)
 
 
+def _symbol_panel_title(symbol_count: int, *, degraded: bool = False) -> str:
+    if degraded:
+        return f"监控币种（配置加载失败，已降级为{symbol_count}个）"
+    return f"监控币种（{symbol_count}个，列表可滚动）"
+
+
+def _symbol_list_height(symbol_count: int) -> int:
+    return min(10, max(4, int(symbol_count)))
+
+
 def get_resource_path(relative_path):
     """获取资源的绝对路径，兼容开发环境和 PyInstaller 打包环境"""
     try:
@@ -552,14 +562,21 @@ class OKXSignalGUI:
         self.update_time()
     
     def create_symbol_frame(self):
-        """创建监控币种列表"""
-        symbol_frame = ttk.LabelFrame(self.main_frame, text="监控币种", padding=(8, 6))
-        symbol_frame.pack(fill='x', pady=(0, 8))
-        
-        # 创建币种列表（使用 Listbox）
+        """创建监控币种列表，并明确显示配置中的总数。"""
+        self.symbol_frame = ttk.LabelFrame(
+            self.main_frame,
+            text="监控币种（正在加载）",
+            padding=(8, 6),
+        )
+        self.symbol_frame.pack(fill='x', pady=(0, 8))
+
+        list_container = ttk.Frame(self.symbol_frame)
+        list_container.pack(fill='both', expand=True)
+
+        # 显示足够多的行，避免把“只显示前三行”误认为“只监控三个币种”。
         self.symbol_list = tk.Listbox(
-            symbol_frame,
-            height=3,
+            list_container,
+            height=8,
             selectmode='none',
             bg=COLORS["panel"],
             fg=COLORS["text"],
@@ -569,13 +586,11 @@ class OKXSignalGUI:
             selectbackground="#075985",
             font=("Cascadia Mono", 10),
         )
-        self.symbol_list.pack(fill='x', padx=2, pady=2)
-        
-        # 添加滚动条
-        scrollbar = ttk.Scrollbar(symbol_frame, command=self.symbol_list.yview)
-        scrollbar.pack(side='right', fill='y')
+        scrollbar = ttk.Scrollbar(list_container, command=self.symbol_list.yview)
         self.symbol_list.config(yscrollcommand=scrollbar.set)
-        
+        self.symbol_list.pack(side='left', fill='both', expand=True, padx=(2, 0), pady=2)
+        scrollbar.pack(side='right', fill='y', padx=(0, 2), pady=2)
+
         # 加载币种列表（从配置文件）
         self.load_symbols()
     
@@ -687,21 +702,27 @@ class OKXSignalGUI:
         self.status_bar.pack(fill='x', side='bottom')
     
     def load_symbols(self):
-        """加载监控币种列表"""
+        """加载监控币种列表，并让界面总数与实际配置一致。"""
         try:
-            from okx_signal_system.config import load_config, load_runtime_config
+            from okx_signal_system.config import load_config
+
             config = load_config("base.yaml")
-            symbols = config.get('data', {}).get('symbols', ['BTC-USDT-SWAP'])
-            
+            symbols = [str(item) for item in config.get('data', {}).get('symbols', ['BTC-USDT-SWAP'])]
+
             self.symbol_list.delete(0, 'end')
             for symbol in symbols:
                 self.symbol_list.insert('end', f"{symbol}  ✅")
-            
+
+            self.symbol_frame.configure(text=_symbol_panel_title(len(symbols)))
+            self.symbol_list.configure(height=_symbol_list_height(len(symbols)))
+            self._watched_symbols = symbols.copy()
             self.log(f"加载了 {len(symbols)} 个监控币种")
         except Exception as e:
             self.log(f"加载币种列表失败: {e}", "ERROR")
-            # 使用默认值
-            self.symbol_list.insert('end', 'BTC-USDT-SWAP  ✅')
+            # 使用默认值，并明确降级状态。
+            self.symbol_list.delete(0, 'end')
+            self.symbol_list.insert('end', 'BTC-USDT-SWAP  ⚠')
+            self.symbol_frame.configure(text=_symbol_panel_title(1, degraded=True))
 
     def _dashboard_is_running(self) -> bool:
         try:

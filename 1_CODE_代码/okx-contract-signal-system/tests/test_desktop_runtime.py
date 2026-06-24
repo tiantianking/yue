@@ -25,6 +25,10 @@ def test_gui_runtime_dependencies_import() -> None:
     assert gui.OKXSignalGUI._breakout_gap_pct(None) is None
     assert gui.APP_VERSION == f"v{okx_signal_system.__version__}"
     assert gui._format_beijing_time(pd.Timestamp("2026-06-16T00:00:00Z")) == "2026-06-16 08:00"
+    assert gui._symbol_panel_title(21) == "监控币种（21个，列表可滚动）"
+    assert gui._symbol_panel_title(1, degraded=True) == "监控币种（配置加载失败，已降级为1个）"
+    assert gui._symbol_list_height(21) == 10
+    assert gui._symbol_list_height(3) == 4
 
 
 def test_websocket_client_uses_15m_candle_channel(monkeypatch) -> None:
