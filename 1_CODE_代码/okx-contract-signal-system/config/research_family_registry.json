@@ -1,0 +1,45 @@
+{
+  "schema": "okx_research_family_registry_v1",
+  "updated_at": "2026-06-24T00:00:00Z",
+  "families": [
+    {
+      "family_id": "14_day_cross_sectional_momentum",
+      "status": "reference",
+      "family": {
+        "core_signal": "cross_sectional_return_rank",
+        "direction": "long_winners_short_losers",
+        "holding_period_bars": 1344,
+        "rebalance_bars": 96,
+        "selection": "top_bottom_quantile",
+        "universe": "okx_usdt_swap_cross_section",
+        "features": ["closed_return", "cross_sectional_rank", "momentum"]
+      }
+    },
+    {
+      "family_id": "1_day_cross_sectional_reversal",
+      "status": "reference",
+      "family": {
+        "core_signal": "cross_sectional_return_rank",
+        "direction": "long_losers_short_winners",
+        "holding_period_bars": 96,
+        "rebalance_bars": 16,
+        "selection": "top_bottom_quantile",
+        "universe": "okx_usdt_swap_cross_section",
+        "features": ["closed_return", "cross_sectional_rank", "reversal"]
+      }
+    },
+    {
+      "family_id": "4h_donchian_volatility_compression",
+      "status": "shadow_reference",
+      "family": {
+        "core_signal": "donchian_breakout_after_atr_compression",
+        "direction": "breakout_direction",
+        "holding_period_bars": 96,
+        "rebalance_bars": 16,
+        "selection": "eligible_breakouts",
+        "universe": "okx_usdt_swap_cross_section",
+        "features": ["donchian", "atr_percentile", "relative_strength", "breadth", "volume_ratio"]
+      }
+    }
+  ]
+}

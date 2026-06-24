@@ -8,6 +8,7 @@ assets/icon.ico
 assets/icon.png
 config/base.yaml
 config/fees.yaml
+config/research_family_registry.json
 config/research_candidates/PRE_PNL_CANDIDATE_TEMPLATE.json
 config/research_candidates/v357_4h_donchian_shadow_candidate.json
 config/research_candidates/v357_shadow_ensemble_candidate.json
@@ -73,6 +74,7 @@ docs/V3.56.8_RELEASE_CN.md
 docs/V3.56.9_RELEASE_CN.md
 docs/V3.56.10_RELEASE_CN.md
 docs/V3.56.11_RELEASE_CN.md
+docs/V3.56.12_RELEASE_CN.md
 gui.py
 hooks/hook-setuptools.py
 hooks/pyi_rth_custom.py
@@ -174,6 +176,7 @@ tests/test_okx_mapping.py
 tests/test_panel_view.py
 tests/test_realtime_research_isolation.py
 tests/test_release_safety.py
+tests/test_research_automation.py
 tests/test_reporting_signal.py
 tests/test_scheduler_notifications.py
 tests/test_shadow_ensemble_runtime.py

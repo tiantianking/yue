@@ -674,3 +674,27 @@
 ### Safety boundary
 - SIGNAL_ONLY, data read-only, dry-run, no live order, and no automatic close boundaries remain unchanged.
 - Formal A-grade push remains fail-closed because no legitimate current-version approved manifest exists.
+
+## 2026-06-24 - Task: v3.56.12 automated research gate closure
+### What was done
+- Upgraded the pre-PnL candidate schema to v2 with structured family, parameter-space, and data-gate declarations.
+- Added AST-based future-leak scanning for negative shifts, negative return transforms, centered rolling windows, forward iloc access, and future-label references.
+- Added an automatic family registry and structural similarity gate against momentum, reversal, the 4h Donchian volatility-compression family, current candidates, and archived failures.
+- Replaced self-reported parameter counts with derived free-parameter and grid-combination audits; hard limits are four free parameters and 216 combinations.
+- Added complete-trade concentration gates for symbol, month, one trade, top three trades, effective positive-trade count, and minimum validation trade count.
+- Added automatic baseline, 1.5x, and 2x cost replay from trade facts, including provenance checks that reject legacy total-cost multiplication.
+- Made failed-strategy archival automatic and idempotent, with Desktop-folder preference and project-output fallback; data deferrals are not mislabeled as strategy failures.
+- Added a data-readiness command that merges retained multi-year history with the latest runtime cache and enforces history, integrity, coverage, and incremental-data thresholds.
+- Kept every new gate in the existing `scripts/system_check.py` entry and removed a duplicate runtime filename implementation.
+- Synchronized package, approved strategy, documentation, tests, and release metadata to `3.56.12`.
+### Verification
+- Python compileall passed.
+- Full Python suite: `376 passed, 18 skipped`.
+- Dashboard `npm run check` passed: lint, typecheck, 21 tests, and production build.
+- Data readiness passed with 21/21 coverage, 21/21 history-qualified symbols, and the integrity gate passed.
+- A real WebSocket scan subscribed to 21/21 symbols, refreshed the runtime status, and left formal push closed by the missing current-version manifest.
+- Current outbox health: failed 0, pending 0; the June 21 historical dead letter remains for audit.
+- Shadow ensemble passed with 21 eligible symbols and zero skipped symbols.
+### Safety boundary
+- The gate can reject, report, generate derived stress evidence, and archive failures; it cannot auto-promote parameters or create an approved manifest.
+- SIGNAL_ONLY, read-only market data, no live order, and no automatic close remain unchanged.

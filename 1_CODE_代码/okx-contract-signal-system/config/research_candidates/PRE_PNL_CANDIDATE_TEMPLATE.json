@@ -1,35 +1,45 @@
 {
-  "schema": "okx_pre_pnl_candidate_v1",
+  "schema": "okx_pre_pnl_candidate_v2",
   "candidate_id": "REPLACE_ME",
   "status": "RETURN_BLIND_PRE_PNL",
   "mechanism": {
-    "payer": "Name the party that is expected to pay the premium.",
+    "payer": "Name the party expected to pay the premium.",
     "direction": "State one unique ex-ante long/short direction.",
     "observable_proxy": "State the point-in-time local field and transformation.",
     "persistence_reason": "Explain why competition should not immediately remove the effect."
+  },
+  "family": {
+    "core_signal": "REPLACE_ME",
+    "direction": "REPLACE_ME",
+    "holding_period_bars": 0,
+    "rebalance_bars": 0,
+    "selection": "REPLACE_ME",
+    "universe": "okx_usdt_swap_cross_section",
+    "features": []
   },
   "data": {
     "exchange": "OKX",
     "cross_exchange": false,
     "local_only": true,
+    "dataset": "okx_15m_extended",
+    "timeframe": "15m",
     "fields": [],
     "start_utc": null,
     "end_utc": null,
     "closed_only": true
   },
-  "freedom": {
-    "continuous_parameters": 0,
-    "discrete_choices": 0,
-    "all_choices_declared_before_pnl": true
+  "data_gate": {
+    "min_symbols": 12,
+    "coverage_ratio": 0.8,
+    "min_history_days": 365,
+    "min_new_days": 30,
+    "max_gap_ratio": 0.02
   },
-  "duplicate": {
-    "references_checked": [
-      "14_day_cross_sectional_momentum",
-      "1_day_cross_sectional_reversal",
-      "archived_failed_families"
-    ],
-    "max_abs_weight_correlation": 0.0,
-    "max_same_side_overlap": 0.0
+  "parameter_space": {
+    "all_choices_declared_before_pnl": true,
+    "declared_free_parameters": 0,
+    "declared_combinations": 1,
+    "parameters": []
   },
   "representation_invariance_passed": false,
   "measurement_semantics_passed": false,
@@ -41,7 +51,7 @@
   "code_files": [],
   "predeclared_costs": {
     "round_trip_baseline_bps": 16,
-    "stress_multiplier": 2.0
+    "stress_multipliers": [1.0, 1.5, 2.0]
   },
-  "decision": "DO_NOT_OPEN_PNL_UNTIL_SYSTEM_CHECK_PASSES"
+  "decision": "DO_NOT_OPEN_PNL_UNTIL_SYSTEM_CHECK_RESEARCH_PASSES"
 }

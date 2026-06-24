@@ -24,7 +24,28 @@ Run checks:
 
 ```powershell
 D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest
+D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe scripts\system_check.py all --mode observation
 ```
+
+Automated research gate:
+
+```powershell
+# Decide whether the local 21-symbol dataset has enough history and new closed bars.
+D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe scripts\system_check.py data
+
+# Run the complete pre-PnL and post-backtest gate. Failed strategies are archived automatically.
+D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe scripts\system_check.py research `
+  --candidate config\research_candidates\MY_CANDIDATE.json `
+  --artifacts outputs\research_runs\MY_RUN
+
+# Mark the current latest closed bars only after a completed research cycle passes every gate.
+D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe scripts\system_check.py research `
+  --candidate config\research_candidates\MY_CANDIDATE.json `
+  --artifacts outputs\research_runs\MY_RUN `
+  --mark-researched
+```
+
+The gate derives parameter freedom, scans Python AST for future leakage, compares the structured family signature against the registry and archived failures, regenerates three cost-stress scenarios, checks symbol/month/top-trade concentration, and refuses a new study until sufficient new data exists. It never promotes parameters automatically.
 
 Linux deployment:
 - Run `deployment/install_linux.sh` from a reviewed release package.
