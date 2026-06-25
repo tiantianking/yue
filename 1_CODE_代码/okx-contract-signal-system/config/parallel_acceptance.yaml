@@ -23,5 +23,15 @@ parallel_acceptance:
         original: 原始14日动量
         hysteresis_4_in_6_out: 固定4入6出
 
+    - track_id: v357_shadow_ensemble
+      label: 4小时Donchian慢趋势与波动压缩组合
+      source_status: 1_CODE_代码/okx-contract-signal-system/outputs/shadow_ensemble_forward_acceptance_status.json
+      source_ledger: 1_CODE_代码/okx-contract-signal-system/outputs/shadow_ensemble_forward_ledger.json
+      updater_script: 1_CODE_代码/okx-contract-signal-system/scripts/update_shadow_ensemble_acceptance.py
+      admission_exempt_frozen_reference: true
+      variants:
+        DC_n24_t50_slow: 4小时Donchian慢趋势
+        VCB_A: 波动压缩突破A
+
   # Early-stop thresholds are loaded exclusively from the SHA-256-pinned JSON
   # protocol above. Editing YAML cannot change them.

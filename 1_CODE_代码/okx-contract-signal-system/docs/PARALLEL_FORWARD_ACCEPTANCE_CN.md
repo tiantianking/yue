@@ -29,6 +29,13 @@
 - `original`：原始14日动量；
 - `hysteresis_4_in_6_out`：固定4入6出。
 
+第二条既有冻结轨道 `v357_shadow_ensemble` 同时登记：
+
+- `DC_n24_t50_slow`：4小时Donchian慢趋势；
+- `VCB_A`：波动压缩突破A。
+
+该轨道只接纳SQLite中的非预热真实前向观察，使用独立冻结协议、候选文件哈希和连续快照哈希链。基础成本沿用影子账本的成本后R，压力成本固定为2倍；每笔0.5%组合风险只用于收益与回撤归一化，不是仓位建议。每个变体必须独立达到60天和50条观察。
+
 飞书消息明确包含：`RESEARCH_ONLY / NOT_A_TIER / SIGNAL_ONLY`。
 
 ## 新候选如何进入并行前向
@@ -82,11 +89,12 @@ RUN_PARALLEL_ACCEPTANCE.cmd
 
 1. 使用 `D:\JIAOYI-CX\LOCAL_DEPS\venv`；
 2. 批量运行候选工厂并写入 `outputs/candidate_factory_status.json`；
-3. 更新每条已登记轨道的前向证据；
-4. 校验冻结的提前淘汰协议并执行并行验收状态机；
-5. 对新信号发送研究级飞书摘要；
-6. 写入 `outputs/parallel_acceptance_status.json`；
-7. 将触发冻结失败规则的轨道永久归档。
+3. 更新动量账本并刷新21币种Donchian/VCB影子；
+4. 把第三轨道的非预热SQLite记录转换为统一状态、账本与快照哈希链；
+5. 校验冻结的提前淘汰协议并执行并行验收状态机；
+6. 对新信号发送研究级飞书摘要；
+7. 写入 `outputs/parallel_acceptance_status.json`；
+8. 将触发冻结失败规则的轨道永久归档。
 
 日志位于 `logs/parallel_acceptance.log`。
 

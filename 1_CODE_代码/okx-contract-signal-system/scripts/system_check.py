@@ -489,10 +489,13 @@ def run_source_audit() -> list[CheckResult]:
         "RUN_PARALLEL_ACCEPTANCE.cmd",
         "config/parallel_acceptance.yaml",
         "config/parallel_acceptance_early_stop_protocol.json",
+        "config/shadow_ensemble_forward_acceptance_protocol.json",
         "docs/PARALLEL_FORWARD_ACCEPTANCE_CN.md",
         "scripts/run_candidate_factory.py",
         "scripts/run_parallel_acceptance.py",
+        "scripts/update_shadow_ensemble_acceptance.py",
         "src/okx_signal_system/research/parallel_acceptance.py",
+        "src/okx_signal_system/research/shadow_ensemble_acceptance.py",
     }
     missing_parallel_release = sorted(parallel_release_files.difference(release_files))
     results.append(

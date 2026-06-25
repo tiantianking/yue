@@ -1,0 +1,55 @@
+{
+  "schema": "okx_shadow_ensemble_forward_acceptance_protocol_v1",
+  "protocol_id": "V357_SHADOW_ENSEMBLE_FORWARD_ACCEPTANCE_20260625",
+  "frozen_at_utc": "2026-06-25T14:15:00Z",
+  "frozen_before_minimum_sample": true,
+  "research_only": true,
+  "production_effect": "NONE",
+  "candidate_id": "v357-shadow-donchian-slow-plus-vcb-a",
+  "candidate_files": {
+    "DC_n24_t50_slow": {
+      "path": "config/research_candidates/v357_4h_donchian_shadow_candidate.json",
+      "sha256": "f59c5f6fba96c035ce33519f832a69c0dece6610fb0cf445068246ff8bdbc409"
+    },
+    "VCB_A": {
+      "path": "config/research_candidates/v357_shadow_ensemble_candidate.json",
+      "sha256": "56fed9a83715a26901d62fb80b60f7a4a96df5fd3282df6bc3b6bdf7711a935a"
+    }
+  },
+  "evidence_rules": {
+    "exclude_warmup_records": true,
+    "signal_time_is_registration_clock": true,
+    "closed_only_for_economic_metrics": true,
+    "open_records_count_toward_prospective_observation_count": true,
+    "entry_model": "next closed 4h bar open",
+    "base_cost_source": "existing estimated_net_r stored by frozen shadow runtime",
+    "stress_cost_multiplier": 2.0,
+    "portfolio_risk_fraction_per_closed_observation": 0.005,
+    "portfolio_risk_fraction_purpose": "normalization for drawdown and total-return gates only; not execution sizing advice"
+  },
+  "minimum_acceptance": {
+    "elapsed_closed_data_days": 60,
+    "fully_prospective_observations": 50,
+    "base_profit_factor_min": 1.10,
+    "stress_profit_factor_min": 1.03,
+    "base_total_return_min": 0.0,
+    "stress_total_return_min": 0.0,
+    "base_maximum_drawdown_min": -0.15,
+    "stress_maximum_drawdown_min": -0.15,
+    "single_symbol_positive_contribution_share_max": 0.25,
+    "single_month_positive_contribution_share_max": 0.35,
+    "top_5_positive_contribution_share_max": 0.50,
+    "minimum_positive_months": 2
+  },
+  "preferred_confirmation": {
+    "elapsed_closed_data_days": 90,
+    "fully_prospective_observations": 50
+  },
+  "promotion_policy": {
+    "automatic_a_promotion": false,
+    "manual_review_required": true,
+    "automatic_ordering": false,
+    "automatic_parameter_changes": false,
+    "parameter_rescue_after_failure": false
+  }
+}

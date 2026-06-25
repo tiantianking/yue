@@ -11,6 +11,7 @@ config/base.yaml
 config/fees.yaml
 config/parallel_acceptance.yaml
 config/parallel_acceptance_early_stop_protocol.json
+config/shadow_ensemble_forward_acceptance_protocol.json
 config/research_family_registry.json
 config/research_candidates/PRE_PNL_CANDIDATE_TEMPLATE.json
 config/research_candidates/v357_4h_donchian_shadow_candidate.json
@@ -80,6 +81,7 @@ docs/V3.56.10_RELEASE_CN.md
 docs/V3.56.11_RELEASE_CN.md
 docs/V3.56.12_RELEASE_CN.md
 docs/V3.56.13_RELEASE_CN.md
+docs/V3.56.14_RELEASE_CN.md
 gui.py
 hooks/hook-setuptools.py
 hooks/pyi_rth_custom.py
@@ -97,6 +99,7 @@ scripts/run_candidate_factory.py
 scripts/run_data_audit.ps1
 scripts/run_parallel_acceptance.py
 scripts/system_check.py
+scripts/update_shadow_ensemble_acceptance.py
 src/okx_signal_system/__init__.py
 src/okx_signal_system/backtest/__init__.py
 src/okx_signal_system/backtest/cli.py
@@ -132,6 +135,7 @@ src/okx_signal_system/research/__init__.py
 src/okx_signal_system/research/approved_strategy_manifest.py
 src/okx_signal_system/research/parallel_acceptance.py
 src/okx_signal_system/research/promote.py
+src/okx_signal_system/research/shadow_ensemble_acceptance.py
 src/okx_signal_system/risk/__init__.py
 src/okx_signal_system/risk/costs.py
 src/okx_signal_system/risk/leverage_advice.py

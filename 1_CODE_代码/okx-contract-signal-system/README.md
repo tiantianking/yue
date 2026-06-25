@@ -50,6 +50,7 @@ The gate derives parameter freedom, scans Python AST for future leakage, compare
 Parallel forward acceptance:
 - `RUN_PARALLEL_ACCEPTANCE.cmd` refreshes every registered research-shadow track, applies frozen 14/30/45/60/90-day checkpoints, and writes `outputs/parallel_acceptance_status.json`.
 - Existing momentum shadows remain explicitly `RESEARCH_ONLY / NOT_A_TIER / SIGNAL_ONLY`.
+- The pre-existing 4h Donchian slow-trend and volatility-compression shadow ensemble is adapted from its isolated SQLite ledger into the same governance without using warmup records.
 - New tracks require a passed `okx_research_gate_report_v2`; serious frozen-rule failures are archived permanently and cannot be rescued by retrospective tuning.
 - The early-stop protocol is checksum-frozen in `config/parallel_acceptance_early_stop_protocol.json`; edited thresholds are rejected.
 - `scripts/run_candidate_factory.py` batch-runs all registered schema-v2 candidates through the same frozen research gate without auto-promotion.
