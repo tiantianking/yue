@@ -94,7 +94,7 @@ def test_release_version_sources_stay_consistent() -> None:
     gui_text = _read("gui.py")
     start_text = _read("start.bat")
 
-    assert package_version == "3.56.12"
+    assert package_version == "3.56.13"
     assert pyproject["project"]["version"] == package_version
     assert APPROVED_STRATEGY_VERSION == package_version
     assert f"Version: {package_version}" in pkg_info
@@ -136,6 +136,7 @@ def test_research_package_is_in_distribution_sources() -> None:
     for path in [
         "src/okx_signal_system/research/__init__.py",
         "src/okx_signal_system/research/approved_strategy_manifest.py",
+        "src/okx_signal_system/research/parallel_acceptance.py",
         "src/okx_signal_system/research/promote.py",
     ]:
         assert path in sources
@@ -168,6 +169,11 @@ def test_release_file_manifest_is_present_and_self_including() -> None:
     assert "RELEASE_FILES.txt" in lines
     assert "scripts/build_release_zip.py" in lines
     assert "scripts/system_check.py" in lines
+    assert "scripts/run_candidate_factory.py" in lines
+    assert "scripts/run_parallel_acceptance.py" in lines
+    assert "config/parallel_acceptance.yaml" in lines
+    assert "config/parallel_acceptance_early_stop_protocol.json" in lines
+    assert "RUN_PARALLEL_ACCEPTANCE.cmd" in lines
     assert "scripts/preflight_check.py" not in lines
     assert "scripts/runtime_healthcheck.py" not in lines
     assert "scripts/check_shadow_ensemble_local.py" not in lines
@@ -178,7 +184,7 @@ def test_release_file_manifest_is_present_and_self_including() -> None:
     assert "deployment/logrotate/okx-signal" in lines
     assert "deployment/okx-signal.env.example" in lines
     assert "docs/DEPLOYMENT_CHECKLIST_CN.md" in lines
-    assert "docs/V3.56.12_RELEASE_CN.md" in lines
+    assert "docs/V3.56.13_RELEASE_CN.md" in lines
     assert len(lines) == len(set(lines))
     assert all("\\" not in line and not line.startswith("/") and ".." not in Path(line).parts for line in lines)
 

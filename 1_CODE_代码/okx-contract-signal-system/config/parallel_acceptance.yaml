@@ -1,0 +1,27 @@
+parallel_acceptance:
+  enabled: true
+  output_status: outputs/parallel_acceptance_status.json
+  notification_state: outputs/parallel_acceptance_notification_state.json
+  notification_enabled: true
+  early_stop_protocol: config/parallel_acceptance_early_stop_protocol.json
+
+  # Failed forward candidates are archived into the existing desktop failure
+  # folder when present; otherwise outputs/failed_research is used. Set
+  # FAILED_RESEARCH_ARCHIVE_DIR to override this location.
+
+  # Every new candidate must first pass scripts/system_check.py research and
+  # provide its okx_research_gate_report_v2 file. Only pre-existing frozen
+  # reference tracks may use admission_exempt_frozen_reference: true.
+  tracks:
+    - track_id: momentum_14d_and_4in6out
+      label: 14日动量与固定4入6出
+      source_status: HISTORY_PACKAGES_20260621/RESEARCH/local_only_hypothesis_discovery_v1/MOMENTUM_FORWARD_ACCEPTANCE_STATUS.json
+      source_ledger: HISTORY_PACKAGES_20260621/RESEARCH/local_only_hypothesis_discovery_v1/MOMENTUM_FORWARD_SHADOW_LEDGER.json
+      updater_script: HISTORY_PACKAGES_20260621/RESEARCH/local_only_hypothesis_discovery_v1/momentum_forward_shadow_observations.py
+      admission_exempt_frozen_reference: true
+      variants:
+        original: 原始14日动量
+        hysteresis_4_in_6_out: 固定4入6出
+
+  # Early-stop thresholds are loaded exclusively from the SHA-256-pinned JSON
+  # protocol above. Editing YAML cannot change them.

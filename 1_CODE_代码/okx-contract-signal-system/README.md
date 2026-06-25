@@ -47,6 +47,14 @@ D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe scripts\system_check.py research
 
 The gate derives parameter freedom, scans Python AST for future leakage, compares the structured family signature against the registry and archived failures, regenerates three cost-stress scenarios, checks symbol/month/top-trade concentration, and refuses a new study until sufficient new data exists. It never promotes parameters automatically.
 
+Parallel forward acceptance:
+- `RUN_PARALLEL_ACCEPTANCE.cmd` refreshes every registered research-shadow track, applies frozen 14/30/45/60/90-day checkpoints, and writes `outputs/parallel_acceptance_status.json`.
+- Existing momentum shadows remain explicitly `RESEARCH_ONLY / NOT_A_TIER / SIGNAL_ONLY`.
+- New tracks require a passed `okx_research_gate_report_v2`; serious frozen-rule failures are archived permanently and cannot be rescued by retrospective tuning.
+- The early-stop protocol is checksum-frozen in `config/parallel_acceptance_early_stop_protocol.json`; edited thresholds are rejected.
+- `scripts/run_candidate_factory.py` batch-runs all registered schema-v2 candidates through the same frozen research gate without auto-promotion.
+- See `docs/PARALLEL_FORWARD_ACCEPTANCE_CN.md`.
+
 Linux deployment:
 - Run `deployment/install_linux.sh` from a reviewed release package.
 - Start with `DEPLOYMENT_MODE=observation` and `FEISHU_ENABLED=false`.

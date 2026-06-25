@@ -485,6 +485,24 @@ def run_source_audit() -> list[CheckResult]:
     results.append(CheckResult("source", "research_family_registry_valid", registry_ok, registry_detail))
     results.append(CheckResult("source", "unified_research_gate_released", "scripts/system_check.py" in release_files, "scripts/system_check.py"))
     results.append(CheckResult("source", "research_registry_released", "config/research_family_registry.json" in release_files, "config/research_family_registry.json"))
+    parallel_release_files = {
+        "RUN_PARALLEL_ACCEPTANCE.cmd",
+        "config/parallel_acceptance.yaml",
+        "config/parallel_acceptance_early_stop_protocol.json",
+        "docs/PARALLEL_FORWARD_ACCEPTANCE_CN.md",
+        "scripts/run_candidate_factory.py",
+        "scripts/run_parallel_acceptance.py",
+        "src/okx_signal_system/research/parallel_acceptance.py",
+    }
+    missing_parallel_release = sorted(parallel_release_files.difference(release_files))
+    results.append(
+        CheckResult(
+            "source",
+            "parallel_research_pipeline_released",
+            not missing_parallel_release,
+            ", ".join(missing_parallel_release) or "complete",
+        )
+    )
     return results
 
 

@@ -4,10 +4,13 @@
 MANIFEST.in
 README.md
 RELEASE_FILES.txt
+RUN_PARALLEL_ACCEPTANCE.cmd
 assets/icon.ico
 assets/icon.png
 config/base.yaml
 config/fees.yaml
+config/parallel_acceptance.yaml
+config/parallel_acceptance_early_stop_protocol.json
 config/research_family_registry.json
 config/research_candidates/PRE_PNL_CANDIDATE_TEMPLATE.json
 config/research_candidates/v357_4h_donchian_shadow_candidate.json
@@ -54,6 +57,7 @@ deployment/systemd/okx-signal-health.service
 deployment/systemd/okx-signal-health.timer
 deployment/systemd/okx-signal.service
 docs/DEPLOYMENT_CHECKLIST_CN.md
+docs/PARALLEL_FORWARD_ACCEPTANCE_CN.md
 docs/RELEASE_SAFETY.md
 docs/RUNTIME_VERIFICATION.md
 docs/SYSTEM_ARCHITECTURE.md
@@ -75,6 +79,7 @@ docs/V3.56.9_RELEASE_CN.md
 docs/V3.56.10_RELEASE_CN.md
 docs/V3.56.11_RELEASE_CN.md
 docs/V3.56.12_RELEASE_CN.md
+docs/V3.56.13_RELEASE_CN.md
 gui.py
 hooks/hook-setuptools.py
 hooks/pyi_rth_custom.py
@@ -88,7 +93,9 @@ rthook_disable_pkg_resources.py
 scripts/backfill_5m_history_range.py
 scripts/backfill_recent_history.py
 scripts/build_release_zip.py
+scripts/run_candidate_factory.py
 scripts/run_data_audit.ps1
+scripts/run_parallel_acceptance.py
 scripts/system_check.py
 src/okx_signal_system/__init__.py
 src/okx_signal_system/backtest/__init__.py
@@ -123,6 +130,7 @@ src/okx_signal_system/reporting/cli.py
 src/okx_signal_system/reporting/report_builder.py
 src/okx_signal_system/research/__init__.py
 src/okx_signal_system/research/approved_strategy_manifest.py
+src/okx_signal_system/research/parallel_acceptance.py
 src/okx_signal_system/research/promote.py
 src/okx_signal_system/risk/__init__.py
 src/okx_signal_system/risk/costs.py

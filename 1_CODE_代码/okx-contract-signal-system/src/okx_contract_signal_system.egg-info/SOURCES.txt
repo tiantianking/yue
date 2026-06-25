@@ -2,15 +2,19 @@
 MANIFEST.in
 README.md
 RELEASE_FILES.txt
+RUN_PARALLEL_ACCEPTANCE.cmd
 assets/icon.ico
 assets/icon.png
 config/base.yaml
 config/fees.yaml
+config/parallel_acceptance.yaml
+config/parallel_acceptance_early_stop_protocol.json
 config/research_candidates/v357_4h_donchian_shadow_candidate.json
 config/research_candidates/v357_shadow_ensemble_candidate.json
 config/risk.yaml
 config/shadow_ensemble.yaml
 docs/DEPLOYMENT_CHECKLIST_CN.md
+docs/PARALLEL_FORWARD_ACCEPTANCE_CN.md
 docs/RELEASE_SAFETY.md
 docs/RUNTIME_VERIFICATION.md
 docs/SYSTEM_ARCHITECTURE.md
@@ -32,9 +36,12 @@ docs/V3.56.9_RELEASE_CN.md
 docs/V3.56.10_RELEASE_CN.md
 docs/V3.56.11_RELEASE_CN.md
 docs/V3.56.12_RELEASE_CN.md
+docs/V3.56.13_RELEASE_CN.md
 pyproject.toml
 requirements.lock
 requirements.txt
+scripts/run_candidate_factory.py
+scripts/run_parallel_acceptance.py
 src/okx_contract_signal_system.egg-info/PKG-INFO
 src/okx_contract_signal_system.egg-info/SOURCES.txt
 src/okx_contract_signal_system.egg-info/dependency_links.txt
@@ -85,6 +92,7 @@ src/okx_signal_system/reporting/cli.py
 src/okx_signal_system/reporting/report_builder.py
 src/okx_signal_system/research/__init__.py
 src/okx_signal_system/research/approved_strategy_manifest.py
+src/okx_signal_system/research/parallel_acceptance.py
 src/okx_signal_system/research/promote.py
 src/okx_signal_system/risk/__init__.py
 src/okx_signal_system/risk/costs.py
@@ -124,6 +132,7 @@ tests/__init__.py
 tests/_integration.py
 tests/test_backtest.py
 tests/test_backtest_signal_only.py
+tests/test_candidate_factory.py
 tests/test_config.py
 tests/test_costs.py
 tests/test_daily_learning_review.py
@@ -137,6 +146,7 @@ tests/test_leverage_advice.py
 tests/test_lifecycle_outbox_runtime.py
 tests/test_okx_mapping.py
 tests/test_panel_view.py
+tests/test_parallel_acceptance.py
 tests/test_realtime_research_isolation.py
 tests/test_release_safety.py
 tests/test_research_automation.py

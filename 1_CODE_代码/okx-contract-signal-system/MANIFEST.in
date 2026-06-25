@@ -1,8 +1,11 @@
 include README.md
 include requirements.txt
 include requirements.lock
+include RUN_PARALLEL_ACCEPTANCE.cmd
 include scripts/preflight_check.py
 include scripts/runtime_healthcheck.py
+include scripts/run_candidate_factory.py
+include scripts/run_parallel_acceptance.py
 recursive-include config *.yaml *.json
 recursive-include docs *.md
 recursive-include deployment *

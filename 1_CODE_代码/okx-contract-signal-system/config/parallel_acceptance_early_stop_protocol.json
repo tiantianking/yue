@@ -1,0 +1,34 @@
+{
+  "schema": "okx_parallel_early_stop_protocol_v1",
+  "frozen_at_utc": "2026-06-25T07:10:00Z",
+  "known_sample_at_freeze": {
+    "elapsed_closed_data_days": 1,
+    "fully_prospective_rebalances": 2,
+    "closed_observations_per_variant": 1
+  },
+  "scope": "governance-only severe early-stop rules; formal 60/90-day acceptance remains unchanged",
+  "calibration_prohibition": "thresholds were not optimized against prospective returns and cannot be changed after this freeze",
+  "retroactivity": "no action is taken before the relevant future checkpoint",
+  "checkpoints": {
+    "day14": {
+      "minimum_rebalances": 10,
+      "purpose": "health_and_evidence_chain_only"
+    },
+    "day30": {
+      "minimum_rebalances": 20,
+      "minimum_closed_per_variant": 20,
+      "base_pf_catastrophic_below": 0.7,
+      "stress_pf_catastrophic_below": 0.6,
+      "base_return_catastrophic_below": -0.08,
+      "stress_return_catastrophic_below": -0.1,
+      "decision": "early_stop_only_when_all_four_economic_conditions_fail"
+    },
+    "day45": {
+      "minimum_rebalances": 35,
+      "minimum_closed_per_variant": 35,
+      "single_symbol_positive_share_catastrophic_above": 0.6,
+      "top5_positive_share_catastrophic_above": 0.85,
+      "decision": "early_stop_only_when_both_concentration_conditions_fail"
+    }
+  }
+}
