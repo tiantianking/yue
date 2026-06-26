@@ -63,7 +63,7 @@ CHECK_REMOTE_SYNC.cmd
 Behavioral changes must update the project overview, current release note, package version, release manifest, tests, and local Git history. The final synchronization check only passes when the project worktree is clean and the local tracked branch matches its configured upstream.
 
 Parallel forward acceptance:
-- `RUN_PARALLEL_ACCEPTANCE.cmd` refreshes every registered research-shadow track, applies frozen 14/30/45/60/90-day checkpoints, and writes `outputs/parallel_acceptance_status.json`.
+- `RUN_PARALLEL_ACCEPTANCE.cmd` refreshes every registered research-shadow track, applies each track's frozen frequency-aware sample profile, and writes `outputs/parallel_acceptance_status.json`.
 - Existing momentum shadows remain explicitly `RESEARCH_ONLY / NOT_A_TIER / SIGNAL_ONLY`.
 - The pre-existing 4h Donchian slow-trend and volatility-compression shadow ensemble is adapted from its isolated SQLite ledger into the same governance without using warmup records.
 - New tracks require a passed `okx_research_gate_report_v2`; serious frozen-rule failures are archived permanently and cannot be rescued by retrospective tuning.

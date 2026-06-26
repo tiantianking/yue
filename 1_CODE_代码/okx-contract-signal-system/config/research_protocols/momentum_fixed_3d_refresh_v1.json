@@ -91,9 +91,11 @@
   },
   "forward_acceptance": {
     "fully_prospective_only": true,
-    "minimum_closed_refreshes": 50,
-    "minimum_calendar_days": 150,
-    "preferred_calendar_days": 180,
+    "minimum_closed_refreshes": 30,
+    "minimum_calendar_days": 90,
+    "preferred_closed_refreshes": 50,
+    "preferred_calendar_days": 150,
+    "minimum_failure_terminal": false,
     "base_profit_factor_min": 1.1,
     "stress_profit_factor_min": 1.03,
     "base_total_return_gt_zero": true,
@@ -104,7 +106,9 @@
     "single_positive_month_share_max": 0.3,
     "top_5_profitable_refreshes_positive_contribution_share_max": 0.5,
     "decision_before_due": "RECORD_ONLY_SAMPLE_INCOMPLETE",
-    "decision_pass": "MANUAL_REVIEW_READY_NO_AUTO_PROMOTION",
+    "decision_minimum_not_passed": "CONTINUE_TO_PREFERRED_CONFIRMATION_MINIMUM_GATE_NOT_YET_PASSED",
+    "decision_pass": "FORWARD_SURVIVOR_CONTINUE_TO_PREFERRED_CONFIRMATION",
+    "decision_preferred_pass": "MANUAL_REVIEW_READY_NO_AUTO_PROMOTION",
     "decision_fail": "ARCHIVE_FIXED_FORWARD_GATE_FAILURE_NO_RESCUE"
   },
   "prohibited_actions": [

@@ -6,7 +6,7 @@ The module is deliberately isolated from the formal signal runtime. It can:
 
 * read already-produced prospective evidence for multiple independent tracks;
 * require a passed frozen research-gate report before a new track is admitted;
-* apply frozen 14/30/45/60/90-day checkpoint rules;
+* apply frozen frequency-aware checkpoint and sample-profile rules;
 * send explicitly labelled research-only Feishu summaries;
 * permanently archive tracks that hit a frozen failure rule.
 
@@ -44,6 +44,30 @@ FROZEN_EARLY_STOP_PROTOCOL_SHA256 = "0aaba2e9c90037e836eb40505c66bd9affa7c954bda
 
 
 @dataclass(frozen=True)
+class ForwardSampleProfile:
+    """Frequency-aware forward-sample requirements.
+
+    The default profile exactly preserves the original daily-track rules. Slow
+    tracks may stretch calendar checkpoints to the same number of scheduled
+    observation opportunities and may use a non-terminal minimum review before
+    the unchanged final manual-review sample is reached.
+    """
+
+    cadence_days: int = 1
+    minimum_calendar_days: int = 60
+    minimum_closed_observations: int = 50
+    preferred_calendar_days: int = 90
+    preferred_closed_observations: int = 50
+    minimum_failure_terminal: bool = True
+
+    def checkpoint_calendar_day(self, base_day: int) -> int:
+        return int(base_day) * int(self.cadence_days)
+
+
+DEFAULT_FORWARD_SAMPLE_PROFILE = ForwardSampleProfile()
+
+
+@dataclass(frozen=True)
 class AcceptanceTrackConfig:
     track_id: str
     label: str
@@ -54,6 +78,7 @@ class AcceptanceTrackConfig:
     updater_script: Path | None = None
     admission_report: Path | None = None
     admission_exempt_frozen_reference: bool = False
+    sample_profile: ForwardSampleProfile = DEFAULT_FORWARD_SAMPLE_PROFILE
 
     def label_for(self, variant: str) -> str:
         labels = dict(self.variant_labels)
@@ -124,6 +149,32 @@ def _parse_variants(raw: Any) -> tuple[tuple[str, ...], tuple[tuple[str, str], .
     return VARIANTS, tuple(DEFAULT_VARIANT_LABELS.items())
 
 
+def _sample_profile_from_mapping(raw: Any) -> ForwardSampleProfile:
+    if raw is None:
+        return DEFAULT_FORWARD_SAMPLE_PROFILE
+    if not isinstance(raw, Mapping):
+        raise ValueError("parallel acceptance sample_profile must be a mapping")
+    profile = ForwardSampleProfile(
+        cadence_days=int(raw.get("cadence_days", 1)),
+        minimum_calendar_days=int(raw.get("minimum_calendar_days", 60)),
+        minimum_closed_observations=int(raw.get("minimum_closed_observations", 50)),
+        preferred_calendar_days=int(raw.get("preferred_calendar_days", 90)),
+        preferred_closed_observations=int(raw.get("preferred_closed_observations", 50)),
+        minimum_failure_terminal=_as_bool(raw.get("minimum_failure_terminal"), True),
+    )
+    if profile.cadence_days < 1:
+        raise ValueError("sample_profile.cadence_days must be at least 1")
+    if profile.minimum_calendar_days < 1 or profile.minimum_closed_observations < 1:
+        raise ValueError("sample_profile minimum sample requirements must be positive")
+    if profile.preferred_calendar_days < profile.minimum_calendar_days:
+        raise ValueError("sample_profile preferred_calendar_days cannot be below minimum_calendar_days")
+    if profile.preferred_closed_observations < profile.minimum_closed_observations:
+        raise ValueError(
+            "sample_profile preferred_closed_observations cannot be below minimum_closed_observations"
+        )
+    return profile
+
+
 def _track_from_mapping(raw: Mapping[str, Any], *, ws_root: Path, index: int) -> AcceptanceTrackConfig:
     variants, labels = _parse_variants(raw.get("variants"))
     if not variants:
@@ -147,6 +198,7 @@ def _track_from_mapping(raw: Mapping[str, Any], *, ws_root: Path, index: int) ->
         updater_script=_resolve_path(updater_value, base=ws_root) if updater_value else None,
         admission_report=_resolve_path(admission_value, base=ws_root) if admission_value else None,
         admission_exempt_frozen_reference=_as_bool(raw.get("admission_exempt_frozen_reference"), False),
+        sample_profile=_sample_profile_from_mapping(raw.get("sample_profile")),
     )
 
 
@@ -332,9 +384,13 @@ def evaluate_variant(
     status: Mapping[str, Any],
     variant: str,
     config: ParallelAcceptanceConfig,
+    sample_profile: ForwardSampleProfile = DEFAULT_FORWARD_SAMPLE_PROFILE,
 ) -> dict[str, Any]:
     days = int(status.get("elapsed_closed_data_days") or 0)
     rebalances = int(status.get("fully_prospective_rebalance_count") or 0)
+    day14_due_at = sample_profile.checkpoint_calendar_day(14)
+    day30_due_at = sample_profile.checkpoint_calendar_day(30)
+    day45_due_at = sample_profile.checkpoint_calendar_day(45)
     variants = status.get("variants")
     summary = variants.get(variant, {}) if isinstance(variants, Mapping) else {}
     summary = summary if isinstance(summary, Mapping) else {}
@@ -360,14 +416,14 @@ def evaluate_variant(
         decision = "FAIL_CLOSED_EVIDENCE_CHAIN"
         reasons.extend(f"integrity_failed:{field}" for field in integrity_failures)
     else:
-        if _checkpoint_due(days, 14):
+        if _checkpoint_due(days, day14_due_at):
             checks["day14_health"] = rebalances >= config.day14_min_rebalances
             if not checks["day14_health"]:
                 stage = "EVIDENCE_BLOCKED"
                 decision = "PAUSE_AND_REPAIR_EVIDENCE_CHAIN"
                 reasons.append("day14_rebalance_capture_severely_incomplete")
 
-        if stage != "EVIDENCE_BLOCKED" and _checkpoint_due(days, 30):
+        if stage != "EVIDENCE_BLOCKED" and _checkpoint_due(days, day30_due_at):
             checks["day30_activity"] = (
                 rebalances >= config.day30_min_rebalances
                 and closed >= config.day30_min_closed_per_variant
@@ -397,7 +453,7 @@ def evaluate_variant(
                     decision = "EARLY_TERMINATE_FROZEN_DAY30_RULE"
                     reasons.append("day30_catastrophic_cost_adjusted_failure")
 
-        if stage not in {"EVIDENCE_BLOCKED", "FAILED_ARCHIVE"} and _checkpoint_due(days, 45):
+        if stage not in {"EVIDENCE_BLOCKED", "FAILED_ARCHIVE"} and _checkpoint_due(days, day45_due_at):
             checks["day45_activity"] = (
                 rebalances >= config.day45_min_rebalances
                 and closed >= config.day45_min_closed_per_variant
@@ -421,15 +477,25 @@ def evaluate_variant(
                     decision = "EARLY_TERMINATE_FROZEN_DAY45_RULE"
                     reasons.append("day45_extreme_symbol_and_few_trade_concentration")
 
-        minimum_due = days >= 60 and rebalances >= 50
-        preferred_due = days >= 90 and rebalances >= 50
+        minimum_due = (
+            days >= sample_profile.minimum_calendar_days
+            and closed >= sample_profile.minimum_closed_observations
+        )
+        preferred_due = (
+            days >= sample_profile.preferred_calendar_days
+            and closed >= sample_profile.preferred_closed_observations
+        )
         fixed_pass, fixed_status = _final_gate_state(status, variant)
         if stage not in {"EVIDENCE_BLOCKED", "FAILED_ARCHIVE"} and minimum_due:
             checks["minimum_fixed_gate"] = fixed_pass
-            if fixed_pass is False:
+            if fixed_pass is False and sample_profile.minimum_failure_terminal:
                 stage = "FAILED_ARCHIVE"
                 decision = "ARCHIVE_FIXED_GATE_FAILURE"
                 reasons.append(f"minimum_fixed_gate_failed:{fixed_status}")
+            elif fixed_pass is False:
+                stage = "RESEARCH_SHADOW"
+                decision = "CONTINUE_TO_PREFERRED_CONFIRMATION_MINIMUM_GATE_NOT_YET_PASSED"
+                reasons.append(f"minimum_fixed_gate_not_yet_passed:{fixed_status}")
             elif fixed_pass is True:
                 stage = "FORWARD_SURVIVOR"
                 decision = "CONTINUE_TO_PREFERRED_CONFIRMATION"
@@ -438,7 +504,7 @@ def evaluate_variant(
                 decision = "FIXED_GATE_RESULT_MISSING_OR_INCOMPLETE"
                 reasons.append(f"minimum_fixed_gate_unavailable:{fixed_status}")
 
-        if stage == "FORWARD_SURVIVOR" and preferred_due:
+        if stage not in {"EVIDENCE_BLOCKED", "FAILED_ARCHIVE"} and preferred_due:
             checks["preferred_fixed_gate"] = fixed_pass
             if fixed_pass is True:
                 stage = "FORMAL_A_REVIEW_READY"
@@ -447,6 +513,10 @@ def evaluate_variant(
                 stage = "FAILED_ARCHIVE"
                 decision = "ARCHIVE_PREFERRED_FIXED_GATE_FAILURE"
                 reasons.append(f"preferred_fixed_gate_failed:{fixed_status}")
+            else:
+                stage = "EVIDENCE_BLOCKED"
+                decision = "PREFERRED_FIXED_GATE_RESULT_MISSING_OR_INCOMPLETE"
+                reasons.append(f"preferred_fixed_gate_unavailable:{fixed_status}")
 
     return {
         "variant": variant,
@@ -458,6 +528,17 @@ def evaluate_variant(
         "automatic_ordering": False,
         "parameter_mutation_allowed": False,
         "closed_observations": closed,
+        "sample_requirements": {
+            "cadence_days": sample_profile.cadence_days,
+            "day14_equivalent_calendar_day": day14_due_at,
+            "day30_equivalent_calendar_day": day30_due_at,
+            "day45_equivalent_calendar_day": day45_due_at,
+            "minimum_calendar_days": sample_profile.minimum_calendar_days,
+            "minimum_closed_observations": sample_profile.minimum_closed_observations,
+            "preferred_calendar_days": sample_profile.preferred_calendar_days,
+            "preferred_closed_observations": sample_profile.preferred_closed_observations,
+            "minimum_failure_terminal": sample_profile.minimum_failure_terminal,
+        },
         "checks": checks,
         "reasons": reasons,
     }
@@ -470,9 +551,10 @@ def build_parallel_acceptance_status(
     source_ledger_sha256: str,
     config: ParallelAcceptanceConfig,
     variants: Sequence[str] = VARIANTS,
+    sample_profile: ForwardSampleProfile = DEFAULT_FORWARD_SAMPLE_PROFILE,
 ) -> dict[str, Any]:
     variant_results = {
-        variant: evaluate_variant(source_status, variant, config)
+        variant: evaluate_variant(source_status, variant, config, sample_profile)
         for variant in variants
     }
     stages = {item["stage"] for item in variant_results.values()}
@@ -518,12 +600,29 @@ def build_parallel_acceptance_status(
             "calibration_prohibition": (config.early_stop_protocol or {}).get("calibration_prohibition"),
             "retroactivity": (config.early_stop_protocol or {}).get("retroactivity"),
         },
+        "sample_profile": {
+            "cadence_days": sample_profile.cadence_days,
+            "minimum_calendar_days": sample_profile.minimum_calendar_days,
+            "minimum_closed_observations": sample_profile.minimum_closed_observations,
+            "preferred_calendar_days": sample_profile.preferred_calendar_days,
+            "preferred_closed_observations": sample_profile.preferred_closed_observations,
+            "minimum_failure_terminal": sample_profile.minimum_failure_terminal,
+        },
         "frozen_early_checkpoints": {
-            "day14": "health_and_evidence_chain_only",
-            "day30": "severe_sample_capture_or_catastrophic_cost_adjusted_failure_only",
-            "day45": "severe_sample_capture_or_joint_extreme_concentration_only",
-            "day60_and_50_rebalances": "existing_fixed_acceptance_gates",
-            "day90_and_50_rebalances": "preferred_confirmation_then_manual_review",
+            "health_calendar_day": sample_profile.checkpoint_calendar_day(14),
+            "health_rule": "health_and_evidence_chain_only",
+            "catastrophic_economics_calendar_day": sample_profile.checkpoint_calendar_day(30),
+            "catastrophic_economics_rule": "severe_sample_capture_or_catastrophic_cost_adjusted_failure_only",
+            "catastrophic_concentration_calendar_day": sample_profile.checkpoint_calendar_day(45),
+            "catastrophic_concentration_rule": "severe_sample_capture_or_joint_extreme_concentration_only",
+            "minimum_review": (
+                f"day{sample_profile.minimum_calendar_days}_and_"
+                f"{sample_profile.minimum_closed_observations}_closed_observations"
+            ),
+            "preferred_review": (
+                f"day{sample_profile.preferred_calendar_days}_and_"
+                f"{sample_profile.preferred_closed_observations}_closed_observations"
+            ),
         },
         "variants": variant_results,
     }
@@ -782,6 +881,7 @@ def run_parallel_acceptance(
             source_ledger_sha256=_sha256_file(track.source_ledger),
             config=config,
             variants=track.variants,
+            sample_profile=track.sample_profile,
         )
         governance["track_id"] = track.track_id
         governance["track_label"] = track.label

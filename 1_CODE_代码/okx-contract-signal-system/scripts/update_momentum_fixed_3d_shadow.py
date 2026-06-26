@@ -587,9 +587,13 @@ def build_status(
     elapsed_days = max(0, int((closed_through - registration) / pd.Timedelta(days=1)))
     acceptance = protocol["forward_acceptance"]
     closed_count = int(base["closed_count"])
-    due = (
+    minimum_due = (
         elapsed_days >= int(acceptance["minimum_calendar_days"])
         and closed_count >= int(acceptance["minimum_closed_refreshes"])
+    )
+    preferred_due = (
+        elapsed_days >= int(acceptance["preferred_calendar_days"])
+        and closed_count >= int(acceptance["preferred_closed_refreshes"])
     )
 
     def finite(value: Any) -> float | None:
@@ -629,17 +633,25 @@ def build_status(
         and float(concentration["top_5_profitable_refreshes_positive_contribution_share"])
         <= float(acceptance["top_5_profitable_refreshes_positive_contribution_share_max"]),
     }
-    all_pass = bool(due and all(checks.values()))
-    if not due:
+    checks_pass = bool(all(checks.values()))
+    if not minimum_due:
         decision = str(acceptance["decision_before_due"])
         fixed_status = "NOT_EVALUATED_SAMPLE_INCOMPLETE"
         fixed_all_pass: bool | None = None
-    elif all_pass:
+    elif preferred_due and checks_pass:
+        decision = str(acceptance["decision_preferred_pass"])
+        fixed_status = "PASS"
+        fixed_all_pass = True
+    elif preferred_due:
+        decision = str(acceptance["decision_fail"])
+        fixed_status = "FAIL"
+        fixed_all_pass = False
+    elif checks_pass:
         decision = str(acceptance["decision_pass"])
         fixed_status = "PASS"
         fixed_all_pass = True
     else:
-        decision = str(acceptance["decision_fail"])
+        decision = str(acceptance["decision_minimum_not_passed"])
         fixed_status = "FAIL"
         fixed_all_pass = False
 
@@ -654,6 +666,8 @@ def build_status(
         "fully_prospective_rebalance_count": int(ledger["fully_prospective_rebalance_count"]),
         "minimum_closed_refreshes": int(acceptance["minimum_closed_refreshes"]),
         "minimum_calendar_days": int(acceptance["minimum_calendar_days"]),
+        "preferred_closed_refreshes": int(acceptance["preferred_closed_refreshes"]),
+        "preferred_calendar_days": int(acceptance["preferred_calendar_days"]),
         "next_expected_refresh_and_entry_utc": ledger["next_expected_refresh_and_entry_utc"],
         "decision": decision,
         "signal_level": "研究级/影子信号",
@@ -679,7 +693,19 @@ def build_status(
             VARIANT: {
                 "status": fixed_status,
                 "all_pass": fixed_all_pass,
-                "due": due,
+                "due": minimum_due,
+                "minimum_due": minimum_due,
+                "preferred_due": preferred_due,
+                "checks": checks,
+            }
+        },
+        "variant_fixed_gate_results": {
+            VARIANT: {
+                "status": fixed_status,
+                "all_pass": fixed_all_pass,
+                "due": minimum_due,
+                "minimum_due": minimum_due,
+                "preferred_due": preferred_due,
                 "checks": checks,
             }
         },

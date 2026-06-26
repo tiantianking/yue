@@ -33,5 +33,21 @@ parallel_acceptance:
         DC_n24_t50_slow: 4小时Donchian慢趋势
         VCB_A: 波动压缩突破A
 
+    - track_id: momentum_fixed_3d_refresh
+      label: 14日动量固定3日低换手版
+      source_status: 1_CODE_代码/okx-contract-signal-system/outputs/momentum_fixed_3d_forward_status.json
+      source_ledger: 1_CODE_代码/okx-contract-signal-system/outputs/momentum_fixed_3d_forward_ledger.json
+      updater_script: 1_CODE_代码/okx-contract-signal-system/scripts/update_momentum_fixed_3d_shadow.py
+      admission_exempt_frozen_reference: true
+      sample_profile:
+        cadence_days: 3
+        minimum_calendar_days: 90
+        minimum_closed_observations: 30
+        preferred_calendar_days: 150
+        preferred_closed_observations: 50
+        minimum_failure_terminal: false
+      variants:
+        fixed_3d_refresh_hysteresis_4_in_6_out: 固定3日刷新4入6出
+
   # Early-stop thresholds are loaded exclusively from the SHA-256-pinned JSON
   # protocol above. Editing YAML cannot change them.

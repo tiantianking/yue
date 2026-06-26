@@ -7,6 +7,7 @@ import pytest
 
 from okx_signal_system.research.parallel_acceptance import (
     AcceptanceTrackConfig,
+    ForwardSampleProfile,
     ParallelAcceptanceConfig,
     archive_failed_track,
     build_parallel_acceptance_status,
@@ -158,6 +159,75 @@ def test_day60_fixed_gate_pass_becomes_forward_survivor(tmp_path: Path) -> None:
     )
     assert result["stage"] == "FORWARD_SURVIVOR"
     assert result["formal_a"] is False
+
+
+def test_low_turnover_profile_scales_early_calendar_checkpoints(tmp_path: Path) -> None:
+    profile = ForwardSampleProfile(
+        cadence_days=3,
+        minimum_calendar_days=90,
+        minimum_closed_observations=30,
+        preferred_calendar_days=150,
+        preferred_closed_observations=50,
+        minimum_failure_terminal=False,
+    )
+    result = evaluate_variant(
+        _status(days=30, rebalances=0, summary=_variant_summary(closed=0)),
+        "original",
+        _config(tmp_path),
+        profile,
+    )
+    assert result["stage"] == "RESEARCH_SHADOW"
+    assert result["sample_requirements"]["day14_equivalent_calendar_day"] == 42
+    assert result["sample_requirements"]["day30_equivalent_calendar_day"] == 90
+    assert result["sample_requirements"]["day45_equivalent_calendar_day"] == 135
+
+
+def test_low_turnover_minimum_failure_is_not_archived_before_final_sample(tmp_path: Path) -> None:
+    profile = ForwardSampleProfile(
+        cadence_days=3,
+        minimum_calendar_days=90,
+        minimum_closed_observations=30,
+        preferred_calendar_days=150,
+        preferred_closed_observations=50,
+        minimum_failure_terminal=False,
+    )
+    result = evaluate_variant(
+        _status(days=90, rebalances=30, summary=_variant_summary(closed=30), fixed_pass=False),
+        "original",
+        _config(tmp_path),
+        profile,
+    )
+    assert result["stage"] == "RESEARCH_SHADOW"
+    assert result["decision"] == "CONTINUE_TO_PREFERRED_CONFIRMATION_MINIMUM_GATE_NOT_YET_PASSED"
+
+
+def test_low_turnover_preferred_failure_is_archived(tmp_path: Path) -> None:
+    profile = ForwardSampleProfile(
+        cadence_days=3,
+        minimum_calendar_days=90,
+        minimum_closed_observations=30,
+        preferred_calendar_days=150,
+        preferred_closed_observations=50,
+        minimum_failure_terminal=False,
+    )
+    result = evaluate_variant(
+        _status(days=150, rebalances=50, summary=_variant_summary(closed=50), fixed_pass=False),
+        "original",
+        _config(tmp_path),
+        profile,
+    )
+    assert result["stage"] == "FAILED_ARCHIVE"
+    assert result["decision"] == "ARCHIVE_PREFERRED_FIXED_GATE_FAILURE"
+
+
+def test_final_due_uses_closed_observations_not_open_rebalances(tmp_path: Path) -> None:
+    result = evaluate_variant(
+        _status(days=90, rebalances=90, summary=_variant_summary(closed=49), fixed_pass=True),
+        "original",
+        _config(tmp_path),
+    )
+    assert result["stage"] == "RESEARCH_SHADOW"
+    assert result["checks"]["minimum_fixed_gate"] is None
 
 
 def test_day90_pass_is_manual_review_ready_not_auto_a(tmp_path: Path) -> None:
