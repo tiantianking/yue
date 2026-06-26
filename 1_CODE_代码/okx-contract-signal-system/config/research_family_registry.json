@@ -1,6 +1,6 @@
 {
   "schema": "okx_research_family_registry_v1",
-  "updated_at": "2026-06-26T12:10:00Z",
+  "updated_at": "2026-06-26T14:05:00Z",
   "families": [
     {
       "family_id": "14_day_cross_sectional_momentum",
@@ -109,6 +109,20 @@
         "selection": "top4_entry_top6_exit_membership_unchanged",
         "universe": "okx_usdt_swap_18_symbol_funding_complete_cross_section",
         "features": ["closed_return", "cross_sectional_rank", "hysteresis", "last_three_known_funding_settlements", "holding_cost_tilt"]
+      }
+    },
+    {
+      "family_id": "MOMENTUM_14D_LIQUIDITY_ADMISSION12_HYSTERESIS6_V1",
+      "status": "rejected_execution_overlay_no_rescue",
+      "failure_reason": "The overlay passed historical cost, falsification, 10/14 eligibility neighborhood and portfolio-increment gates, but mean turnover increased 29.77% instead of meeting the frozen minimum 5% reduction objective.",
+      "family": {
+        "core_signal": "existing_14_day_momentum_with_trailing_quote_volume_entry_admission",
+        "direction": "inherit_parent_momentum_direction",
+        "holding_period_bars": 96,
+        "rebalance_bars": 96,
+        "selection": "top4_entry_top6_exit_new_entries_restricted_to_top12_trailing_30d_quote_volume",
+        "universe": "okx_usdt_swap_18_symbol_funding_complete_cross_section",
+        "features": ["closed_return", "cross_sectional_rank", "hysteresis", "causal_30_day_quote_volume_rank", "entry_only_liquidity_gate", "observed_funding_cashflow"]
       }
     }
   ]

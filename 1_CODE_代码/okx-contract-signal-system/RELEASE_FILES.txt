@@ -20,6 +20,7 @@ config/research_candidates/v357_4h_donchian_shadow_candidate.json
 config/research_candidates/v357_shadow_ensemble_candidate.json
 config/research_protocols/momentum_downside_risk_weight_v1.json
 config/research_protocols/momentum_funding_carry_tilt_v1.json
+config/research_protocols/momentum_liquidity_admission_v1.json
 config/research_protocols/momentum_rank_conviction_v1.json
 config/research_protocols/momentum_sector_balance_v1.json
 config/risk.yaml
@@ -99,6 +100,7 @@ docs/V3.56.19_RELEASE_CN.md
 docs/V3.56.20_RELEASE_CN.md
 docs/V3.56.21_RELEASE_CN.md
 docs/V3.56.22_RELEASE_CN.md
+docs/V3.56.23_RELEASE_CN.md
 gui.py
 hooks/hook-setuptools.py
 hooks/pyi_rth_custom.py
@@ -116,6 +118,7 @@ scripts/check_change_governance.py
 scripts/refresh_failure_archive.py
 scripts/research_downside_risk_weighting.py
 scripts/research_funding_carry_tilt.py
+scripts/research_liquidity_admission_momentum.py
 scripts/research_rank_conviction_weighting.py
 scripts/research_sector_balanced_momentum.py
 scripts/run_candidate_factory.py
@@ -158,6 +161,7 @@ src/okx_signal_system/research/__init__.py
 src/okx_signal_system/research/approved_strategy_manifest.py
 src/okx_signal_system/research/downside_risk_weighting.py
 src/okx_signal_system/research/funding_carry_tilt.py
+src/okx_signal_system/research/liquidity_admission_momentum.py
 src/okx_signal_system/research/parallel_acceptance.py
 src/okx_signal_system/research/promote.py
 src/okx_signal_system/research/rank_conviction_weighting.py
@@ -212,6 +216,7 @@ tests/test_desktop_runtime.py
 tests/test_downside_risk_weighting.py
 tests/test_features.py
 tests/test_funding_carry_tilt.py
+tests/test_liquidity_admission_momentum.py
 tests/test_feishu_notify.py
 tests/test_learning_lock.py
 tests/test_leverage_advice.py
