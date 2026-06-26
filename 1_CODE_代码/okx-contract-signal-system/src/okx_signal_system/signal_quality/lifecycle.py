@@ -982,6 +982,13 @@ class SignalLifecycleStore:
     def summary(self) -> dict[str, Any]:
         setup_counts = Counter(item.setup_state for item in self.records)
         outcome_counts = Counter(item.outcome_state for item in self.records)
+        active_records = sum(
+            1
+            for item in self.records
+            if item.setup_state in {"TRIGGERED", "CONFIRMED"}
+            and item.outcome_state not in OUTCOME_TERMINAL_STATES
+        )
+        terminal_records = len(self.records) - active_records
         latest_updated = max((item.updated_at for item in self.records if item.updated_at), default=None)
         latest_event_at = max(
             (item.last_event_at or item.updated_at or item.created_at for item in self.records if (item.last_event_at or item.updated_at or item.created_at)),
@@ -1007,15 +1014,8 @@ class SignalLifecycleStore:
             "stop_reached": outcome_counts.get("STOP_REACHED", 0),
             "timeout_result": outcome_counts.get("TIMEOUT_RESULT", 0),
             "censored": outcome_counts.get("CENSORED", 0),
-            "active": setup_counts.get("TRIGGERED", 0) + setup_counts.get("CONFIRMED", 0),
-            "terminal": (
-                setup_counts.get("INVALIDATED", 0)
-                + setup_counts.get("EXPIRED", 0)
-                + outcome_counts.get("TARGET_REACHED", 0)
-                + outcome_counts.get("STOP_REACHED", 0)
-                + outcome_counts.get("TIMEOUT_RESULT", 0)
-                + outcome_counts.get("CENSORED", 0)
-            ),
+            "active": active_records,
+            "terminal": terminal_records,
             "latest_event_type": latest_event_type,
             "latest_event_at": latest_event_at,
             "outbox": outbox,

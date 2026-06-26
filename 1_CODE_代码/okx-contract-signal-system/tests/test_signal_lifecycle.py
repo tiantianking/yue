@@ -71,7 +71,7 @@ def test_lifecycle_target_reached_after_confirmation(tmp_path) -> None:
     summary = store.summary()
     assert summary["triggered"] == 0
     assert summary["target_reached"] == 1
-    assert summary["active"] == 1
+    assert summary["active"] == 0
     assert summary["terminal"] == 1
     assert summary["latest_event_type"] == "TARGET_REACHED"
     assert summary["latest_event_at"] == "2026-01-01T00:30:00+00:00"
@@ -219,6 +219,7 @@ def test_lifecycle_stop_reached_after_confirmation(tmp_path) -> None:
 
     summary = store.summary()
     assert summary["stop_reached"] == 1
+    assert summary["active"] == 0
     assert summary["terminal"] == 1
     assert summary["latest_event_type"] == "STOP_REACHED"
 
@@ -329,6 +330,7 @@ def test_lifecycle_timeout_result_after_confirmation(tmp_path) -> None:
     }
     summary = store.summary()
     assert summary["timeout_result"] == 1
+    assert summary["active"] == 0
     assert summary["terminal"] == 1
 
 

@@ -1,6 +1,6 @@
 # OKX 合约信号系统部署前后完整清单
 
-适用版本：v3.56.15
+适用版本：v3.56.18
 
 本系统是 `SIGNAL_ONLY` 公共行情信号观察系统。部署过程不得配置 OKX 私有 API Key，不得加入下单、撤单、开仓、平仓或真实账户仓位逻辑。
 
@@ -12,7 +12,7 @@
 - [x] Dashboard lint、TypeScript 类型检查、Node 测试和生产构建通过。
 - [x] `git diff --check` 通过。
 - [x] Python 生产模块完成语法编译。
-- [x] 版本号、approved strategy version、发布清单和文档保持一致。
+- [x] 应用版本、approved strategy version、发布清单和文档分别登记且保持可审计。
 - [x] 发布包排除 `.env`、SQLite、日志、运行缓存、`node_modules`、`.next` 和私密凭据。
 - [ ] 在目标 VPS 上验证发布包 SHA-256 与发布记录一致。
 
@@ -59,7 +59,7 @@ outputs/runtime/approved_strategy_manifest.json
 必须满足：
 
 - [ ] 研究版本是 `v3.56-strict`。
-- [ ] 应用和策略版本是 `3.56.15`。
+- [ ] 应用版本是 `3.56.18`，approved strategy version 仍是 `3.56.15`。
 - [ ] validation 与 blind 时间窗严格隔离。
 - [ ] blind 状态为真实 `BLIND_SEALED_PASS`。
 - [ ] 成本压力测试通过。
@@ -159,8 +159,8 @@ sudo -u okxsignal /opt/okx-signal/venv/bin/python \
 ### 1. 上传并校验发布包
 
 ```bash
-sha256sum okx-contract-signal-system-v3.56.15-final.zip
-unzip okx-contract-signal-system-v3.56.15-final.zip -d /tmp/okx-signal-release
+sha256sum okx-contract-signal-system-v3.56.18-final.zip
+unzip okx-contract-signal-system-v3.56.18-final.zip -d /tmp/okx-signal-release
 cd /tmp/okx-signal-release
 ```
 
