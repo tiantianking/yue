@@ -1,6 +1,6 @@
 {
   "schema": "okx_research_family_registry_v1",
-  "updated_at": "2026-06-26T14:05:00Z",
+  "updated_at": "2026-06-26T15:10:00Z",
   "families": [
     {
       "family_id": "14_day_cross_sectional_momentum",
@@ -123,6 +123,20 @@
         "selection": "top4_entry_top6_exit_new_entries_restricted_to_top12_trailing_30d_quote_volume",
         "universe": "okx_usdt_swap_18_symbol_funding_complete_cross_section",
         "features": ["closed_return", "cross_sectional_rank", "hysteresis", "causal_30_day_quote_volume_rank", "entry_only_liquidity_gate", "observed_funding_cashflow"]
+      }
+    },
+    {
+      "family_id": "MOMENTUM_14D_MEMBERSHIP_CHANGE_REBALANCE_HYSTERESIS6_V1",
+      "status": "rejected_execution_overlay_no_rescue",
+      "failure_reason": "The parameter-free overlay preserved the exact signed membership path, passed historical, exposure, random-time, reverse-direction and 15-minute-delay checks, but turnover and transaction cost fell only 2.83% versus the frozen 15% minimum; material incremental-value count was zero.",
+      "family": {
+        "core_signal": "existing_14_day_momentum_with_membership_change_only_equal_weight_reset",
+        "direction": "inherit_parent_momentum_direction",
+        "holding_period_bars": 96,
+        "rebalance_bars": 96,
+        "selection": "top4_entry_top6_exit_membership_unchanged_execution_overlay",
+        "universe": "okx_usdt_swap_18_symbol_funding_complete_cross_section",
+        "features": ["closed_return", "cross_sectional_rank", "hysteresis", "path_dependent_weight_drift", "membership_change_rebalance", "observed_funding_cashflow"]
       }
     }
   ]

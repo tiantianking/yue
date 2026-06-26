@@ -52,6 +52,7 @@ docs/V3.56.20_RELEASE_CN.md
 docs/V3.56.21_RELEASE_CN.md
 docs/V3.56.22_RELEASE_CN.md
 docs/V3.56.23_RELEASE_CN.md
+docs/V3.56.24_RELEASE_CN.md
 pyproject.toml
 requirements.lock
 requirements.txt
@@ -113,6 +114,7 @@ src/okx_signal_system/research/approved_strategy_manifest.py
 src/okx_signal_system/research/downside_risk_weighting.py
 src/okx_signal_system/research/funding_carry_tilt.py
 src/okx_signal_system/research/liquidity_admission_momentum.py
+src/okx_signal_system/research/membership_change_rebalance.py
 src/okx_signal_system/research/parallel_acceptance.py
 src/okx_signal_system/research/promote.py
 src/okx_signal_system/research/rank_conviction_weighting.py
@@ -169,6 +171,7 @@ tests/test_downside_risk_weighting.py
 tests/test_features.py
 tests/test_funding_carry_tilt.py
 tests/test_liquidity_admission_momentum.py
+tests/test_membership_change_rebalance.py
 tests/test_feishu_notify.py
 tests/test_learning_lock.py
 tests/test_leverage_advice.py
