@@ -7,6 +7,7 @@ import pytest
 from okx_signal_system.research.fixed_cadence_momentum import (
     fixed_cadence_hysteresis_weights,
     next_refresh_at_or_after,
+    staggered_cadence_hysteresis_weights,
 )
 
 
@@ -80,6 +81,65 @@ def test_hysteresis_retains_incumbent_at_exit_rank() -> None:
     assert result.weights[1, index["S0"]] > 0.0
     assert result.weights[1, index["S1"]] > 0.0
     assert result.weights[1, index["S2"]] == 0.0
+
+
+def test_staggered_cohorts_equal_average_frozen_calendar_phases() -> None:
+    times = pd.date_range("2026-01-01T04:00:00Z", periods=8, freq="1D")
+    scores = [_score(SYMBOLS) for _ in times]
+    individual = [
+        fixed_cadence_hysteresis_weights(
+            scores,
+            times,
+            SYMBOLS,
+            anchor_utc=times[0] + pd.Timedelta(days=offset),
+            cadence_days=3,
+            top_n=2,
+            exit_rank=3,
+            gross_exposure=0.4,
+        )
+        for offset in (0, 1, 2)
+    ]
+
+    result = staggered_cadence_hysteresis_weights(
+        scores,
+        times,
+        SYMBOLS,
+        base_anchor_utc=times[0],
+        cohort_offsets_days=(0, 1, 2),
+        cadence_days=3,
+        top_n=2,
+        exit_rank=3,
+        gross_exposure=0.4,
+    )
+
+    expected = np.mean(np.stack([item.weights for item in individual], axis=0), axis=0)
+    assert np.allclose(result.weights, expected)
+    assert result.refresh_flags.tolist() == [True] * len(times)
+    assert np.isclose(np.abs(result.weights[2]).sum(), 0.4)
+    assert np.isclose(result.weights[2].sum(), 0.0)
+
+
+def test_staggered_cohorts_reject_duplicate_or_out_of_cycle_offsets() -> None:
+    times = pd.date_range("2026-01-01T04:00:00Z", periods=2, freq="1D")
+    scores = [_score(SYMBOLS) for _ in times]
+    with pytest.raises(ValueError, match="unique"):
+        staggered_cadence_hysteresis_weights(
+            scores,
+            times,
+            SYMBOLS,
+            base_anchor_utc=times[0],
+            cohort_offsets_days=(0, 0),
+            cadence_days=3,
+        )
+    with pytest.raises(ValueError, match="within"):
+        staggered_cadence_hysteresis_weights(
+            scores,
+            times,
+            SYMBOLS,
+            base_anchor_utc=times[0],
+            cohort_offsets_days=(0, 3),
+            cadence_days=3,
+        )
 
 
 def test_next_refresh_uses_same_calendar_anchor() -> None:

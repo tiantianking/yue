@@ -36,6 +36,7 @@ import momentum_overlay_common as common  # noqa: E402
 from okx_signal_system.research.fixed_cadence_momentum import (  # noqa: E402
     fixed_cadence_hysteresis_weights,
     next_refresh_at_or_after,
+    staggered_cadence_hysteresis_weights,
 )
 
 PROTOCOL_PATH = PROJECT_ROOT / "config" / "research_protocols" / "momentum_fixed_3d_refresh_v1.json"
@@ -43,6 +44,7 @@ LEDGER_PATH = PROJECT_ROOT / "outputs" / "momentum_fixed_3d_forward_ledger.json"
 STATUS_PATH = PROJECT_ROOT / "outputs" / "momentum_fixed_3d_forward_status.json"
 EVIDENCE_DIR = PROJECT_ROOT / "outputs" / "momentum_fixed_3d_forward_evidence"
 VARIANT = "fixed_3d_refresh_hysteresis_4_in_6_out"
+ADDITIONAL_CODE_PATHS: list[Path] = []
 
 
 def _now_text() -> str:
@@ -471,16 +473,35 @@ def build_ledger(prior_ledger: dict[str, Any] | None = None) -> tuple[dict[str, 
         formation_bars_4h=int(protocol["signal"]["formation_bars_4h"]),
     ).reset_index(drop=True)
     decision_times = [pd.Timestamp(value) for value in signals["entry_utc"]]
-    built = fixed_cadence_hysteresis_weights(
-        list(signals["scores"]),
-        decision_times,
-        symbols,
-        anchor_utc=protocol["signal"]["calendar_anchor_utc"],
-        cadence_days=int(protocol["signal"]["refresh_interval_hours"]) // 24,
-        top_n=int(protocol["signal"]["entry_rank"]),
-        exit_rank=int(protocol["signal"]["exit_rank"]),
-        gross_exposure=float(protocol["signal"]["operational_gross_exposure"]),
-    )
+    signal_protocol = protocol["signal"]
+    execution_mode = str(signal_protocol.get("execution_mode") or "fixed_cadence")
+    if execution_mode == "fixed_cadence":
+        built = fixed_cadence_hysteresis_weights(
+            list(signals["scores"]),
+            decision_times,
+            symbols,
+            anchor_utc=signal_protocol["calendar_anchor_utc"],
+            cadence_days=int(signal_protocol["refresh_interval_hours"]) // 24,
+            top_n=int(signal_protocol["entry_rank"]),
+            exit_rank=int(signal_protocol["exit_rank"]),
+            gross_exposure=float(signal_protocol["operational_gross_exposure"]),
+        )
+        observation_cadence_days = int(signal_protocol["refresh_interval_hours"]) // 24
+    elif execution_mode == "staggered_equal_cohorts":
+        built = staggered_cadence_hysteresis_weights(
+            list(signals["scores"]),
+            decision_times,
+            symbols,
+            base_anchor_utc=signal_protocol["calendar_anchor_utc"],
+            cohort_offsets_days=tuple(signal_protocol["cohort_offsets_days"]),
+            cadence_days=int(signal_protocol["cohort_refresh_interval_hours"]) // 24,
+            top_n=int(signal_protocol["entry_rank"]),
+            exit_rank=int(signal_protocol["exit_rank"]),
+            gross_exposure=float(signal_protocol["operational_gross_exposure"]),
+        )
+        observation_cadence_days = int(signal_protocol["refresh_interval_hours"]) // 24
+    else:
+        raise ValueError(f"unsupported execution mode: {execution_mode}")
     latest_closed = pd.Timestamp(panels.m15_close.index[-1])
     eligible = [
         index
@@ -521,6 +542,7 @@ def build_ledger(prior_ledger: dict[str, Any] | None = None) -> tuple[dict[str, 
     code_paths = [
         PROJECT_ROOT / "src" / "okx_signal_system" / "research" / "fixed_cadence_momentum.py",
         Path(__file__).resolve(),
+        *ADDITIONAL_CODE_PATHS,
     ]
     code_hashes = {str(path.relative_to(PROJECT_ROOT)): _sha256_file(path) for path in code_paths}
     snapshot_integrity = _write_refresh_snapshots(
@@ -538,10 +560,10 @@ def build_ledger(prior_ledger: dict[str, Any] | None = None) -> tuple[dict[str, 
     next_refresh = next_refresh_at_or_after(
         max(registration, latest_closed + pd.Timedelta(minutes=15)),
         anchor_utc=protocol["signal"]["calendar_anchor_utc"],
-        cadence_days=int(protocol["signal"]["refresh_interval_hours"]) // 24,
+        cadence_days=observation_cadence_days,
     )
     ledger = {
-        "schema": "momentum_fixed_3d_forward_ledger_v1",
+        "schema": str(protocol.get("forward_ledger_schema") or "momentum_fixed_3d_forward_ledger_v1"),
         "protocol_id": protocol["protocol_id"],
         "registration_at_utc": registration.isoformat(),
         "generated_at_utc": _now_text(),
@@ -656,7 +678,7 @@ def build_status(
         fixed_all_pass = False
 
     return {
-        "schema": "momentum_fixed_3d_forward_status_v1",
+        "schema": str(protocol.get("forward_status_schema") or "momentum_fixed_3d_forward_status_v1"),
         "acceptance_protocol_id": protocol["protocol_id"],
         "candidate_protocol_id": protocol["protocol_id"],
         "generated_at_utc": _now_text(),
@@ -710,7 +732,11 @@ def build_status(
             }
         },
         "current_reference_position": ledger.get("current_reference_position"),
-        "historical_warning": protocol["historical_evidence"]["random_time_warning"],
+        "historical_warning": str(
+            protocol["historical_evidence"].get("random_time_warning")
+            or protocol["historical_evidence"].get("caution")
+            or ""
+        ),
         "production_effect": "NONE",
         "formal_signal_effect": "NONE",
     }

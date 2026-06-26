@@ -698,3 +698,21 @@
 ### Safety boundary
 - The gate can reject, report, generate derived stress evidence, and archive failures; it cannot auto-promote parameters or create an approved manifest.
 - SIGNAL_ONLY, read-only market data, no live order, and no automatic close remain unchanged.
+
+## 2026-06-27 - Task: v3.56.27 H22 staggered 3x3 momentum shadow
+### What was done
+- Froze and evaluated three equal-weight 14-day momentum cohorts with fixed 0/1/2-day calendar offsets and a three-day refresh cadence per cohort.
+- Historical base/stress PF were 1.1754/1.0926, base/stress maximum drawdown were 8.12%/9.88%, and aggregate turnover fell 29.42% versus the daily parent path.
+- Random-time, direction-reversal, 15-minute delay, calendar-phase, leave-one-phase-out, symbol, month, and top-day concentration checks passed; the middle stress segment remained near break-even, so the result is forward-shadow-only.
+- Added a reusable staggered fixed-cadence weight constructor and extended the existing fixed-cadence forward runtime instead of duplicating it.
+- Registered a separate daily aggregate forward ledger with no historical backfill. Registration is 2026-06-26T16:12:35Z and the first fully prospective entry is 2026-06-27T04:00:00Z.
+- Kept the existing fixed three-day track independent and unchanged.
+### Verification
+- Historical H22 evaluation passed base/stress, random-time, direction-reversal, 15-minute delay, phase robustness, concentration, and future-leakage checks.
+- Targeted fixed-cadence, parallel-acceptance, and release-safety tests passed.
+- Full Python compileall and pytest suite passed with only the existing environment-dependent skips.
+- Source and observation preflight system checks passed; missing explicit safety environment values and the absent formal approved manifest remained non-blocking warnings.
+- Unified parallel acceptance refreshed all four research-shadow tracks without notifications, and the v3.56.27 release ZIP plus SHA-256 sidecar were built successfully.
+### Safety boundary
+- H22 is an execution variant of the existing momentum family, not an independent Alpha and not an A-grade strategy.
+- Formal signals, Feishu formal-push gates, approved manifests, leverage, accounts, positions, and order paths are unchanged.

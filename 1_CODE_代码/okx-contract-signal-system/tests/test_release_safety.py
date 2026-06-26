@@ -94,7 +94,7 @@ def test_release_version_sources_stay_consistent() -> None:
     gui_text = _read("gui.py")
     start_text = _read("start.bat")
 
-    assert package_version == "3.56.26"
+    assert package_version == "3.56.27"
     assert pyproject["project"]["version"] == package_version
     assert APPROVED_STRATEGY_VERSION == "3.56.15"
     assert f"Version: {package_version}" in pkg_info
@@ -184,6 +184,7 @@ def test_release_file_manifest_is_present_and_self_including() -> None:
     assert "scripts/run_parallel_acceptance.py" in lines
     assert "scripts/update_shadow_ensemble_acceptance.py" in lines
     assert "scripts/update_momentum_fixed_3d_shadow.py" in lines
+    assert "scripts/update_momentum_staggered_3x3_shadow.py" in lines
     assert "config/parallel_acceptance.yaml" in lines
     assert "config/parallel_acceptance_early_stop_protocol.json" in lines
     assert "config/shadow_ensemble_forward_acceptance_protocol.json" in lines
@@ -200,7 +201,7 @@ def test_release_file_manifest_is_present_and_self_including() -> None:
     assert "docs/CHANGE_CONTROL_POLICY_CN.md" in lines
     assert "docs/DEPLOYMENT_CHECKLIST_CN.md" in lines
     assert "docs/PROJECT_OVERVIEW_CN.md" in lines
-    assert "docs/V3.56.26_RELEASE_CN.md" in lines
+    assert "docs/V3.56.27_RELEASE_CN.md" in lines
     assert len(lines) == len(set(lines))
     assert all("\\" not in line and not line.startswith("/") and ".." not in Path(line).parts for line in lines)
 

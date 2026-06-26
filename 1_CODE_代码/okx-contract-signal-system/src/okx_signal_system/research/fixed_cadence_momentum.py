@@ -136,6 +136,63 @@ def fixed_cadence_hysteresis_weights(
     )
 
 
+def staggered_cadence_hysteresis_weights(
+    scores: Sequence[Mapping[str, float]],
+    decision_times: Sequence[pd.Timestamp | str],
+    symbols: Sequence[str],
+    *,
+    base_anchor_utc: pd.Timestamp | str,
+    cohort_offsets_days: Sequence[int] = (0, 1, 2),
+    cadence_days: int = 3,
+    top_n: int = 4,
+    exit_rank: int = 6,
+    gross_exposure: float = 1.0,
+) -> FixedCadenceWeights:
+    """Equal-weight several causally independent fixed-cadence cohorts.
+
+    Each cohort uses the same frozen ranking and hysteresis rules but refreshes
+    on a different predeclared calendar phase. The returned account target is
+    the arithmetic mean of all cohort targets. No return or price information
+    is inspected while constructing the weights.
+    """
+
+    offsets = tuple(int(value) for value in cohort_offsets_days)
+    if not offsets:
+        raise ValueError("at least one cohort offset is required")
+    if len(offsets) != len(set(offsets)):
+        raise ValueError("cohort offsets must be unique")
+    if cadence_days <= 0:
+        raise ValueError("cadence_days must be positive")
+    if any(value < 0 or value >= cadence_days for value in offsets):
+        raise ValueError("cohort offsets must lie within the cadence cycle")
+
+    base_anchor = pd.Timestamp(base_anchor_utc)
+    base_anchor = (
+        base_anchor.tz_localize("UTC")
+        if base_anchor.tzinfo is None
+        else base_anchor.tz_convert("UTC")
+    )
+    cohorts = [
+        fixed_cadence_hysteresis_weights(
+            scores,
+            decision_times,
+            symbols,
+            anchor_utc=base_anchor + pd.Timedelta(days=offset),
+            cadence_days=cadence_days,
+            top_n=top_n,
+            exit_rank=exit_rank,
+            gross_exposure=gross_exposure,
+        )
+        for offset in offsets
+    ]
+    weights = np.mean(np.stack([item.weights for item in cohorts], axis=0), axis=0)
+    refresh_flags = np.any(
+        np.stack([item.refresh_flags for item in cohorts], axis=0),
+        axis=0,
+    )
+    return FixedCadenceWeights(weights=weights, refresh_flags=refresh_flags)
+
+
 def next_refresh_at_or_after(
     timestamp_utc: pd.Timestamp | str,
     *,

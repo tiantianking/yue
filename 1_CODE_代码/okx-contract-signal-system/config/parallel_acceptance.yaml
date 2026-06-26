@@ -49,5 +49,22 @@ parallel_acceptance:
       variants:
         fixed_3d_refresh_hysteresis_4_in_6_out: 固定3日刷新4入6出
 
+    # Frozen execution variant of the admitted momentum parent; not a new Alpha claim.
+    - track_id: momentum_staggered_3x3_refresh
+      label: 14日动量3组错开低换手版
+      source_status: 1_CODE_代码/okx-contract-signal-system/outputs/momentum_staggered_3x3_forward_status.json
+      source_ledger: 1_CODE_代码/okx-contract-signal-system/outputs/momentum_staggered_3x3_forward_ledger.json
+      updater_script: 1_CODE_代码/okx-contract-signal-system/scripts/update_momentum_staggered_3x3_shadow.py
+      admission_exempt_frozen_reference: true
+      sample_profile:
+        cadence_days: 1
+        minimum_calendar_days: 60
+        minimum_closed_observations: 50
+        preferred_calendar_days: 90
+        preferred_closed_observations: 80
+        minimum_failure_terminal: false
+      variants:
+        staggered_3x3_refresh_hysteresis_4_in_6_out: 3组等权错开3日刷新4入6出
+
   # Early-stop thresholds are loaded exclusively from the SHA-256-pinned JSON
   # protocol above. Editing YAML cannot change them.

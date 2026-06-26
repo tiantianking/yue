@@ -21,6 +21,7 @@ config/research_candidates/v357_shadow_ensemble_candidate.json
 config/research_protocols/momentum_downside_risk_weight_v1.json
 config/research_protocols/momentum_funding_carry_tilt_v1.json
 config/research_protocols/momentum_fixed_3d_refresh_v1.json
+config/research_protocols/momentum_staggered_3x3_refresh_v1.json
 config/research_protocols/momentum_liquidity_admission_v1.json
 config/research_protocols/momentum_membership_change_rebalance_v1.json
 config/research_protocols/momentum_rank_conviction_v1.json
@@ -106,6 +107,7 @@ docs/V3.56.23_RELEASE_CN.md
 docs/V3.56.24_RELEASE_CN.md
 docs/V3.56.25_RELEASE_CN.md
 docs/V3.56.26_RELEASE_CN.md
+docs/V3.56.27_RELEASE_CN.md
 gui.py
 hooks/hook-setuptools.py
 hooks/pyi_rth_custom.py
@@ -132,6 +134,7 @@ scripts/run_data_audit.ps1
 scripts/run_parallel_acceptance.py
 scripts/system_check.py
 scripts/update_momentum_fixed_3d_shadow.py
+scripts/update_momentum_staggered_3x3_shadow.py
 scripts/update_shadow_ensemble_acceptance.py
 src/okx_signal_system/__init__.py
 src/okx_signal_system/backtest/__init__.py

@@ -64,7 +64,7 @@ Behavioral changes must update the project overview, current release note, packa
 
 Parallel forward acceptance:
 - `RUN_PARALLEL_ACCEPTANCE.cmd` refreshes every registered research-shadow track, applies each track's frozen frequency-aware sample profile, and writes `outputs/parallel_acceptance_status.json`.
-- Existing momentum shadows remain explicitly `RESEARCH_ONLY / NOT_A_TIER / SIGNAL_ONLY`.
+- Existing momentum shadows remain explicitly `RESEARCH_ONLY / NOT_A_TIER / SIGNAL_ONLY`; the staggered 3x3 low-turnover execution variant has its own daily forward ledger and cannot replace or retroactively rescue the fixed three-day track.
 - The pre-existing 4h Donchian slow-trend and volatility-compression shadow ensemble is adapted from its isolated SQLite ledger into the same governance without using warmup records.
 - New tracks require a passed `okx_research_gate_report_v2`; serious frozen-rule failures are archived permanently and cannot be rescued by retrospective tuning.
 - The early-stop protocol is checksum-frozen in `config/parallel_acceptance_early_stop_protocol.json`; edited thresholds are rejected.

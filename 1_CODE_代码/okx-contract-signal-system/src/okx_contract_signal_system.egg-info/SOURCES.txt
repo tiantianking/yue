@@ -55,6 +55,7 @@ docs/V3.56.23_RELEASE_CN.md
 docs/V3.56.24_RELEASE_CN.md
 docs/V3.56.25_RELEASE_CN.md
 docs/V3.56.26_RELEASE_CN.md
+docs/V3.56.27_RELEASE_CN.md
 pyproject.toml
 requirements.lock
 requirements.txt
@@ -63,6 +64,7 @@ scripts/refresh_failure_archive.py
 scripts/run_candidate_factory.py
 scripts/run_parallel_acceptance.py
 scripts/update_momentum_fixed_3d_shadow.py
+scripts/update_momentum_staggered_3x3_shadow.py
 scripts/update_shadow_ensemble_acceptance.py
 src/okx_contract_signal_system.egg-info/PKG-INFO
 src/okx_contract_signal_system.egg-info/SOURCES.txt
