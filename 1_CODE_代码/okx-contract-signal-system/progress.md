@@ -716,3 +716,21 @@
 ### Safety boundary
 - H22 is an execution variant of the existing momentum family, not an independent Alpha and not an A-grade strategy.
 - Formal signals, Feishu formal-push gates, approved manifests, leverage, accounts, positions, and order paths are unchanged.
+
+## 2026-06-27 - Task: H23-H27 independent mechanism and diversification continuation
+### What was done
+- H23 static liquidity-risk premium was stopped before PnL. Its Amihud-style rank had a 0.9484 median correlation with inverse trailing quote-volume rank and mainly became a persistent long-small/short-BTC-ETH size sort. No residualization, exclusions, or threshold rescue was allowed.
+- H24 seven-day lottery-upside-concentration was frozen before PnL and then rejected. Base/stress PF were 1.0685/0.8474, stress return was -9.18%, stress maximum drawdown was 20.60%, random-time empirical p-value was 0.2255, and single-symbol positive contribution was 25.18%. The stronger five-day sensitivity result remained ineligible for post-result reselection.
+- H25 common-liquidity-shock premium was stopped before PnL. Rolling correlation and rolling-beta representations of the same mechanism had only 0.5552 median rank agreement, 0.3209 tenth-percentile agreement, and 48.37% same-side slot agreement, so the signal definition was not invariant enough to open returns.
+- H26 fixed 50/50 H22 plus v357 combination was frozen and evaluated. Daily return correlation was only 0.0514 and combined base/stress PF were 1.1974/1.0335, but base/stress maximum drawdown expanded to 29.52%/37.23% and maximum loss streaks worsened to 13/15 days. The combination was rejected without weight search, member removal, or risk-scale changes.
+- H23, H24, H25, and H26 were written to `C:\Users\26492\Desktop\失败策略` with Chinese failure summaries and structured results where available.
+- H27 forward diversification observation was frozen. It reads only the independent prospective H22 and v357 ledgers, does not backfill history, does not select weights, and measures future correlation, shared loss days, shared drawdowns, and worst common windows.
+- Added an isolated H27 observer under `HISTORY_PACKAGES_20260621/RESEARCH/h27_h22_v357_forward_diversification_observation_v1/`. Initial status is `RECORD_ONLY_SAMPLE_INCOMPLETE`: H22 closed observations 0, v357 closed trades 2, data-quality checks passing.
+### Current recovery point
+- Application version remains `3.56.27`; no formal runtime, signal, A-grade, Feishu, leverage, account, position, order, or approved-manifest logic changed.
+- Next resume sequence: inspect this final progress entry and `docs/PROJECT_OVERVIEW_CN.md`; verify Git status; refresh H22 and v357 ledgers; run the H27 observer; record only while sample gates are incomplete; then continue independent candidate intake from failure-family de-duplication and pre-PnL audit.
+- Do not rerun H23-H26 parameter variants, search H22/v357 portfolio weights, reopen rejected sensitivity neighbors, or open the sealed official holdout.
+### Documentation continuity rule
+- Every completed research test, failure archive, forward-track change, or next-step transition must update both `progress.md` and `docs/PROJECT_OVERVIEW_CN.md` in the same work cycle.
+- The two files must agree on version, active tracks, archived failures, sample state, prohibited rescue actions, and the single next recovery entry point.
+- Documentation-only continuity updates do not require an application version bump, but they must be committed and pushed so a new session can recover from GitHub without reconstructing state from chat history.
