@@ -85,6 +85,7 @@ docs/V3.56.13_RELEASE_CN.md
 docs/V3.56.14_RELEASE_CN.md
 docs/V3.56.15_RELEASE_CN.md
 docs/V3.56.16_RELEASE_CN.md
+docs/V3.56.17_RELEASE_CN.md
 gui.py
 hooks/hook-setuptools.py
 hooks/pyi_rth_custom.py

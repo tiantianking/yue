@@ -830,6 +830,21 @@ def test_lifecycle_migrates_legacy_json_to_sqlite(tmp_path) -> None:
         assert conn.execute("SELECT COUNT(*) FROM notification_outbox").fetchone()[0] == 1
 
 
+def test_gui_active_lifecycle_records_hide_terminal_history() -> None:
+    from gui import active_lifecycle_records
+
+    records = [
+        SimpleNamespace(signal_id="stopped", setup_state="CONFIRMED", outcome_state="STOP_REACHED"),
+        SimpleNamespace(signal_id="timeout", setup_state="CONFIRMED", outcome_state="TIMEOUT_RESULT"),
+        SimpleNamespace(signal_id="active", setup_state="CONFIRMED", outcome_state="ACTIVE"),
+        SimpleNamespace(signal_id="pending", setup_state="TRIGGERED", outcome_state="PENDING_ENTRY"),
+    ]
+
+    visible = active_lifecycle_records(records, limit=30)
+
+    assert [record.signal_id for record in visible] == ["active", "pending"]
+
+
 def test_gui_lifecycle_table_values_match_visible_columns(tmp_path) -> None:
     from gui import lifecycle_table_values
 

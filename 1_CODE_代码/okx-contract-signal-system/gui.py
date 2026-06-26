@@ -126,6 +126,18 @@ def lifecycle_table_values(rec) -> tuple[str, str, str, str, str, str, str, str]
     )
 
 
+def active_lifecycle_records(records, *, limit: int = 30):
+    """Return only non-terminal records for the current observation panel."""
+    terminal_outcomes = {"TARGET_REACHED", "STOP_REACHED", "TIMEOUT_RESULT", "CENSORED"}
+    active = [
+        record
+        for record in records
+        if record.setup_state in {"TRIGGERED", "CONFIRMED"}
+        and record.outcome_state not in terminal_outcomes
+    ]
+    return active[-max(0, int(limit)):]
+
+
 class GUILogHandler:
     """将日志输出到 GUI 文本框（兼容 logging.Handler 和 file-like 接口）"""
     def __init__(self, log_queue):
@@ -618,7 +630,7 @@ class OKXSignalGUI:
     
     def create_position_frame(self):
         """创建信号观察记录面板"""
-        pos_frame = ttk.LabelFrame(self.main_frame, text="信号观察记录（历史样本 / 风险参考）", padding=(8, 6))
+        pos_frame = ttk.LabelFrame(self.main_frame, text="当前有效信号观察", padding=(8, 6))
         pos_frame.pack(fill='x', pady=(0, 8))
 
         # 上方：观察记录表格
@@ -651,7 +663,7 @@ class OKXSignalGUI:
     def _refresh_position_table(self):
         """刷新观察记录表格"""
         try:
-            records = self._signal_lifecycle_store().records[-30:]
+            records = active_lifecycle_records(self._signal_lifecycle_store().records, limit=30)
 
             # 清空表格
             for item in self.pos_tree.get_children():
