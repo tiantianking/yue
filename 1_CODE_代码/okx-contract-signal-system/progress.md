@@ -754,3 +754,29 @@
 - Refresh H22 and v357, then H27, and record only until sample gates are due.
 - Before proposing any new Alpha, search `config/research_family_registry.json`, `MECHANISM_CANDIDATE_REGISTER_20260624.json`, Desktop failure archives and this progress log. Only a mechanism with a distinct payer, unique direction, causal observable fields, sufficient coverage and acceptable cost scale may proceed to a return-blind structural audit.
 - The independent candidate queue is currently empty; do not manufacture a candidate from the closed funding, downside-beta, liquidity, dispersion, option-directional-flow, momentum/reversal or price-pattern families.
+
+## 2026-06-27 - Task: v3.56.28 machine-enforced global failure-family deduplication
+### What was done
+- Refreshed H22, v357 and H27 before new intake work. Local closed data did not advance: H22 remains at zero fully prospective closed observations, v357 remains at two non-warmup closed trades under the H27 adapter, and H27 remains `RECORD_ONLY_SAMPLE_INCOMPLETE` with data quality passing.
+- Rechecked the direct local contract-data audit and the option-surface admission audit. OHLCV, volume, spot/perpetual, mark/index, signed trades, funding, options surface and the currently short native positioning fields have no unused admissible Alpha route under the frozen policy.
+- Identified the remaining process defect: `run_family_duplicate_gate` compared structured family signatures but did not machine-check registered historical aliases or the existing failure-fingerprint library. A renamed candidate could therefore reach implementation before a human found the duplicate.
+- Added exact historical alias rejection for candidate IDs registered under prior family names.
+- Added failure-fingerprint rejection using split mechanism tags. Underscore-connected terms now retain the full token and also expose component tokens, so `downside_market_beta`, `same_hour_seasonality` and similar relabels cannot hide their family.
+- Embedded 30 failure/data-ineligibility fingerprints in `config/research_family_registry.json`, covering price, momentum/reversal, breakout, liquidity, spot/perpetual, mark/index, order flow, funding, OI/leverage, liquidation, options, calendar, position ratios, trade-size, borrow, ADL, insurance fund, contract granularity, L2, cross-asset lead-lag, macro events, cross-venue, pair convergence and price-level/trend-pullback families.
+- Tightened source validation so a release fails if the registry contains fewer than 30 fingerprints.
+- Added regression tests for alias rejection, option-surface relabel rejection and a distinct-family non-rejection counterexample.
+- Bumped application/package metadata and release documentation to `3.56.28`; approved strategy remains `3.56.15` and strict research identity remains `v3.56-strict`.
+### Verification
+- Python compileall passed for source, entrypoints, tests and the unified checker.
+- Targeted research/candidate/release tests: 44 passed.
+- Full Python suite: 490 passed, 18 skipped only because `JIAOYI_DATA_DIR` is not configured, 0 failed.
+- Dashboard `npm run check` passed: lint, TypeScript, 21 Node tests and production build.
+- `scripts/system_check.py source` passed with 23 structured families and 30 failure fingerprints.
+- Counterexample checks confirmed downside-beta maps to `FP04_PRICE_PATH_RISK_FACTORS`, same-hour seasonality maps to `FP16_CALENDAR_INTRADAY`, and an unrelated validator-queue example maps to no fingerprint.
+- Built the v3.56.28 release ZIP and verified its SHA-256 sidecar after final documentation sync.
+### Safety boundary
+- This release changes research admission only. Formal signals, A-grade logic, Feishu delivery, leverage guidance, accounts, positions, orders and approved manifests are unchanged.
+- No new candidate PnL was opened and no failed family was rescued.
+### Current recovery point
+- Commit and push the reviewed v3.56.28 research-gate release after final diff and staged-scope checks.
+- After release, keep refreshing H22, v357 and H27. New Alpha implementation remains forbidden unless a genuinely new causal field with adequate point-in-time history passes structure, alias and fingerprint gates.

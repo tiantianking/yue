@@ -81,6 +81,28 @@ REQUIRED_RESEARCH_CHECKS = {
 MAX_FREE_PARAMETERS = 4
 MAX_PARAMETER_COMBINATIONS = 216
 MAX_FAMILY_SIMILARITY = 0.72
+MIN_FAILURE_FINGERPRINT_TAG_MATCHES = 2
+MIN_FAILURE_FINGERPRINT_COVERAGE = 0.25
+FINGERPRINT_GENERIC_TAGS = {
+    "asset",
+    "assets",
+    "cross_sectional",
+    "factor",
+    "market",
+    "okx",
+    "portfolio",
+    "price",
+    "rank",
+    "return",
+    "returns",
+    "signal",
+    "strategy",
+    "swap",
+    "symbol",
+    "symbols",
+    "time_series",
+    "usdt",
+}
 MAX_SYMBOL_CONTRIBUTION = 0.25
 MAX_MONTH_CONTRIBUTION = 0.35
 MAX_SINGLE_TRADE_CONTRIBUTION = 0.25
@@ -497,8 +519,19 @@ def run_source_audit() -> list[CheckResult]:
     try:
         registry = _json_mapping(registry_path)
         registry_families = registry.get("families", [])
-        registry_ok = registry.get("schema") == "okx_research_family_registry_v1" and isinstance(registry_families, list) and len(registry_families) >= 3
-        registry_detail = f"schema={registry.get('schema')} families={len(registry_families) if isinstance(registry_families, list) else 0}"
+        registry_fingerprints = registry.get("failure_fingerprints", [])
+        registry_ok = (
+            registry.get("schema") == "okx_research_family_registry_v1"
+            and isinstance(registry_families, list)
+            and len(registry_families) >= 3
+            and isinstance(registry_fingerprints, list)
+            and len(registry_fingerprints) >= 30
+        )
+        registry_detail = (
+            f"schema={registry.get('schema')} "
+            f"families={len(registry_families) if isinstance(registry_families, list) else 0} "
+            f"fingerprints={len(registry_fingerprints) if isinstance(registry_fingerprints, list) else 0}"
+        )
     except Exception as exc:
         registry_ok = False
         registry_detail = str(exc)
@@ -736,9 +769,20 @@ def family_fingerprint(family: dict[str, Any]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _text_tokens(value: Any) -> set[str]:
+    text = json.dumps(_normalise_family_value(value), ensure_ascii=False)
+    tokens: set[str] = set()
+    for raw_token in re.findall(r"[a-z0-9_]+|[\u4e00-\u9fff]+", text.lower()):
+        if len(raw_token) > 1:
+            tokens.add(raw_token)
+        for part in raw_token.split("_"):
+            if len(part) > 1:
+                tokens.add(part)
+    return tokens
+
+
 def _family_tokens(family: dict[str, Any]) -> set[str]:
-    text = json.dumps(_normalise_family_value(family), ensure_ascii=False)
-    return {token for token in re.findall(r"[a-z0-9_]+|[\u4e00-\u9fff]+", text.lower()) if len(token) > 1}
+    return _text_tokens(family)
 
 
 def _family_similarity(left: dict[str, Any], right: dict[str, Any]) -> float:
@@ -769,6 +813,89 @@ def _family_similarity(left: dict[str, Any], right: dict[str, Any]) -> float:
     if union:
         score += 0.15 * (len(left_tokens & right_tokens) / len(union))
     return min(1.0, score)
+
+
+def _normalised_identifier(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
+
+
+def _registry_alias_duplicates(candidate: dict[str, Any], registry_path: Path) -> list[str]:
+    if not registry_path.is_file():
+        return []
+    registry = _json_mapping(registry_path)
+    candidate_id = _normalised_identifier(candidate.get("candidate_id"))
+    if not candidate_id:
+        return []
+    matches: list[str] = []
+    rows = registry.get("families", [])
+    if not isinstance(rows, list):
+        return []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        identifiers = [row.get("family_id"), row.get("candidate_id")]
+        aliases = row.get("aliases", [])
+        if isinstance(aliases, list):
+            identifiers.extend(aliases)
+        normalised = {_normalised_identifier(item) for item in identifiers if item}
+        if candidate_id in normalised:
+            matches.append(str(row.get("family_id") or row.get("candidate_id") or candidate_id))
+    return sorted(set(matches))
+
+
+def _tag_matches(candidate_tokens: set[str], tag: str) -> bool:
+    normalised = _normalised_identifier(tag)
+    if not normalised:
+        return False
+    if normalised in candidate_tokens:
+        return True
+    parts = {part for part in normalised.split("_") if len(part) > 1}
+    return bool(parts) and parts.issubset(candidate_tokens)
+
+
+def _failure_fingerprint_matches(
+    family: dict[str, Any],
+    registry_path: Path,
+) -> list[tuple[str, float, tuple[str, ...]]]:
+    if not registry_path.is_file():
+        return []
+    registry = _json_mapping(registry_path)
+    rows = registry.get("failure_fingerprints", [])
+    if not isinstance(rows, list):
+        return []
+    candidate_tokens = _family_tokens(family)
+    matches: list[tuple[str, float, tuple[str, ...]]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        tags = row.get("tags", [])
+        if not isinstance(tags, list):
+            continue
+        distinctive_tags = [
+            str(tag)
+            for tag in tags
+            if _normalised_identifier(tag)
+            and _normalised_identifier(tag) not in FINGERPRINT_GENERIC_TAGS
+        ]
+        matched_tags = tuple(
+            sorted(tag for tag in distinctive_tags if _tag_matches(candidate_tokens, tag))
+        )
+        coverage = len(matched_tags) / max(1, len(distinctive_tags))
+        family_key = _normalised_identifier(row.get("family_key"))
+        exact_key_match = bool(family_key and family_key in candidate_tokens)
+        duplicate = exact_key_match or (
+            len(matched_tags) >= MIN_FAILURE_FINGERPRINT_TAG_MATCHES
+            and coverage >= MIN_FAILURE_FINGERPRINT_COVERAGE
+        )
+        if duplicate:
+            matches.append(
+                (
+                    str(row.get("fingerprint_id") or row.get("family_key") or "failure_fingerprint"),
+                    coverage,
+                    matched_tags,
+                )
+            )
+    return sorted(matches, key=lambda item: (item[1], len(item[2]), item[0]), reverse=True)
 
 
 def _load_family_references(
@@ -845,6 +972,15 @@ def run_family_duplicate_gate(
     )
     top_id, top_score = similarities[0] if similarities else ("none", 0.0)
     duplicates = [(reference_id, score) for reference_id, score in similarities if score >= MAX_FAMILY_SIMILARITY]
+    alias_duplicates = _registry_alias_duplicates(candidate, registry_path)
+    fingerprint_duplicates = _failure_fingerprint_matches(family, registry_path)
+    fingerprint_detail = "none"
+    if fingerprint_duplicates:
+        fingerprint_id, coverage, matched_tags = fingerprint_duplicates[0]
+        fingerprint_detail = (
+            f"top={fingerprint_id} coverage={coverage:.4f} "
+            f"matched={list(matched_tags)} matches={len(fingerprint_duplicates)}"
+        )
     return [
         CheckResult("research", "family_signature_complete", True, family_fingerprint(family)),
         CheckResult(
@@ -852,6 +988,18 @@ def run_family_duplicate_gate(
             "automatic_family_deduplication",
             not duplicates,
             f"top={top_id}:{top_score:.4f} threshold={MAX_FAMILY_SIMILARITY:.2f} references={len(references)}",
+        ),
+        CheckResult(
+            "research",
+            "registered_family_alias_deduplication",
+            not alias_duplicates,
+            ", ".join(alias_duplicates) if alias_duplicates else "none",
+        ),
+        CheckResult(
+            "research",
+            "failure_fingerprint_deduplication",
+            not fingerprint_duplicates,
+            fingerprint_detail,
         ),
     ]
 

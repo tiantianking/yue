@@ -97,6 +97,137 @@ def test_family_registry_automatically_rejects_duplicate(tmp_path: Path) -> None
     assert "known" in dedupe.detail
 
 
+def test_registered_alias_rejects_relabelled_historical_candidate(tmp_path: Path) -> None:
+    module = _load_system_check()
+    registry = tmp_path / "registry.json"
+    registry.write_text(
+        json.dumps(
+            {
+                "families": [
+                    {
+                        "family_id": "MC02_DOWNSIDE_BETA_ASYMMETRY_PREMIUM",
+                        "aliases": ["H28_42D_DOWNSIDE_MARKET_BETA_ASYMMETRY_PREMIUM_V1"],
+                        "family": {
+                            "core_signal": "downside_beta",
+                            "direction": "long_high_bad_beta",
+                            "selection": "weekly_extremes",
+                            "universe": "okx_swaps",
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    family = {
+        "core_signal": "renamed_downside_covariance_score",
+        "direction": "long_high_score_short_low_score",
+        "holding_period_bars": 168,
+        "selection": "weekly_cross_sectional_extremes",
+        "universe": "okx_usdt_swap_cross_section",
+    }
+    candidate = {
+        "candidate_id": "H28_42D_DOWNSIDE_MARKET_BETA_ASYMMETRY_PREMIUM_V1",
+        "family": family,
+    }
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+
+    results = module.run_family_duplicate_gate(candidate, candidate_path, registry_path=registry)
+
+    alias_gate = next(item for item in results if item.name == "registered_family_alias_deduplication")
+    assert alias_gate.ok is False
+    assert "MC02_DOWNSIDE_BETA_ASYMMETRY_PREMIUM" in alias_gate.detail
+
+
+def test_failure_fingerprint_rejects_option_surface_relabel(tmp_path: Path) -> None:
+    module = _load_system_check()
+    registry = tmp_path / "registry.json"
+    registry.write_text(
+        json.dumps(
+            {
+                "families": [],
+                "failure_fingerprints": [
+                    {
+                        "fingerprint_id": "FP15_OPTION_SURFACE_DIRECTION",
+                        "family_key": "option_surface_direction",
+                        "tags": [
+                            "options",
+                            "implied_volatility",
+                            "skew",
+                            "term_structure",
+                            "gamma",
+                            "dealer_hedging",
+                            "surface",
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    family = {
+        "core_signal": "transaction_implied_volatility_skew_from_options_surface",
+        "direction": "short_underlying_when_put_skew_steepens",
+        "holding_period_bars": 16,
+        "selection": "market_level_skew_extreme",
+        "universe": "btc_eth_options_to_okx_perpetual",
+        "features": ["options", "implied_volatility", "skew", "surface"],
+    }
+    candidate = {"candidate_id": "renamed-option-skew", "family": family}
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+
+    results = module.run_family_duplicate_gate(candidate, candidate_path, registry_path=registry)
+
+    fingerprint_gate = next(item for item in results if item.name == "failure_fingerprint_deduplication")
+    assert fingerprint_gate.ok is False
+    assert "FP15_OPTION_SURFACE_DIRECTION" in fingerprint_gate.detail
+    assert "implied_volatility" in fingerprint_gate.detail
+
+
+def test_failure_fingerprint_allows_distinct_mechanism(tmp_path: Path) -> None:
+    module = _load_system_check()
+    registry = tmp_path / "registry.json"
+    registry.write_text(
+        json.dumps(
+            {
+                "families": [],
+                "failure_fingerprints": [
+                    {
+                        "fingerprint_id": "FP11_FUNDING_CARRY_CROWDING",
+                        "family_key": "funding_carry",
+                        "tags": ["funding", "carry", "persistence", "crowding", "settlement"],
+                    },
+                    {
+                        "fingerprint_id": "FP16_CALENDAR_INTRADAY",
+                        "family_key": "calendar_intraday",
+                        "tags": ["calendar", "utc", "hour", "weekday", "seasonality", "same_hour"],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    family = {
+        "core_signal": "validator_exit_queue_acceleration",
+        "direction": "long_queue_relief_short_queue_stress",
+        "holding_period_bars": 168,
+        "selection": "fixed_threshold_event",
+        "universe": "staking_assets",
+        "features": ["validator_queue", "staking_withdrawal"],
+    }
+    candidate = {"candidate_id": "distinct-mechanism", "family": family}
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+
+    results = module.run_family_duplicate_gate(candidate, candidate_path, registry_path=registry)
+
+    fingerprint_gate = next(item for item in results if item.name == "failure_fingerprint_deduplication")
+    assert fingerprint_gate.ok is True
+    assert fingerprint_gate.detail == "none"
+
+
 def test_contribution_metrics_detect_few_trade_concentration() -> None:
     module = _load_system_check()
     trades = pd.DataFrame(

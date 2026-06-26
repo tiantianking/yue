@@ -1,6 +1,6 @@
 {
   "schema": "okx_research_family_registry_v1",
-  "updated_at": "2026-06-26T18:15:00Z",
+  "updated_at": "2026-06-26T18:30:00Z",
   "families": [
     {
       "family_id": "14_day_cross_sectional_momentum",
@@ -305,6 +305,159 @@
         "universe": "existing_independent_shadow_ledgers",
         "features": ["H22", "V357", "fixed_weight", "portfolio_diversification"]
       }
+    }
+  ],
+  "failure_fingerprint_library_id": "FAILED_FAMILY_MACHINE_LIBRARY_V3_20260627",
+  "failure_fingerprints": [
+    {
+      "fingerprint_id": "FP01_CROSS_SECTIONAL_MOMENTUM",
+      "family_key": "cross_sectional_momentum",
+      "tags": ["price", "cross_sectional", "rank", "continuation", "momentum", "winner_loser", "path_filter"]
+    },
+    {
+      "fingerprint_id": "FP02_CROSS_SECTIONAL_REVERSAL",
+      "family_key": "cross_sectional_reversal",
+      "tags": ["price", "cross_sectional", "rank", "reversal", "overreaction", "loser_winner", "short_horizon"]
+    },
+    {
+      "fingerprint_id": "FP03_BREAKOUT_COMPRESSION",
+      "family_key": "breakout_compression",
+      "tags": ["price", "volatility", "compression", "breakout", "donchian", "atr", "continuation"]
+    },
+    {
+      "fingerprint_id": "FP04_PRICE_PATH_RISK_FACTORS",
+      "family_key": "price_path_risk_factor",
+      "tags": ["price", "volatility", "skew", "tail", "downside", "beta", "jump", "risk_premium"]
+    },
+    {
+      "fingerprint_id": "FP05_VOLUME_LIQUIDITY",
+      "family_key": "volume_liquidity",
+      "tags": ["volume", "quote_volume", "liquidity", "illiquidity", "activity", "zero_return", "elasticity"]
+    },
+    {
+      "fingerprint_id": "FP06_SPOT_PERP_RELATIVE",
+      "family_key": "spot_perp_relative",
+      "tags": ["spot", "perpetual", "basis", "relative_price", "relative_volume", "lead_lag", "convergence"]
+    },
+    {
+      "fingerprint_id": "FP07_MARK_INDEX_DEVIATION",
+      "family_key": "mark_index_deviation",
+      "tags": ["mark", "index", "perpetual", "premium", "deviation", "convergence", "liquidation_proxy"]
+    },
+    {
+      "fingerprint_id": "FP08_ORDERFLOW_CONTINUATION",
+      "family_key": "orderflow_continuation",
+      "tags": ["signed_trades", "aggressive_flow", "continuation", "orderflow", "trade_side", "persistence"]
+    },
+    {
+      "fingerprint_id": "FP09_ORDERFLOW_ABSORPTION",
+      "family_key": "orderflow_absorption",
+      "tags": ["signed_trades", "aggressive_flow", "absorption", "reversal", "orderflow", "price_response"]
+    },
+    {
+      "fingerprint_id": "FP10_CROSS_ORDERFLOW",
+      "family_key": "cross_orderflow",
+      "tags": ["signed_trades", "cross_symbol", "lead_lag", "diffusion", "orderflow", "propagation"]
+    },
+    {
+      "fingerprint_id": "FP11_FUNDING_CARRY_CROWDING",
+      "family_key": "funding_carry",
+      "tags": ["funding", "carry", "persistence", "crowding", "cross_sectional", "time_series", "settlement"]
+    },
+    {
+      "fingerprint_id": "FP12_OPEN_INTEREST_LEVERAGE_PROXY",
+      "family_key": "open_interest_leverage",
+      "tags": ["open_interest", "leverage", "crowding", "price", "continuation", "reversal", "deleveraging"]
+    },
+    {
+      "fingerprint_id": "FP13_LIQUIDATION_PROXY",
+      "family_key": "liquidation_flow",
+      "tags": ["liquidation", "forced_flow", "deleveraging", "continuation", "exhaustion", "reversal", "price_shock"]
+    },
+    {
+      "fingerprint_id": "FP14_OPTION_DIRECTIONAL_FLOW",
+      "family_key": "option_directional_flow",
+      "tags": ["options", "trade_side", "call_put", "premium_flow", "delta_weight", "directional_demand"]
+    },
+    {
+      "fingerprint_id": "FP15_OPTION_SURFACE_DIRECTION",
+      "family_key": "option_surface_direction",
+      "tags": ["options", "implied_volatility", "skew", "term_structure", "gamma", "dealer_hedging", "surface"]
+    },
+    {
+      "fingerprint_id": "FP16_CALENDAR_INTRADAY",
+      "family_key": "calendar_intraday",
+      "tags": ["calendar", "utc", "hour", "weekday", "seasonality", "same_hour", "boundary"]
+    },
+    {
+      "fingerprint_id": "FP17_LARGE_TRADE_FLOW",
+      "family_key": "large_trade_flow",
+      "tags": ["large_trade", "block_trade", "trade_side", "orderflow", "hedging", "continuation"]
+    },
+    {
+      "fingerprint_id": "FP18_POSITION_RATIO_CROWDING",
+      "family_key": "position_ratio_crowding",
+      "tags": ["long_short_ratio", "top_trader", "position_ratio", "account_ratio", "average_position_size", "crowding", "positioning", "hedging", "reversal", "continuation"]
+    },
+    {
+      "fingerprint_id": "FP19_TRADE_SIZE_ASYMMETRY",
+      "family_key": "trade_size_asymmetry",
+      "tags": ["size_distribution", "signed_trades", "institutional_execution", "trade_side", "large_trade", "small_trade"]
+    },
+    {
+      "fingerprint_id": "FP20_MULTI_SCALE_TRADE_RESPONSE",
+      "family_key": "multi_scale_trade_response",
+      "tags": ["multi_scale", "size_distribution", "price_response", "information_flow", "signed_trades", "trade_size"]
+    },
+    {
+      "fingerprint_id": "FP21_BORROW_DEMAND",
+      "family_key": "borrow_demand",
+      "tags": ["borrow_rate", "utilization", "leverage", "carry", "crowding", "reversal"]
+    },
+    {
+      "fingerprint_id": "FP22_ADL_PRESSURE",
+      "family_key": "adl_pressure",
+      "tags": ["adl", "forced_deleveraging", "bankruptcy", "positioning", "insurance", "deleveraging"]
+    },
+    {
+      "fingerprint_id": "FP23_INSURANCE_FUND_PRESSURE",
+      "family_key": "insurance_fund_pressure",
+      "tags": ["insurance_fund", "bankruptcy", "tail_risk", "systemic_risk", "liquidation", "deleveraging"]
+    },
+    {
+      "fingerprint_id": "FP24_INSTRUMENT_GRANULARITY",
+      "family_key": "instrument_granularity",
+      "tags": ["tick_size", "lot_size", "market_design", "liquidity", "minimum_notional", "contract_metadata"]
+    },
+    {
+      "fingerprint_id": "FP25_L2_QUEUE_IMBALANCE",
+      "family_key": "l2_queue_imbalance",
+      "tags": ["l2", "queue_imbalance", "depth", "microstructure", "order_book", "queue_pressure"]
+    },
+    {
+      "fingerprint_id": "FP26_CROSS_ASSET_PRICE_LEAD_LAG",
+      "family_key": "cross_asset_price_lead_lag",
+      "tags": ["btc_eth", "leader_follower", "cross_asset", "lead_lag", "catch_up", "underreaction", "information_diffusion"]
+    },
+    {
+      "fingerprint_id": "FP27_MACRO_EVENT_DIFFUSION",
+      "family_key": "macro_event_diffusion",
+      "tags": ["macro_event", "fomc", "announcement", "diffusion", "delayed_reaction", "calendar", "event_study"]
+    },
+    {
+      "fingerprint_id": "FP28_CROSS_VENUE_CONSENSUS",
+      "family_key": "cross_venue_consensus",
+      "tags": ["cross_venue", "exchange", "consensus", "lead_lag", "price_discovery", "arbitrage", "multi_exchange"]
+    },
+    {
+      "fingerprint_id": "FP29_PAIR_CONVERGENCE",
+      "family_key": "pair_convergence",
+      "tags": ["pair", "spread", "cointegration", "convergence", "relative_value", "mean_reversion", "residual_spread"]
+    },
+    {
+      "fingerprint_id": "FP30_PRICE_LEVEL_RETEST_AND_TREND_PULLBACK",
+      "family_key": "price_level_retest_and_trend_pullback",
+      "tags": ["support_resistance", "retest", "pullback", "trend", "moving_average", "momentum_reset", "ema", "continuation"]
     }
   ]
 }
