@@ -28,6 +28,10 @@ if str(SRC_ROOT) not in sys.path:
 from okx_signal_system import __version__
 from okx_signal_system.config import env_bool, load_config
 from okx_signal_system.research.approved_strategy_manifest import load_approved_manifest_status
+from okx_signal_system.research.robustness_screen import (
+    evaluate_robustness_screen,
+    frozen_protocol_ok,
+)
 
 
 @dataclass(frozen=True)
@@ -845,6 +849,9 @@ def run_candidate_gate(candidate_path: Path, *, registry_path: Path = DEFAULT_FA
     data = candidate.get("data") if isinstance(candidate.get("data"), dict) else {}
     leakage = candidate.get("leakage") if isinstance(candidate.get("leakage"), dict) else {}
     parameter_audit = audit_parameter_space(candidate)
+    robustness_protocol_ok, robustness_protocol_detail = frozen_protocol_ok(
+        candidate.get("robustness_protocol")
+    )
 
     results = [
         CheckResult("research", "candidate_schema_v2", candidate.get("schema") == "okx_pre_pnl_candidate_v2", str(candidate.get("schema"))),
@@ -867,6 +874,12 @@ def run_candidate_gate(candidate_path: Path, *, registry_path: Path = DEFAULT_FA
             "automatic_parameter_freedom",
             parameter_audit.bounded,
             f"free={parameter_audit.free_parameters}/{MAX_FREE_PARAMETERS} combinations={parameter_audit.combinations}/{MAX_PARAMETER_COMBINATIONS} problems={list(parameter_audit.problems)}",
+        ),
+        CheckResult(
+            "research",
+            "robustness_protocol_frozen",
+            robustness_protocol_ok,
+            robustness_protocol_detail,
         ),
         CheckResult("research", "representation_invariance_passed", candidate.get("representation_invariance_passed") is True, str(candidate.get("representation_invariance_passed"))),
         CheckResult("research", "measurement_semantics_passed", candidate.get("measurement_semantics_passed") is True, str(candidate.get("measurement_semantics_passed"))),
@@ -1051,7 +1064,11 @@ def execute_cost_stress(artifact_dir: Path) -> tuple[list[CheckResult], pd.DataF
     ], stress
 
 
-def run_artifact_gate(artifact_dir: Path) -> list[CheckResult]:
+def run_artifact_gate(
+    artifact_dir: Path,
+    *,
+    candidate: dict[str, Any] | None = None,
+) -> list[CheckResult]:
     results: list[CheckResult] = []
     required = {
         "acceptance_checklist.csv",
@@ -1121,6 +1138,23 @@ def run_artifact_gate(artifact_dir: Path) -> list[CheckResult]:
     candidate_payload = _json_mapping(artifact_dir / "candidate_params.json")
     results.append(CheckResult("research", "formal_candidate_type", candidate_payload.get("artifact_type") == "strict_research_candidate", str(candidate_payload.get("artifact_type"))))
     results.append(CheckResult("research", "promotion_requires_manual_gate", candidate_payload.get("promotion_eligible") is True, str(candidate_payload.get("promotion_eligible"))))
+
+    robustness_report = evaluate_robustness_screen(
+        artifact_dir,
+        protocol=(candidate or {}).get("robustness_protocol"),
+    )
+    _write_json_atomic(artifact_dir / "robustness_screen.json", robustness_report)
+    for item in robustness_report.get("checks", []):
+        if not isinstance(item, dict):
+            continue
+        results.append(
+            CheckResult(
+                "research",
+                str(item.get("name") or "robustness_screen_check"),
+                item.get("ok") is True,
+                str(item.get("detail") or ""),
+            )
+        )
     return results
 
 
@@ -1590,7 +1624,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         if args.artifacts is not None:
-            results.extend(run_artifact_gate(args.artifacts))
+            results.extend(run_artifact_gate(args.artifacts, candidate=candidate_payload))
         report_payload = {
             "schema": "okx_research_gate_report_v2",
             "generated_at": datetime.now(timezone.utc).isoformat(),

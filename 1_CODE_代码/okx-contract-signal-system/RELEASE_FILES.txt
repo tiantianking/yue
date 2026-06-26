@@ -61,6 +61,7 @@ deployment/systemd/okx-signal.service
 docs/DEPLOYMENT_CHECKLIST_CN.md
 docs/PARALLEL_FORWARD_ACCEPTANCE_CN.md
 docs/RELEASE_SAFETY.md
+docs/RESEARCH_ROBUSTNESS_SCREEN_CN.md
 docs/RUNTIME_VERIFICATION.md
 docs/SYSTEM_ARCHITECTURE.md
 docs/V3.56.7_DESKTOP_RUNTIME_FIX_CN.md
@@ -87,6 +88,7 @@ docs/V3.56.15_RELEASE_CN.md
 docs/V3.56.16_RELEASE_CN.md
 docs/V3.56.17_RELEASE_CN.md
 docs/V3.56.18_RELEASE_CN.md
+docs/V3.56.19_RELEASE_CN.md
 gui.py
 hooks/hook-setuptools.py
 hooks/pyi_rth_custom.py
@@ -140,6 +142,7 @@ src/okx_signal_system/research/__init__.py
 src/okx_signal_system/research/approved_strategy_manifest.py
 src/okx_signal_system/research/parallel_acceptance.py
 src/okx_signal_system/research/promote.py
+src/okx_signal_system/research/robustness_screen.py
 src/okx_signal_system/research/shadow_ensemble_acceptance.py
 src/okx_signal_system/risk/__init__.py
 src/okx_signal_system/risk/costs.py

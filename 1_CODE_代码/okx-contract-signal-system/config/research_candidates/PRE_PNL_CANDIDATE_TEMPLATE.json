@@ -43,6 +43,21 @@
   },
   "representation_invariance_passed": false,
   "measurement_semantics_passed": false,
+  "robustness_protocol": {
+    "schema": "okx_robustness_screen_protocol_v1",
+    "random_time_trials": 500,
+    "random_time_alpha": 0.05,
+    "entry_delay_bars": 1,
+    "minimum_neighbor_variants": 3,
+    "minimum_positive_neighbor_ratio": 0.6666666666666666,
+    "portfolio_increment_required": true,
+    "locked_before_pnl": true,
+    "evidence_files": [
+      "falsification_trials.csv",
+      "parameter_neighborhood.csv",
+      "portfolio_increment.csv"
+    ]
+  },
   "leakage": {
     "future_returns_opened": false,
     "pnl_opened": false,

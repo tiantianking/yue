@@ -18,6 +18,7 @@ config/shadow_ensemble.yaml
 docs/DEPLOYMENT_CHECKLIST_CN.md
 docs/PARALLEL_FORWARD_ACCEPTANCE_CN.md
 docs/RELEASE_SAFETY.md
+docs/RESEARCH_ROBUSTNESS_SCREEN_CN.md
 docs/RUNTIME_VERIFICATION.md
 docs/SYSTEM_ARCHITECTURE.md
 docs/V3.56.3_RUNTIME_CACHE_INTEGRATION_CN.md
@@ -44,6 +45,7 @@ docs/V3.56.15_RELEASE_CN.md
 docs/V3.56.16_RELEASE_CN.md
 docs/V3.56.17_RELEASE_CN.md
 docs/V3.56.18_RELEASE_CN.md
+docs/V3.56.19_RELEASE_CN.md
 pyproject.toml
 requirements.lock
 requirements.txt
@@ -102,6 +104,7 @@ src/okx_signal_system/research/__init__.py
 src/okx_signal_system/research/approved_strategy_manifest.py
 src/okx_signal_system/research/parallel_acceptance.py
 src/okx_signal_system/research/promote.py
+src/okx_signal_system/research/robustness_screen.py
 src/okx_signal_system/research/shadow_ensemble_acceptance.py
 src/okx_signal_system/risk/__init__.py
 src/okx_signal_system/risk/costs.py
@@ -160,6 +163,7 @@ tests/test_shadow_ensemble_acceptance.py
 tests/test_realtime_research_isolation.py
 tests/test_release_safety.py
 tests/test_research_automation.py
+tests/test_robustness_screen.py
 tests/test_reporting_signal.py
 tests/test_scheduler_notifications.py
 tests/test_shadow_trading.py
