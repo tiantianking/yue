@@ -1,0 +1,39 @@
+{
+  "schema": "okx_forward_diversification_observation_status_v1",
+  "protocol_id": "H27_H22_V357_FORWARD_DIVERSIFICATION_OBSERVATION_V1",
+  "generated_at_utc": "2026-06-26T17:28:39.363734Z",
+  "closed_data_through_utc": "2026-06-26T12:00:00+00:00",
+  "elapsed_calendar_days": 0,
+  "h22_closed_observations": 0,
+  "v357_closed_trades": 2,
+  "minimum_due": false,
+  "preferred_due": false,
+  "decision": "RECORD_ONLY_SAMPLE_INCOMPLETE",
+  "all_pass": null,
+  "statistics": {
+    "common_daily_rows": 1,
+    "base_pearson": null,
+    "base_spearman": null,
+    "stress_pearson": null,
+    "stress_spearman": null,
+    "both_loss_day_fraction": 0.0,
+    "h22_loss_days_shared_by_v357": null,
+    "v357_loss_days_shared_by_h22": null,
+    "top_five_joint_loss_share": null,
+    "worst_common_10_day_base_return": null,
+    "worst_common_20_day_base_return": null
+  },
+  "checks": {
+    "data_quality": true,
+    "base_correlation": false,
+    "stress_correlation": false,
+    "h22_shared_loss_fraction": false,
+    "v357_shared_loss_fraction": false,
+    "top_five_joint_loss_share": false
+  },
+  "production_effect": "NONE",
+  "formal_signal_effect": "NONE",
+  "weight_selection_allowed": false,
+  "automatic_ordering": false,
+  "automatic_promotion": false
+}

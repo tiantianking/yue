@@ -1,0 +1,59 @@
+{
+  "schema": "okx_forward_diversification_observation_protocol_v1",
+  "protocol_id": "H27_H22_V357_FORWARD_DIVERSIFICATION_OBSERVATION_V1",
+  "frozen_at_utc": "2026-06-26T17:12:00Z",
+  "status": "FORWARD_OBSERVATION_ONLY",
+  "purpose": "Measure whether H22 and the existing v357 shadow remain genuinely diversifying in fully prospective evidence after the frozen 50/50 historical combination failed its drawdown gates.",
+  "components": {
+    "h22": "MOMENTUM_14D_STAGGERED_3X3_REFRESH_HYSTERESIS6_V1",
+    "v357": "v357-shadow-donchian-slow-plus-vcb-a"
+  },
+  "observation_start": "No evidence before the H22 registration at 2026-06-26T16:12:35Z may be counted.",
+  "data_rules": {
+    "h22": "Use only closed fully prospective daily aggregate observations from its independent forward ledger.",
+    "v357": "Use only non-warmup closed fully prospective trades from its independent SQLite-derived forward ledger, normalized using the already frozen 0.5 percent portfolio-risk convention and aggregated by UTC day.",
+    "common_day_definition": "A UTC day beginning at 04:00 UTC after H22 registration. A component with no closed return on a day contributes zero for correlation observation, but missing or unhealthy data days are excluded rather than filled.",
+    "costs": "Use each component's existing base and stress forward cost definitions without modification.",
+    "historical_backfill": false
+  },
+  "minimum_evidence": {
+    "calendar_days": 60,
+    "h22_closed_observations": 50,
+    "v357_closed_trades": 30,
+    "preferred_calendar_days": 90,
+    "preferred_h22_closed_observations": 80,
+    "preferred_v357_closed_trades": 50
+  },
+  "statistics_only": [
+    "base and stress daily Pearson correlation",
+    "base and stress daily Spearman rank correlation",
+    "fraction of days both components lose",
+    "fraction of each component loss days shared by the other component",
+    "fraction of days both components are below their own running equity peak",
+    "worst common 10-day and 20-day net-return windows",
+    "top five joint-loss days share of total joint losses"
+  ],
+  "review_conditions": {
+    "maximum_absolute_base_daily_correlation": 0.3,
+    "maximum_absolute_stress_daily_correlation": 0.4,
+    "maximum_shared_loss_day_fraction_of_either_component": 0.5,
+    "maximum_top_five_joint_loss_share": 0.5,
+    "minimum_data_quality": "all source integrity and snapshot-chain checks pass"
+  },
+  "decision_scope": {
+    "pass": "DIVERSIFICATION_EVIDENCE_WORTH_NEW_PRE_REGISTERED_COMBINATION_RESEARCH",
+    "fail": "KEEP_TRACKS_INDEPENDENT_NO_COMBINATION_RESEARCH",
+    "not_allowed": [
+      "compute or select a portfolio weight",
+      "backfill historical returns",
+      "change H22 or v357 rules",
+      "promote either component",
+      "send formal A-grade signals",
+      "place or manage orders"
+    ]
+  },
+  "production_effect": "NONE",
+  "formal_signal_effect": "NONE",
+  "automatic_ordering": false,
+  "automatic_promotion": false
+}

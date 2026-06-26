@@ -1,6 +1,6 @@
 {
   "schema": "okx_research_family_registry_v1",
-  "updated_at": "2026-06-26T15:10:00Z",
+  "updated_at": "2026-06-26T18:15:00Z",
   "families": [
     {
       "family_id": "14_day_cross_sectional_momentum",
@@ -151,6 +151,159 @@
         "selection": "top4_entry_top6_exit_refresh_every_three_utc_days",
         "universe": "okx_usdt_swap_18_symbol_funding_complete_cross_section",
         "features": ["closed_return", "cross_sectional_rank", "hysteresis", "fixed_calendar_cadence", "low_turnover_execution", "observed_funding_cashflow"]
+      }
+    },
+    {
+      "family_id": "MC01_CROSS_SECTIONAL_ILLIQUIDITY_RISK_PREMIUM",
+      "aliases": ["H23_STATIC_LIQUIDITY_RISK_PREMIUM"],
+      "status": "rejected_before_pnl_no_rescue",
+      "failure_reason": "Return-blind audits were dominated by persistent small-versus-large contract exposure and breached the frozen single-symbol concentration gate.",
+      "family": {
+        "core_signal": "lagged_return_per_quote_volume_or_static_liquidity_rank",
+        "direction": "long_less_liquid_short_more_liquid",
+        "selection": "cross_sectional_extremes",
+        "universe": "okx_usdt_swap_mature_cross_section",
+        "features": ["quote_volume", "amihud_proxy", "liquidity_level", "size_sort"]
+      }
+    },
+    {
+      "family_id": "MC02_DOWNSIDE_BETA_ASYMMETRY_PREMIUM",
+      "aliases": ["H28_42D_DOWNSIDE_MARKET_BETA_ASYMMETRY_PREMIUM_V1"],
+      "status": "rejected_before_pnl_duplicate_no_rescue",
+      "failure_reason": "The original MC02 audit duplicated plain beta and idiosyncratic skewness and concentrated BTC; the later H28 re-audit also failed representation invariance and H19 overlap. H28 is duplicate confirmation, not a new family.",
+      "family": {
+        "core_signal": "downside_market_beta_minus_upside_market_beta",
+        "direction": "long_high_bad_beta_short_low_bad_beta",
+        "selection": "weekly_cross_sectional_extremes",
+        "universe": "okx_usdt_swap_mature_cross_section",
+        "features": ["downside_beta", "upside_beta", "market_drawdown_exposure", "bad_beta"]
+      }
+    },
+    {
+      "family_id": "MC03_SYSTEMATIC_LIQUIDITY_SHOCK_EXPOSURE_PREMIUM",
+      "aliases": ["H25_COMMON_LIQUIDITY_SHOCK_PREMIUM"],
+      "status": "rejected_before_pnl_duplicate_no_rescue",
+      "failure_reason": "The exposure ranking overlapped downside beta and plain beta above the frozen 25 percent same-side limit; OHLCV liquidity proxies cannot justify a new family.",
+      "family": {
+        "core_signal": "asset_exposure_to_common_liquidity_deterioration",
+        "direction": "long_high_bad_liquidity_exposure_short_low",
+        "selection": "weekly_cross_sectional_extremes",
+        "universe": "okx_usdt_swap_mature_cross_section",
+        "features": ["quote_volume", "price_impact_proxy", "common_liquidity_shock", "rolling_beta"]
+      }
+    },
+    {
+      "family_id": "MC04_MAX_RETURN_LOTTERY_DEMAND_REVERSAL",
+      "aliases": ["H24_7D_LOTTERY_UPSIDE_CONCENTRATION_V1"],
+      "status": "rejected_no_rescue",
+      "failure_reason": "The family duplicated low-volatility and tail-risk sorts before PnL; the frozen H24 implementation later failed stress PF, drawdown, random-time and concentration gates.",
+      "family": {
+        "core_signal": "recent_extreme_positive_return_or_upside_concentration",
+        "direction": "short_lottery_like_long_non_lottery",
+        "selection": "cross_sectional_extremes",
+        "universe": "okx_usdt_swap_mature_cross_section",
+        "features": ["maximum_return", "upside_concentration", "lottery_preference", "tail_shape"]
+      }
+    },
+    {
+      "family_id": "MC05_DISPERSION_EXPANSION_DECAY_OR_PERSISTENCE",
+      "aliases": ["H29_42D_CROSS_SECTIONAL_DISPERSION_SHOCK_EXPOSURE_PREMIUM_V1"],
+      "status": "rejected_before_pnl_direction_ambiguous_no_rescue",
+      "failure_reason": "The original mechanism could not choose continuation versus convergence before outcomes. The later H29 re-audit found that dispersion spikes were not bad states and standard-deviation versus MAD definitions produced only 0.67 percent identical portfolios. H29 is duplicate confirmation, not a new family.",
+      "family": {
+        "core_signal": "cross_sectional_dispersion_expansion_or_exposure_to_dispersion_shock",
+        "direction": "not_uniquely_identified_before_pnl",
+        "selection": "event_or_weekly_cross_sectional_extremes",
+        "universe": "okx_usdt_swap_mature_cross_section",
+        "features": ["cross_sectional_dispersion", "dispersion_shock", "correlation_break", "exposure_beta"]
+      }
+    },
+    {
+      "family_id": "MC06_CORRELATION_BREAKDOWN_AND_REINTEGRATION",
+      "status": "rejected_before_pnl_structural_instability_no_rescue",
+      "failure_reason": "No pair was stable in at least half of the rolling windows and dynamic clustering exceeded the freedom budget while duplicating H3 and pair convergence.",
+      "family": {
+        "core_signal": "correlation_break_and_common_factor_reintegration",
+        "direction": "relative_convergence",
+        "selection": "dynamic_pairs_or_clusters",
+        "universe": "okx_usdt_swap_mature_cross_section",
+        "features": ["rolling_correlation", "cluster_break", "residual_spread", "reintegration"]
+      }
+    },
+    {
+      "family_id": "MC07_VOLATILITY_REGIME_TRANSITION_BEHAVIOR",
+      "status": "overlay_only_not_independent_alpha",
+      "failure_reason": "Volatility transitions are measurable state variables but do not determine a unique direction before outcomes; they may only be used as frozen risk or execution context, not relabeled as Alpha.",
+      "family": {
+        "core_signal": "realized_volatility_regime_transition",
+        "direction": "undefined_without_existing_alpha",
+        "selection": "market_state",
+        "universe": "okx_usdt_swap_market",
+        "features": ["realized_volatility", "regime_transition", "state_filter"]
+      }
+    },
+    {
+      "family_id": "MC08_SYNCHRONIZED_COJUMP_FLOW_EXHAUSTION",
+      "status": "rejected_at_intake_duplicate_and_unobservable_no_rescue",
+      "failure_reason": "The idea duplicated shock-reversal and forced-deleveraging families, while OHLCV could not identify actual forced flow or liquidation ownership.",
+      "family": {
+        "core_signal": "synchronized_cross_sectional_cojump_followed_by_flow_exhaustion",
+        "direction": "post_shock_reversal",
+        "selection": "market_wide_cojump_event",
+        "universe": "okx_usdt_swap_cross_section",
+        "features": ["cojump", "volume_spike", "shock_reversal", "forced_flow_proxy"]
+      }
+    },
+    {
+      "family_id": "REALIZED_FUNDING_CROWDING_AND_CARRY",
+      "aliases": ["H21_7D_PRICE_24H_FUNDING_DISAGREEMENT_V1", "I017_LAGGED_FUNDING_PERSISTENCE_CARRY", "I018_TIME_SERIES_FUNDING_SIGN_CARRY", "H30_FUNDING_RATE_UNCERTAINTY_PREMIUM_V1"],
+      "status": "rejected_family_no_rescue",
+      "failure_reason": "H21 failed boundary ties and momentum overlap; I017 failed coverage, turnover, reversal overlap and carry-to-cost scale; I018 funding-only PF was 0.0718 base and 0.0328 stress with no positive symbol; H30 was stopped at intake because funding volatility had no unique ex-ante direction and required residualization to claim independence.",
+      "family": {
+        "core_signal": "realized_funding_level_sign_persistence_disagreement_or_uncertainty",
+        "direction": "carry_or_crowding_unwind",
+        "selection": "funding_settlement_or_cross_sectional_extremes",
+        "universe": "okx_usdt_swap_funding_history",
+        "features": ["funding_rate", "funding_sign", "funding_persistence", "funding_volatility", "crowding"]
+      }
+    },
+    {
+      "family_id": "OPTION_DIRECTIONAL_PREMIUM_OR_DELTA_FLOW",
+      "aliases": ["I016_OPTION_DIRECTIONAL_PREMIUM_FLOW", "I019_OTM_OPTION_DELTA_WEIGHTED_DIRECTIONAL_FLOW", "C001_OTM_OPTION_DELTA_FLOW_CALIBRATION"],
+      "status": "rejected_calibration_no_rescue",
+      "failure_reason": "I016 failed structure/evidence gates; I019 passed pre-PnL structure but C001 calibration produced base PF 0.8542 and stress PF 0.7223, so validation and locked segments remained sealed.",
+      "family": {
+        "core_signal": "btc_eth_option_aggressor_premium_or_otm_delta_weighted_flow",
+        "direction": "follow_option_directional_flow",
+        "selection": "market_level_4h_direction",
+        "universe": "btc_eth_options_to_okx_swap_cross_section",
+        "features": ["option_premium", "aggressor_side", "delta_weighted_volume", "otm_flow"]
+      }
+    },
+    {
+      "family_id": "MOMENTUM_14D_STAGGERED_3X3_REFRESH_HYSTERESIS6_V1",
+      "status": "historically_supported_forward_shadow_only",
+      "warning": "H22 is a staggered execution variant of the existing 14-day momentum family, not independent Alpha. Historical evidence permits only fully prospective shadow observation.",
+      "family": {
+        "core_signal": "existing_14_day_momentum_three_equal_cohorts_staggered_zero_one_two_days",
+        "direction": "inherit_parent_momentum_direction",
+        "holding_period_bars": 288,
+        "rebalance_bars": 288,
+        "selection": "top4_entry_top6_exit_three_calendar_phases",
+        "universe": "okx_usdt_swap_18_symbol_funding_complete_cross_section",
+        "features": ["closed_return", "cross_sectional_rank", "hysteresis", "staggered_calendar_cadence", "low_turnover_execution"]
+      }
+    },
+    {
+      "family_id": "H26_H22_V357_FIXED_EQUAL_WEIGHT_COMBINATION",
+      "status": "rejected_portfolio_combination_no_weight_search",
+      "failure_reason": "The frozen 50/50 combination had low return correlation but expanded base/stress drawdown to 29.52/37.23 percent and worsened loss streaks. Other weights, member removal and risk rescaling are prohibited.",
+      "family": {
+        "core_signal": "fixed_equal_weight_combination_of_h22_and_v357",
+        "direction": "inherit_components",
+        "selection": "fixed_50_50_daily_combination",
+        "universe": "existing_independent_shadow_ledgers",
+        "features": ["H22", "V357", "fixed_weight", "portfolio_diversification"]
       }
     }
   ]

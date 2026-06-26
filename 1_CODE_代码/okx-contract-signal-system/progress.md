@@ -734,3 +734,23 @@
 - Every completed research test, failure archive, forward-track change, or next-step transition must update both `progress.md` and `docs/PROJECT_OVERVIEW_CN.md` in the same work cycle.
 - The two files must agree on version, active tracks, archived failures, sample state, prohibited rescue actions, and the single next recovery entry point.
 - Documentation-only continuity updates do not require an application version bump, but they must be committed and pushed so a new session can recover from GitHub without reconstructing state from chat history.
+
+## 2026-06-27 - Task: H27 refresh, H28-H30 intake closure, and global family-registry repair
+### What was done
+- Refreshed the frozen H22 staggered 3x3 forward ledger. Closed data reached 2026-06-26 15:00 UTC, protocol/ledger/data/snapshot integrity all passed, and the track remains `RECORD_ONLY_SAMPLE_INCOMPLETE` with zero fully prospective closed observations; the first eligible entry remains 2026-06-27 04:00 UTC.
+- Refreshed the v357 shadow ensemble and acceptance adapter. Runtime coverage remained 21/21, the adapter reported six fully prospective observations over four closed-data days, and no production or formal-signal behavior changed.
+- Refreshed H27 after both source ledgers. It remains `RECORD_ONLY_SAMPLE_INCOMPLETE` with H22 closed observations 0, v357 non-warmup closed trades 2, one common daily row, and data-quality checks passing. Correlation and shared-loss judgments remain unavailable and were not forced.
+- H28 42-day downside-beta-asymmetry was audited without opening returns. It had 150 weekly observations, acceptable turnover, neighbor stability and concentration, but log/simple-return full portfolio agreement was only 73.33% versus the frozen 90% minimum and H19 same-side overlap was 28.67% versus the 25% maximum.
+- H29 42-day dispersion-shock exposure was audited without opening returns. Top-decile dispersion shocks contained only 42.42% negative-market hours and a positive median market return; standard-deviation versus MAD definitions produced only 0.67% identical portfolios and median/p10 rank agreement of 0.5779/0.0436.
+- A global de-duplication review then found that H28 repeated archived MC02 downside-beta asymmetry and H29 repeated archived MC05 dispersion expansion. Both were reclassified as duplicate re-audits rather than new independent Alpha families. Their additional failures remain useful evidence, but no new family credit is assigned.
+- H30 funding-rate uncertainty was stopped at intake with no audit/backtest implementation and no PnL access. High funding volatility had no unique ex-ante direction and repeated the payer/data channel already closed by H21, I017 and I018; residualization or window search is prohibited.
+- Added MC01-MC08, realized-funding, option-flow, H22 and H26 families plus aliases to `config/research_family_registry.json`. Future intake must search both this registry and `MECHANISM_CANDIDATE_REGISTER_20260624.json` before any implementation.
+- Archived H28, H29 and H30 Chinese failure summaries to `C:\Users\26492\Desktop\失败策略`; added duplicate-reclassification evidence for H28 and H29.
+### Verification and safety
+- Application version remains `3.56.27`; no formal runtime, signal, notification, leverage, account, position, order or approved-manifest logic changed.
+- H28/H29 future returns and PnL remained closed; H30 stopped before implementation; H27 remained record-only.
+- Do not reopen MC01-MC08, H21, H23-H30, I016-I018 or C001 through renaming, residualization, direction reversal, symbol exclusion, threshold changes or neighbor selection.
+### Current recovery point
+- Refresh H22 and v357, then H27, and record only until sample gates are due.
+- Before proposing any new Alpha, search `config/research_family_registry.json`, `MECHANISM_CANDIDATE_REGISTER_20260624.json`, Desktop failure archives and this progress log. Only a mechanism with a distinct payer, unique direction, causal observable fields, sufficient coverage and acceptable cost scale may proceed to a return-blind structural audit.
+- The independent candidate queue is currently empty; do not manufacture a candidate from the closed funding, downside-beta, liquidity, dispersion, option-directional-flow, momentum/reversal or price-pattern families.

@@ -1,0 +1,49 @@
+{
+  "schema": "okx_research_candidate_intake_result_v1",
+  "candidate_id": "H30_FUNDING_RATE_UNCERTAINTY_PREMIUM_V1",
+  "evaluated_at_utc": "2026-06-26T18:10:00Z",
+  "research_stage": "MECHANISM_AND_DUPLICATE_INTAKE_ONLY",
+  "proposed_mechanism": "Rank contracts by trailing realized OKX funding-rate volatility and trade a weekly cross-sectional premium for bearing uncertain financing costs.",
+  "proposed_payer": "Leveraged perpetual traders seeking stable financing costs and participants forced to reduce positions when funding becomes unstable.",
+  "data_feasibility": {
+    "existing_local_data_only": true,
+    "source": "official OKX realized funding-rate archives already stored locally",
+    "individual_symbol_rows_approximately": 4383,
+    "strict_common_18_symbol_timestamps_observed_in_i017": 2595,
+    "new_external_data_required": false
+  },
+  "duplicate_audit": {
+    "H21_price_funding_disagreement": "same funding cross-section and crowded-position payer; H21 was already rejected before PnL for boundary ties and momentum-family overlap",
+    "I017_lagged_funding_persistence_carry": "same realized funding archive and adjacent-settlement crowding channel; rejected for coverage, turnover, reversal overlap and insufficient carry-to-cost scale",
+    "I018_time_series_funding_sign_carry": "same leveraged funding payer; direct funding cashflow failed across every symbol after costs",
+    "funding_carry_family_duplicate": true
+  },
+  "direction_audit": {
+    "long_high_uncertainty_interpretation": "risk compensation for bearing unstable financing costs",
+    "short_high_uncertainty_interpretation": "crowding and deleveraging pressure predicts underperformance",
+    "unique_direction_before_pnl": false,
+    "reason": "Both directions are economically plausible and the available primary literature supports the funding-price anchoring mechanism, not a unique cross-sectional return sign for funding volatility. Selecting a sign from historical returns would be outcome-driven."
+  },
+  "freedom_audit": {
+    "would_require_post_hoc_sign_selection": true,
+    "would_require_volatility_window_selection": true,
+    "would_require_level_or_mean_neutralization_to_claim_independence": true,
+    "acceptable_under_current_protocol": false
+  },
+  "decision": "REJECT_H30_AT_INTAKE_DUPLICATE_AND_DIRECTION_AMBIGUOUS_NO_IMPLEMENTATION",
+  "future_returns_opened": false,
+  "pnl_opened": false,
+  "audit_code_written": false,
+  "backtest_code_written": false,
+  "formal_a": false,
+  "automatic_promotion": false,
+  "automatic_ordering": false,
+  "production_effect": "NONE",
+  "no_rescue": [
+    "do not choose long-high or short-high funding volatility after viewing returns",
+    "do not residualize against funding level or price momentum to manufacture independence",
+    "do not select a better volatility window",
+    "do not reopen H21, I017 or I018 under a new name",
+    "do not open PnL for this candidate"
+  ]
+}

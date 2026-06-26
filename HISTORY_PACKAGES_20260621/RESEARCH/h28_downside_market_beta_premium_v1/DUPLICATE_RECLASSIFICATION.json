@@ -1,0 +1,11 @@
+{
+  "schema": "research_duplicate_reclassification_v1",
+  "candidate_id": "H28_42D_DOWNSIDE_MARKET_BETA_ASYMMETRY_PREMIUM_V1",
+  "reclassified_at_utc": "2026-06-26T18:15:00Z",
+  "original_failed_family": "MC02_DOWNSIDE_BETA_ASYMMETRY_PREMIUM",
+  "classification": "DUPLICATE_REAUDIT_NOT_NEW_ALPHA_FAMILY",
+  "pnl_opened": false,
+  "reason": "MC02 had already audited and rejected downside-beta asymmetry before PnL. H28 independently confirmed additional representation-invariance and H19-overlap failures, but should have been stopped by global family de-duplication before a new H identifier was treated as an independent candidate.",
+  "process_correction": "MC01-MC08 and their aliases were added to config/research_family_registry.json; future intake must search both that registry and the mechanism-pool register before any audit implementation.",
+  "production_effect": "NONE"
+}

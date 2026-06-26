@@ -1,0 +1,54 @@
+{
+  "schema": "okx_research_protocol_frozen_before_pnl_v1",
+  "candidate_id": "H28_42D_DOWNSIDE_MARKET_BETA_ASYMMETRY_PREMIUM_V1",
+  "frozen_at_utc": "2026-06-26T17:35:00Z",
+  "stage": "RETURN_BLIND_PRE_PNL",
+  "mechanism": "Assets that covary more strongly with the crypto market during market declines than during market advances expose holders to bad systematic risk. The frozen direction requires compensation for that exposure: long the highest downside-minus-upside beta asymmetry and short the lowest.",
+  "payer": "Investors seeking protection from broad crypto drawdowns and participants forced to reduce high co-crash exposure during deleveraging episodes.",
+  "data": {
+    "source": "existing local closed OKX perpetual 15-minute history strictly resampled to closed 1-hour bars",
+    "universe": "18 mature USDT perpetual swaps with complete funding-history eligibility",
+    "new_external_data": false
+  },
+  "frozen_rule": {
+    "primary_lookback_hours": 1008,
+    "neighbour_lookback_hours": [672, 1344],
+    "market_proxy": "equal-weight hourly log return of the 18-symbol universe",
+    "characteristic": "downside beta conditional on negative market hours minus upside beta conditional on positive market hours",
+    "feature_lag_hours": 1,
+    "rebalance": "Monday 00:00 UTC",
+    "long": "four highest characteristic values",
+    "short": "four lowest characteristic values",
+    "weighting": "equal 50 percent long and 50 percent short",
+    "holding_period": "one week",
+    "free_parameter_count": 2,
+    "parameter_search_count": 0
+  },
+  "pre_pnl_gates": {
+    "minimum_rebalances": 100,
+    "minimum_log_simple_full_set_agreement": 0.9,
+    "minimum_btc_proxy_median_rank_correlation": 0.65,
+    "minimum_btc_proxy_p10_rank_correlation": 0.25,
+    "minimum_neighbour_median_rank_correlation": 0.65,
+    "minimum_neighbour_p10_rank_correlation": 0.25,
+    "maximum_existing_family_weight_correlation": 0.5,
+    "maximum_existing_family_same_side_overlap": 0.25,
+    "maximum_risk_proxy_weight_correlation": 0.75,
+    "maximum_mean_one_way_turnover": 0.7,
+    "maximum_single_symbol_slot_share": 0.2
+  },
+  "anti_rescue": [
+    "do not reverse the direction after seeing results",
+    "do not replace the equal-weight market proxy after seeing results",
+    "do not exclude BTC or any other eligible symbol",
+    "do not change the 42-day lookback or weekly schedule after seeing results",
+    "do not add momentum, volatility, liquidity, funding or sector filters",
+    "do not open future returns or PnL unless every pre-PnL gate passes"
+  ],
+  "future_returns_opened": false,
+  "pnl_opened": false,
+  "formal_a": false,
+  "automatic_promotion": false,
+  "automatic_ordering": false,
+  "production_effect": "NONE"
+}

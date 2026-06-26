@@ -1,0 +1,168 @@
+{
+  "schema": "h28_pre_pnl_audit_v1",
+  "candidate_id": "H28_42D_DOWNSIDE_MARKET_BETA_ASYMMETRY_PREMIUM_V1",
+  "interpretation": "Return-blind structure audit only; no future return or PnL metric calculated.",
+  "candidate_rule": {
+    "market_factor": "equal-weight hourly return of the 18-symbol mature OKX perpetual universe",
+    "characteristic": "negative-market conditional beta minus positive-market conditional beta",
+    "lookback_hours": 1008,
+    "feature_lag_hours": 1,
+    "rebalance": "Monday 00:00 UTC",
+    "long": "four highest downside-beta-asymmetry symbols",
+    "short": "four lowest downside-beta-asymmetry symbols",
+    "future_outcomes_opened": false,
+    "parameter_search_count": 0
+  },
+  "coverage": {
+    "rebalance_count": 150,
+    "first_rebalance_utc": "2023-08-14T00:00:00+00:00",
+    "last_rebalance_utc": "2026-06-22T00:00:00+00:00",
+    "mean_one_way_turnover": 0.24580536912751677,
+    "median_long_minus_short_asymmetry": 0.32508215022182196
+  },
+  "representation_invariance": {
+    "observations": 150,
+    "log_simple_full_set_agreement": 0.7333333333333333,
+    "log_simple_rank": {
+      "observation_count": 150,
+      "median_rank_correlation": 0.9958720330237358,
+      "p10_rank_correlation": 0.9874097007223943
+    },
+    "equal_weight_vs_btc_proxy_rank": {
+      "observation_count": 150,
+      "median_rank_correlation": 0.7192982456140351,
+      "p10_rank_correlation": 0.38575851393188854
+    }
+  },
+  "neighbour_stability": {
+    "28": {
+      "observation_count": 150,
+      "median_rank_correlation": 0.8854489164086687,
+      "p10_rank_correlation": 0.4247678018575851
+    },
+    "56": {
+      "observation_count": 150,
+      "median_rank_correlation": 0.9256965944272446,
+      "p10_rank_correlation": 0.5983488132094943
+    }
+  },
+  "comparisons": {
+    "14_day_cross_sectional_momentum": {
+      "weight_vector_correlation": -0.09333333333333335,
+      "mean_candidate_position_overlap": 0.4816666666666667,
+      "mean_same_side_overlap_fraction_of_candidate": 0.19416666666666665
+    },
+    "24h_cross_sectional_reversal": {
+      "weight_vector_correlation": 0.025833333333333337,
+      "mean_candidate_position_overlap": 0.4525,
+      "mean_same_side_overlap_fraction_of_candidate": 0.23916666666666667
+    },
+    "H19_sector_rank_momentum": {
+      "weight_vector_correlation": -0.08161062615847664,
+      "mean_candidate_position_overlap": 0.6583333333333333,
+      "mean_same_side_overlap_fraction_of_candidate": 0.2866666666666667
+    },
+    "H20_42day_idiosyncratic_volatility_proxy": {
+      "weight_vector_correlation": 0.09333333333333335,
+      "mean_candidate_position_overlap": 0.4683333333333333,
+      "mean_same_side_overlap_fraction_of_candidate": 0.2808333333333333
+    },
+    "42day_plain_market_beta": {
+      "weight_vector_correlation": -0.1541666666666667,
+      "mean_candidate_position_overlap": 0.5241666666666667,
+      "mean_same_side_overlap_fraction_of_candidate": 0.185
+    },
+    "42day_total_volatility": {
+      "weight_vector_correlation": -0.14333333333333334,
+      "mean_candidate_position_overlap": 0.5433333333333333,
+      "mean_same_side_overlap_fraction_of_candidate": 0.2
+    },
+    "7day_expected_shortfall": {
+      "weight_vector_correlation": 0.10666666666666667,
+      "mean_candidate_position_overlap": 0.5,
+      "mean_same_side_overlap_fraction_of_candidate": 0.30333333333333334
+    },
+    "28day_max_daily_return_lottery": {
+      "weight_vector_correlation": -0.22333333333333333,
+      "mean_candidate_position_overlap": 0.47833333333333333,
+      "mean_same_side_overlap_fraction_of_candidate": 0.1275
+    }
+  },
+  "selection_concentration": {
+    "long_slots": {
+      "leader": "FIL-USDT-SWAP",
+      "leader_count": 77,
+      "leader_share": 0.12833333333333333,
+      "counts": {
+        "ADA-USDT-SWAP": 13,
+        "ATOM-USDT-SWAP": 35,
+        "AVAX-USDT-SWAP": 11,
+        "BCH-USDT-SWAP": 30,
+        "BTC-USDT-SWAP": 6,
+        "DOGE-USDT-SWAP": 40,
+        "DOT-USDT-SWAP": 18,
+        "ETC-USDT-SWAP": 13,
+        "ETH-USDT-SWAP": 27,
+        "FIL-USDT-SWAP": 77,
+        "LINK-USDT-SWAP": 13,
+        "LTC-USDT-SWAP": 74,
+        "NEAR-USDT-SWAP": 18,
+        "OP-USDT-SWAP": 30,
+        "SOL-USDT-SWAP": 40,
+        "TRX-USDT-SWAP": 63,
+        "UNI-USDT-SWAP": 24,
+        "XRP-USDT-SWAP": 68
+      }
+    },
+    "short_slots": {
+      "leader": "SOL-USDT-SWAP",
+      "leader_count": 66,
+      "leader_share": 0.11,
+      "counts": {
+        "ADA-USDT-SWAP": 44,
+        "ATOM-USDT-SWAP": 8,
+        "AVAX-USDT-SWAP": 36,
+        "BCH-USDT-SWAP": 57,
+        "BTC-USDT-SWAP": 59,
+        "DOGE-USDT-SWAP": 3,
+        "DOT-USDT-SWAP": 19,
+        "ETC-USDT-SWAP": 33,
+        "ETH-USDT-SWAP": 42,
+        "FIL-USDT-SWAP": 8,
+        "LINK-USDT-SWAP": 41,
+        "LTC-USDT-SWAP": 9,
+        "NEAR-USDT-SWAP": 63,
+        "OP-USDT-SWAP": 36,
+        "SOL-USDT-SWAP": 66,
+        "UNI-USDT-SWAP": 48,
+        "XRP-USDT-SWAP": 28
+      }
+    }
+  },
+  "gates": {
+    "minimum_rebalances": 100,
+    "minimum_log_simple_full_set_agreement": 0.9,
+    "minimum_btc_proxy_median_rank_correlation": 0.65,
+    "minimum_btc_proxy_p10_rank_correlation": 0.25,
+    "minimum_neighbour_median_rank_correlation": 0.65,
+    "minimum_neighbour_p10_rank_correlation": 0.25,
+    "maximum_existing_family_weight_correlation": 0.5,
+    "maximum_existing_family_same_side_overlap": 0.25,
+    "maximum_risk_proxy_weight_correlation": 0.75,
+    "maximum_mean_one_way_turnover": 0.7,
+    "maximum_single_symbol_slot_share": 0.2,
+    "representation_passed": false,
+    "btc_proxy_stable": true,
+    "neighbour_stable": true,
+    "duplicate_existing_family": true,
+    "duplicate_risk_proxy": false,
+    "concentration_passed": true,
+    "all_pass": false
+  },
+  "decision": "REJECT_H28_BEFORE_PNL_NO_RESCUE",
+  "future_returns_opened": false,
+  "pnl_opened": false,
+  "formal_a": false,
+  "automatic_ordering": false,
+  "production_effect": "NONE"
+}

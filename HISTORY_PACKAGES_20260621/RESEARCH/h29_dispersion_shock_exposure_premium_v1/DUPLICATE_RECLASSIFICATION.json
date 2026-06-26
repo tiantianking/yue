@@ -1,0 +1,11 @@
+{
+  "schema": "research_duplicate_reclassification_v1",
+  "candidate_id": "H29_42D_CROSS_SECTIONAL_DISPERSION_SHOCK_EXPOSURE_PREMIUM_V1",
+  "reclassified_at_utc": "2026-06-26T18:15:00Z",
+  "original_failed_family": "MC05_DISPERSION_EXPANSION_DECAY_OR_PERSISTENCE",
+  "classification": "DUPLICATE_REAUDIT_NOT_NEW_ALPHA_FAMILY",
+  "pnl_opened": false,
+  "reason": "MC05 had already rejected dispersion expansion because the mechanism could not identify continuation versus convergence before outcomes. H29 independently showed that dispersion shocks were not bad states and that standard-deviation versus MAD definitions were unstable, but should have been stopped by global family de-duplication before implementation.",
+  "process_correction": "MC01-MC08 and their aliases were added to config/research_family_registry.json; future intake must search both that registry and the mechanism-pool register before any audit implementation.",
+  "production_effect": "NONE"
+}

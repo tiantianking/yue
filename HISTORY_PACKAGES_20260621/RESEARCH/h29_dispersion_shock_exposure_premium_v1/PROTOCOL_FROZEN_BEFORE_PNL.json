@@ -1,0 +1,56 @@
+{
+  "schema": "okx_research_protocol_frozen_before_pnl_v1",
+  "candidate_id": "H29_42D_CROSS_SECTIONAL_DISPERSION_SHOCK_EXPOSURE_PREMIUM_V1",
+  "frozen_at_utc": "2026-06-26T17:45:00Z",
+  "stage": "RETURN_BLIND_PRE_PNL",
+  "mechanism": "A sudden widening of cross-sectional crypto returns is treated as a fragmentation and stress state. Assets that lose when dispersion widens provide poor insurance and must offer a return premium; assets that rise in those states are hedges that investors may accept at lower expected returns.",
+  "payer": "Investors paying for protection against broad fragmentation and participants forced to reduce assets that perform poorly when market dispersion expands.",
+  "data": {
+    "source": "existing local closed OKX perpetual data strictly resampled to closed 1-hour bars",
+    "universe": "18 mature USDT perpetual swaps",
+    "new_external_data": false
+  },
+  "frozen_rule": {
+    "primary_lookback_hours": 1008,
+    "neighbour_lookback_hours": [672, 1344],
+    "primary_dispersion": "cross-sectional standard deviation of hourly log returns",
+    "dispersion_shock": "first difference of log dispersion",
+    "characteristic": "negative rolling beta of each asset return to the dispersion shock",
+    "feature_lag_hours": 1,
+    "rebalance": "Monday 00:00 UTC",
+    "long": "four highest loss-exposure scores",
+    "short": "four lowest loss-exposure scores",
+    "weighting": "equal 50 percent long and 50 percent short",
+    "holding_period": "one week",
+    "parameter_search_count": 0
+  },
+  "pre_pnl_gates": {
+    "minimum_rebalances": 100,
+    "minimum_bad_state_top_decile_negative_market_fraction": 0.55,
+    "maximum_bad_state_top_decile_median_market_return": 0.0,
+    "minimum_std_mad_full_set_agreement": 0.75,
+    "minimum_std_mad_median_rank_correlation": 0.65,
+    "minimum_std_mad_p10_rank_correlation": 0.25,
+    "minimum_neighbour_median_rank_correlation": 0.65,
+    "minimum_neighbour_p10_rank_correlation": 0.25,
+    "maximum_existing_family_weight_correlation": 0.5,
+    "maximum_existing_family_same_side_overlap": 0.25,
+    "maximum_risk_proxy_weight_correlation": 0.75,
+    "maximum_mean_one_way_turnover": 0.7,
+    "maximum_single_symbol_slot_share": 0.2
+  },
+  "anti_rescue": [
+    "do not reverse the direction after seeing results",
+    "do not redefine dispersion after seeing results",
+    "do not exclude BTC or any other eligible symbol",
+    "do not change the 42-day lookback or weekly schedule",
+    "do not add momentum, volatility, liquidity, funding or sector filters",
+    "do not open future returns or PnL unless every pre-PnL gate passes"
+  ],
+  "future_returns_opened": false,
+  "pnl_opened": false,
+  "formal_a": false,
+  "automatic_promotion": false,
+  "automatic_ordering": false,
+  "production_effect": "NONE"
+}
