@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -43,9 +44,17 @@ class FakeLifecycleStore:
         self.updated.append(inst_id)
         return 0
 
+    def active_record(self, _inst_id, _side=None):
+        return None
+
     def record_signal(self, signal, **kwargs):
         self.recorded.append((signal, kwargs))
         return None
+
+
+class ActiveLifecycleStore(FakeLifecycleStore):
+    def active_record(self, _inst_id, _side=None):
+        return SimpleNamespace(signal_id="existing-active-signal")
 
 
 class FakeShadowLedger:
@@ -161,6 +170,78 @@ def test_signal_scan_service_returns_ranked_ready_candidate(monkeypatch) -> None
     assert result.ready_candidates[0].payload["total_formal_candidates"] == 1
     assert shadow_ledger.min_closed_values == []
     assert lifecycle.recorded
+
+
+def test_signal_scan_service_suppresses_duplicate_active_same_side(monkeypatch) -> None:
+    async def loader(_inst_id: str, _limit: int) -> pd.DataFrame:
+        return _frame()
+
+    def fake_build_feature_frame(frame, **_kwargs):
+        out = frame.copy()
+        out["atr"] = 2.0
+        out["atr_pct"] = 0.02
+        out["breakout_high"] = 99.0
+        out["breakout_low"] = 95.0
+        out["trend_bias"] = "long"
+        out["ema_fast"] = 101.0
+        out["ema_slow"] = 99.0
+        out["vol_ratio"] = 1.2
+        out["signal_timeframe"] = "15m"
+        out["trend_timeframe"] = "1h"
+        return out
+
+    def fake_build_signal(row, *, inst_id, params, frame, idx):
+        return TradeSignal(
+            ts=row["ts"],
+            inst_id=inst_id,
+            side="long",
+            entry_ref=100.0,
+            stop_loss=92.0,
+            take_profit=148.0,
+            max_hold_bars=params.max_hold_bars,
+            reason_codes=("TEST",),
+            signal_score=7.0,
+            risk_reward_ratio=6.0,
+        )
+
+    monkeypatch.setattr("okx_signal_system.signal_service.scan.build_feature_frame", fake_build_feature_frame)
+    monkeypatch.setattr("okx_signal_system.signal_service.scan.build_signal", fake_build_signal)
+    monkeypatch.setattr(
+        "okx_signal_system.signal_service.scan.ensemble_vote",
+        lambda *args, **kwargs: EnsembleResult("long", 8.0, [], 1.0, "test"),
+    )
+
+    lifecycle = ActiveLifecycleStore()
+    service = SignalScanService(
+        candle_loader=loader,
+        regime_manager=FakeRegimeManager(),
+        quality_model_shadow=FakeQualityShadow(),
+        lifecycle_store=lifecycle,
+        shadow_ledger=FakeShadowLedger(),
+        notify_key_builder=lambda signal: f"{signal.inst_id}:{signal.side}:new",
+    )
+    context = SignalScanContext(
+        dataset="test",
+        signal_timeframe="15m",
+        trend_timeframe="1h",
+        strategy_params=StrategyParams(),
+        risk_config=RiskConfig(),
+        ledger=Ledger("portfolio", init_capital=10000, equity=10000),
+        quality_gate_allows_push=True,
+        min_vote_approval_rate=0.4,
+        mode="test_manual_confirmation_only",
+        min_history_bars=5,
+        expected_latest_closed=pd.Timestamp("2026-01-01T02:45:00Z"),
+        now=pd.Timestamp("2026-01-01T03:05:00Z"),
+    )
+
+    result = asyncio.run(service.scan_cycle(["BTC-USDT-SWAP"], context))
+
+    assert result.ready_candidates == []
+    assert result.cycle_health[0]["reason"] == "active_same_side_signal"
+    assert result.cycle_health[0]["would_push"] is False
+    assert result.cycle_health[0]["active_signal_id"] == "existing-active-signal"
+    assert lifecycle.recorded == []
 
 
 def test_signal_scan_service_does_not_suppress_signal_for_account_position(monkeypatch) -> None:
@@ -562,7 +643,7 @@ def test_signal_scan_service_rejects_future_closed_bar() -> None:
     assert shadow_ledger.min_closed_values == []
 
 
-def test_signal_scan_service_does_not_update_state_before_closed_bar_gate() -> None:
+def test_signal_scan_service_updates_lifecycle_before_missing_closed_bar_gate() -> None:
     lifecycle = FakeLifecycleStore()
     shadow_ledger = FakeShadowLedger()
 
@@ -596,7 +677,7 @@ def test_signal_scan_service_does_not_update_state_before_closed_bar_gate() -> N
     assert result.cycle_health[0]["reason"] == "missing_latest_closed_bar"
     assert result.candidate_history == {}
     assert lifecycle.recorded == []
-    assert lifecycle.updated == []
+    assert lifecycle.updated == ["BTC-USDT-SWAP"]
     assert shadow_ledger.updated == []
     assert shadow_ledger.min_closed_values == []
 
@@ -641,7 +722,7 @@ def test_signal_scan_service_retries_feature_error_bar(monkeypatch) -> None:
     assert result.cycle_health[0]["reason"] == "feature_error"
     assert checked == {}
     assert lifecycle.recorded == []
-    assert lifecycle.updated == []
+    assert lifecycle.updated == ["BTC-USDT-SWAP"]
     assert shadow_ledger.updated == []
 
 
@@ -682,7 +763,7 @@ def test_signal_scan_service_retries_invalid_features_bar(monkeypatch) -> None:
     assert result.cycle_health[0]["reason"] == "invalid_features"
     assert checked == {}
     assert lifecycle.recorded == []
-    assert lifecycle.updated == []
+    assert lifecycle.updated == ["BTC-USDT-SWAP"]
     assert shadow_ledger.updated == []
 
 

@@ -1025,6 +1025,19 @@ class SignalLifecycleStore:
     def get(self, signal_id: str) -> SignalLifecycleRecord | None:
         return self._by_id.get(signal_id)
 
+    def active_record(self, inst_id: str, side: str | None = None) -> SignalLifecycleRecord | None:
+        for record in reversed(self.records):
+            if record.inst_id != inst_id:
+                continue
+            if side is not None and record.side != side:
+                continue
+            if record.setup_state not in {"TRIGGERED", "CONFIRMED"}:
+                continue
+            if record.outcome_state in OUTCOME_TERMINAL_STATES:
+                continue
+            return record
+        return None
+
     @staticmethod
     def _closed_frame(frame: pd.DataFrame) -> pd.DataFrame:
         if frame.empty or "ts" not in frame.columns or "close" not in frame.columns:
@@ -1061,11 +1074,28 @@ class SignalLifecycleStore:
             bars_seen = int(idx) + 1
             close = float(row["close"])
             closed_time = pd.Timestamp(row["ts"]).isoformat()
+            was_confirmed = record.setup_state == "CONFIRMED"
             if record.bars_seen != bars_seen or record.last_closed_time != closed_time or record.last_close != close:
                 record.bars_seen = bars_seen
                 record.last_closed_time = closed_time
                 record.last_close = close
                 changed = True
+
+            if (
+                was_confirmed
+                and record.outcome_state not in OUTCOME_TERMINAL_STATES
+                and record.take_profit is None
+                and self._analysis_stop_reached(record, row)
+            ):
+                record.outcome_state = "STOP_REACHED"
+                record.status = self._compat_status(record.setup_state, record.outcome_state)
+                record.stop_reached_at = closed_time
+                record.last_event_type = "STOP_REACHED"
+                record.last_event_at = closed_time
+                record.updated_at = _now_text()
+                if lifecycle_events is not None:
+                    lifecycle_events.append((record, "STOP_REACHED", closed_time, record.status, record.setup_state, record.outcome_state))
+                return True
 
             result_event = self._research_result_event(record, future.iloc[:bars_seen])
             if result_event is not None and record.outcome_state not in OUTCOME_TERMINAL_STATES:
@@ -1126,6 +1156,24 @@ class SignalLifecycleStore:
                     lifecycle_events.append((record, "EXPIRED", closed_time, record.status, record.setup_state, record.outcome_state))
 
             if (
+                record.setup_state == "CONFIRMED"
+                and record.outcome_state not in OUTCOME_TERMINAL_STATES
+                and record.take_profit is None
+                and record.max_hold_bars > 0
+                and bars_seen >= record.max_hold_bars
+            ):
+                record.outcome_state = "TIMEOUT_RESULT"
+                record.status = self._compat_status(record.setup_state, record.outcome_state)
+                record.timeout_result_at = closed_time
+                record.last_event_type = "TIMEOUT_RESULT"
+                record.last_event_at = closed_time
+                record.updated_at = _now_text()
+                changed = True
+                if lifecycle_events is not None:
+                    lifecycle_events.append((record, "TIMEOUT_RESULT", closed_time, record.status, record.setup_state, record.outcome_state))
+                return True
+
+            if (
                 record.setup_state == "INVALIDATED"
                 and record.outcome_state not in OUTCOME_TERMINAL_STATES
                 and record.max_hold_bars > 0
@@ -1156,6 +1204,13 @@ class SignalLifecycleStore:
         if record.side == "long":
             return close <= record.invalidation_price
         return close >= record.invalidation_price
+
+    @staticmethod
+    def _analysis_stop_reached(record: SignalLifecycleRecord, row: pd.Series) -> bool:
+        stop = float(record.stop_loss)
+        if record.side == "long":
+            return float(row["low"]) <= stop
+        return float(row["high"]) >= stop
 
     def _research_result_event(self, record: SignalLifecycleRecord, frame: pd.DataFrame) -> tuple[str, str, str] | None:
         if record.take_profit is None or record.max_hold_bars <= 0:

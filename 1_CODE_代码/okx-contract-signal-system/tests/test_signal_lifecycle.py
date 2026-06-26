@@ -223,6 +223,46 @@ def test_lifecycle_stop_reached_after_confirmation(tmp_path) -> None:
     assert summary["latest_event_type"] == "STOP_REACHED"
 
 
+def test_confirmed_signal_without_take_profit_stops_on_later_closed_bar(tmp_path) -> None:
+    store = SignalLifecycleStore(tmp_path / "lifecycle.sqlite3")
+    signal = _signal(stop_loss=95.0, take_profit=None, max_hold_bars=4)
+    store.record_signal(signal, signal_id="sig-no-tp-stop")
+
+    frame = _frame(
+        [
+            {"ts": pd.Timestamp("2026-01-01T00:15:00Z"), "open": 100.0, "high": 102.0, "low": 99.0, "close": 101.0, "is_closed": True},
+            {"ts": pd.Timestamp("2026-01-01T00:30:00Z"), "open": 101.0, "high": 101.5, "low": 94.0, "close": 96.0, "is_closed": True},
+        ]
+    )
+
+    assert store.update_symbol("BTC-USDT-SWAP", frame) == 1
+    record = store.get("sig-no-tp-stop")
+    assert record.setup_state == "CONFIRMED"
+    assert record.outcome_state == "STOP_REACHED"
+    assert record.status == "STOP_REACHED"
+    assert record.stop_reached_at == "2026-01-01T00:30:00+00:00"
+
+
+def test_confirmed_signal_without_take_profit_times_out(tmp_path) -> None:
+    store = SignalLifecycleStore(tmp_path / "lifecycle.sqlite3")
+    signal = _signal(stop_loss=95.0, take_profit=None, max_hold_bars=2)
+    store.record_signal(signal, signal_id="sig-no-tp-timeout")
+
+    frame = _frame(
+        [
+            {"ts": pd.Timestamp("2026-01-01T00:15:00Z"), "open": 100.0, "high": 102.0, "low": 99.0, "close": 101.0, "is_closed": True},
+            {"ts": pd.Timestamp("2026-01-01T00:30:00Z"), "open": 101.0, "high": 103.0, "low": 100.0, "close": 102.0, "is_closed": True},
+        ]
+    )
+
+    assert store.update_symbol("BTC-USDT-SWAP", frame) == 1
+    record = store.get("sig-no-tp-timeout")
+    assert record.setup_state == "CONFIRMED"
+    assert record.outcome_state == "TIMEOUT_RESULT"
+    assert record.status == "TIMEOUT_RESULT"
+    assert record.timeout_result_at == "2026-01-01T00:30:00+00:00"
+
+
 def test_lifecycle_ignores_unclosed_reversal(tmp_path) -> None:
     store = SignalLifecycleStore(tmp_path / "lifecycle.json")
     signal = _signal(stop_loss=95.0)
@@ -387,6 +427,17 @@ def test_lifecycle_outcome_advances_after_setup_invalidated(
             (f"sig-invalidated-{expected_state}",),
         ).fetchone()
     assert row == ("INVALIDATED", expected_state, expected_state)
+
+
+def test_active_record_returns_latest_nonterminal_same_side(tmp_path) -> None:
+    store = SignalLifecycleStore(tmp_path / "lifecycle.sqlite3")
+    first = store.record_signal(_signal(ts="2026-01-01T00:00:00Z"), signal_id="sig-first")
+    second = store.record_signal(_signal(ts="2026-01-01T00:15:00Z", entry_ref=101.0), signal_id="sig-second")
+
+    assert first is not None
+    assert second is not None
+    assert len(store.records) == 2
+    assert store.active_record("BTC-USDT-SWAP", "long") is second
 
 
 def test_lifecycle_persists_records(tmp_path) -> None:
@@ -803,5 +854,5 @@ def test_gui_lifecycle_table_values_match_visible_columns(tmp_path) -> None:
         "95.00",
         "TRIGGERED",
         "1",
-        "-",
+        "2026-01-01 08:00",
     )

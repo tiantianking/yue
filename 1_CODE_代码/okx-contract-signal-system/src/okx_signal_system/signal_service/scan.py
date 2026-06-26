@@ -181,11 +181,13 @@ class SignalScanService:
 
             latest_closed = pd.to_datetime(df["ts"].iloc[-1], utc=True)
             expected_closed = self._expected_latest_closed(context)
-            if latest_closed < expected_closed:
-                cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="missing_latest_closed_bar"))
-                continue
             if latest_closed > expected_closed:
                 cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="future_closed_bar"))
+                continue
+            if self._lifecycle_store is not None:
+                self._lifecycle_store.update_symbol(inst_id, df)
+            if latest_closed < expected_closed:
+                cycle_health.append(self._candidate_health_item(inst_id=inst_id, reason="missing_latest_closed_bar"))
                 continue
             if signal_is_stale(
                 latest_closed,
@@ -240,8 +242,6 @@ class SignalScanService:
                     idx=len(features) - 1,
                 )
                 candidate_history[inst_id] = df
-                if self._lifecycle_store is not None:
-                    self._lifecycle_store.update_symbol(inst_id, df)
                 if not signal.accepted:
                     observation = self._observation_candidate(
                         inst_id=inst_id,
@@ -345,20 +345,30 @@ class SignalScanService:
                 }
                 if would_push:
                     if self._lifecycle_store is not None:
-                        lifecycle_record = self._lifecycle_store.record_signal(
-                            signal,
-                            signal_id=notify_key,
-                            invalidation_price=signal.stop_loss,
-                            signal_timeframe=context.signal_timeframe,
-                            trend_timeframe=context.trend_timeframe,
-                        )
-                        if lifecycle_record is not None:
-                            lifecycle = lifecycle_payload(lifecycle_record)
-                            payload["signal"]["invalidation_price"] = lifecycle_record.invalidation_price
-                            payload["lifecycle"] = lifecycle
-                            health_item["invalidation_price"] = lifecycle_record.invalidation_price
-                            health_item["lifecycle_status"] = lifecycle_record.status
-                            health_item["lifecycle"] = lifecycle
+                        active_lookup = getattr(self._lifecycle_store, "active_record", None)
+                        active_record = active_lookup(signal.inst_id, signal.side) if callable(active_lookup) else None
+                        if active_record is not None and active_record.signal_id != notify_key:
+                            would_push = False
+                            health_item["would_push"] = False
+                            health_item["reason"] = "active_same_side_signal"
+                            health_item["active_signal_id"] = active_record.signal_id
+                            payload["push_suppressed_reason"] = "active_same_side_signal"
+                            payload["active_signal_id"] = active_record.signal_id
+                        else:
+                            lifecycle_record = self._lifecycle_store.record_signal(
+                                signal,
+                                signal_id=notify_key,
+                                invalidation_price=signal.stop_loss,
+                                signal_timeframe=context.signal_timeframe,
+                                trend_timeframe=context.trend_timeframe,
+                            )
+                            if lifecycle_record is not None:
+                                lifecycle = lifecycle_payload(lifecycle_record)
+                                payload["signal"]["invalidation_price"] = lifecycle_record.invalidation_price
+                                payload["lifecycle"] = lifecycle
+                                health_item["invalidation_price"] = lifecycle_record.invalidation_price
+                                health_item["lifecycle_status"] = lifecycle_record.status
+                                health_item["lifecycle"] = lifecycle
                 if would_push and self._is_observable(signal):
                     ready_candidates.append(
                         self._candidate(

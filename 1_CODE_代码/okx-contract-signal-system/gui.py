@@ -122,7 +122,7 @@ def lifecycle_table_values(rec) -> tuple[str, str, str, str, str, str, str, str]
         f"{rec.invalidation_price:.2f}",
         rec.status,
         str(rec.bars_seen),
-        rec.signal_timeframe or "-",
+        _format_beijing_time(rec.signal_time),
     )
 
 
@@ -441,6 +441,28 @@ class OKXSignalGUI:
             self._lifecycle_store = SignalLifecycleStore()
         return self._lifecycle_store
 
+    def _reconcile_signal_lifecycle_from_local_cache(self) -> int:
+        api = getattr(self, "api", None)
+        if api is None or not hasattr(api, "_data_store"):
+            return 0
+        store = self._signal_lifecycle_store()
+        active_symbols = sorted(
+            {
+                record.inst_id
+                for record in store.records
+                if record.setup_state in {"TRIGGERED", "CONFIRMED"}
+                and record.outcome_state not in {"TARGET_REACHED", "STOP_REACHED", "TIMEOUT_RESULT", "CENSORED"}
+            }
+        )
+        updated = 0
+        for inst_id in active_symbols:
+            try:
+                frame = api._data_store.load(inst_id)
+                updated += store.update_symbol(inst_id, frame)
+            except Exception as exc:
+                log.warning("Lifecycle cache reconciliation failed for %s: %s", inst_id, exc)
+        return updated
+
     def _notification_dispatcher(self):
         if self._notification_dispatcher_instance is None:
             from okx_signal_system.notify import NotificationDispatcher
@@ -610,7 +632,7 @@ class OKXSignalGUI:
         self.pos_tree.heading('sl', text='失效价')
         self.pos_tree.heading('tp', text='生命周期')
         self.pos_tree.heading('pnl', text='已观察K线')
-        self.pos_tree.heading('score', text='信号周期')
+        self.pos_tree.heading('score', text='信号时间')
 
         self.pos_tree.column('inst_id', width=120)
         self.pos_tree.column('side', width=40)
@@ -619,7 +641,7 @@ class OKXSignalGUI:
         self.pos_tree.column('sl', width=80)
         self.pos_tree.column('tp', width=80)
         self.pos_tree.column('pnl', width=80)
-        self.pos_tree.column('score', width=60)
+        self.pos_tree.column('score', width=145)
 
         pos_scrollbar = ttk.Scrollbar(pos_frame, orient='vertical', command=self.pos_tree.yview)
         self.pos_tree.configure(yscrollcommand=pos_scrollbar.set)
@@ -861,6 +883,9 @@ class OKXSignalGUI:
                 except Exception:
                     pass
             self.message_queue.put(('log', (f"已加载 {loaded_count} 个币种的历史数据", "INFO")))
+            reconciled = self._reconcile_signal_lifecycle_from_local_cache()
+            if reconciled:
+                self.message_queue.put(('log', (f"已用本地闭合K线更新 {reconciled} 条信号生命周期记录", "INFO")))
 
             self.message_queue.put(('log', ('正在核对当前闭合K线并自动补齐...', "INFO")))
             closed_status = await asyncio.to_thread(self._run_closed_backfill_once)
