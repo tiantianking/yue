@@ -241,6 +241,10 @@ def test_failed_research_archive_is_idempotent(tmp_path: Path) -> None:
     artifacts = tmp_path / "artifacts"
     artifacts.mkdir()
     pd.DataFrame([{"net_r": -1.0}]).to_csv(artifacts / "sample_trades.csv", index=False)
+    (artifacts / "robustness_screen.json").write_text(
+        json.dumps({"passed": False, "decision": "FAIL_STOP_NO_RESCUE"}),
+        encoding="utf-8",
+    )
     failure = module.CheckResult("research", "automatic_future_leak_scan", False, "line=1")
     archive_root = tmp_path / "archive"
 
@@ -249,7 +253,9 @@ def test_failed_research_archive_is_idempotent(tmp_path: Path) -> None:
 
     assert first == second
     assert (first / "failure_summary.json").is_file()
+    assert (first / "失败说明.md").is_file()
     assert (first / "sample_trades.csv").is_file()
+    assert (first / "robustness_screen.json").is_file()
     summary = json.loads((first / "failure_summary.json").read_text(encoding="utf-8"))
     assert summary["status"] == "REJECT_AND_ARCHIVE_NO_RESCUE"
     assert len(summary["failure_hash"]) == 64

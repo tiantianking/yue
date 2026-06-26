@@ -440,6 +440,23 @@ def run_source_audit() -> list[CheckResult]:
     project_version = str(pyproject.get("project", {}).get("version", ""))
     results.append(CheckResult("source", "version_consistent", project_version == __version__, f"pyproject={project_version} package={__version__}"))
 
+    overview_path = PROJECT_ROOT / "docs" / "PROJECT_OVERVIEW_CN.md"
+    policy_path = PROJECT_ROOT / "docs" / "CHANGE_CONTROL_POLICY_CN.md"
+    release_note_path = PROJECT_ROOT / "docs" / f"V{__version__}_RELEASE_CN.md"
+    overview_text = overview_path.read_text(encoding="utf-8") if overview_path.is_file() else ""
+    results.extend(
+        [
+            CheckResult(
+                "source",
+                "project_overview_current",
+                overview_path.is_file() and f"当前版本：v{__version__}" in overview_text,
+                str(overview_path),
+            ),
+            CheckResult("source", "change_control_policy_present", policy_path.is_file(), str(policy_path)),
+            CheckResult("source", "current_release_note_present", release_note_path.is_file(), str(release_note_path)),
+        ]
+    )
+
     release_files = _read_release_files()
     results.append(CheckResult("source", "release_manifest_unique", len(release_files) == len(set(release_files)), f"entries={len(release_files)} unique={len(set(release_files))}"))
     missing = [item for item in release_files if not (PROJECT_ROOT / item).is_file()]
@@ -1435,11 +1452,7 @@ def _default_failure_archive_root() -> Path:
     configured = os.environ.get("FAILED_RESEARCH_ARCHIVE_DIR", "").strip()
     if configured:
         return Path(configured).expanduser()
-    for name in ("失败策略", "失败策略文件夹", "Failed Strategies"):
-        desktop = Path.home() / "Desktop" / name
-        if desktop.is_dir():
-            return desktop
-    return PROJECT_ROOT / "outputs" / "failed_research"
+    return Path.home() / "Desktop" / "失败策略"
 
 
 def archive_failed_research(
@@ -1457,6 +1470,7 @@ def archive_failed_research(
     failed_checks = [asdict(item) for item in results if item.category == "research" and item.blocking and not item.ok]
     failure_material = candidate_path.read_bytes() + json.dumps(failed_checks, sort_keys=True, ensure_ascii=False).encode("utf-8")
     failure_hash = hashlib.sha256(failure_material).hexdigest()
+    archive_root.mkdir(parents=True, exist_ok=True)
     destination = archive_root / f"{safe_id}_{failure_hash[:12]}"
     if destination.is_dir() and (destination / "failure_summary.json").is_file():
         return destination
@@ -1471,6 +1485,7 @@ def archive_failed_research(
             "candidate_params.json",
             "final_report.md",
             "research_gate_report.json",
+            "robustness_screen.json",
         ):
             source = artifact_dir / name
             if source.is_file():
@@ -1483,6 +1498,31 @@ def archive_failed_research(
         "failed_checks": failed_checks,
     }
     _write_json_atomic(destination / "failure_summary.json", summary)
+    markdown_lines = [
+        f"# {candidate_id} 失败说明",
+        "",
+        "- 状态：`REJECT_AND_ARCHIVE_NO_RESCUE`",
+        f"- 归档时间：`{summary['archived_at']}`",
+        f"- 失败哈希：`{failure_hash}`",
+        "- 生产系统影响：`NONE`",
+        "",
+        "## 失败门禁",
+        "",
+    ]
+    for item in failed_checks:
+        markdown_lines.append(f"- `{item.get('name', 'unknown')}`：{item.get('detail', '')}")
+    if not failed_checks:
+        markdown_lines.append("- 未提供结构化失败项，请查看原始报告。")
+    markdown_lines.extend(
+        [
+            "",
+            "## 固定结论",
+            "",
+            "该候选已永久归档，不得通过事后调参、删币、改方向、降低成本或更名重新进入候选池。",
+            "",
+        ]
+    )
+    (destination / "失败说明.md").write_text("\n".join(markdown_lines), encoding="utf-8")
     return destination
 
 

@@ -26,3 +26,6 @@ logs/
 *.db-journal
 okx_signal.lock
 /codex_write_test.txt
+/dist/
+/NUL
+/CHECK_*.cmd

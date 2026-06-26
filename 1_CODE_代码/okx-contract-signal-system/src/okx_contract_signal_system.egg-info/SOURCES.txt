@@ -15,8 +15,10 @@ config/research_candidates/v357_4h_donchian_shadow_candidate.json
 config/research_candidates/v357_shadow_ensemble_candidate.json
 config/risk.yaml
 config/shadow_ensemble.yaml
+docs/CHANGE_CONTROL_POLICY_CN.md
 docs/DEPLOYMENT_CHECKLIST_CN.md
 docs/PARALLEL_FORWARD_ACCEPTANCE_CN.md
+docs/PROJECT_OVERVIEW_CN.md
 docs/RELEASE_SAFETY.md
 docs/RESEARCH_ROBUSTNESS_SCREEN_CN.md
 docs/RUNTIME_VERIFICATION.md
@@ -46,9 +48,12 @@ docs/V3.56.16_RELEASE_CN.md
 docs/V3.56.17_RELEASE_CN.md
 docs/V3.56.18_RELEASE_CN.md
 docs/V3.56.19_RELEASE_CN.md
+docs/V3.56.20_RELEASE_CN.md
 pyproject.toml
 requirements.lock
 requirements.txt
+scripts/check_change_governance.py
+scripts/refresh_failure_archive.py
 scripts/run_candidate_factory.py
 scripts/run_parallel_acceptance.py
 scripts/update_shadow_ensemble_acceptance.py
@@ -145,6 +150,7 @@ tests/_integration.py
 tests/test_backtest.py
 tests/test_backtest_signal_only.py
 tests/test_candidate_factory.py
+tests/test_change_governance.py
 tests/test_config.py
 tests/test_costs.py
 tests/test_daily_learning_review.py

@@ -2,6 +2,11 @@
 
 Lightweight OKX USDT perpetual research and signal observation system.
 
+Project documentation:
+- Chinese project overview: `docs/PROJECT_OVERVIEW_CN.md`.
+- Change, failure-archive, and synchronization policy: `docs/CHANGE_CONTROL_POLICY_CN.md`.
+- Failed research is copied to the user's Desktop `失败策略` archive and indexed by `scripts/refresh_failure_archive.py`.
+
 Current boundary:
 - Signal-only local research, backtesting, observation, and Feishu notification.
 - Release defaults to `SIGNAL_ONLY`; no automatic execution entry is provided.
@@ -46,6 +51,16 @@ D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe scripts\system_check.py research
 ```
 
 The gate derives parameter freedom, scans Python AST for future leakage, compares the structured family signature against the registry and archived failures, regenerates three cost-stress scenarios, checks symbol/month/top-trade concentration, and refuses a new study until sufficient new data exists. It never promotes parameters automatically.
+
+Change governance:
+
+```powershell
+py -3.12 scripts\check_change_governance.py
+py -3.12 scripts\refresh_failure_archive.py
+CHECK_REMOTE_SYNC.cmd
+```
+
+Behavioral changes must update the project overview, current release note, package version, release manifest, tests, and local Git history. The final synchronization check only passes when the project worktree is clean and the local tracked branch matches its configured upstream.
 
 Parallel forward acceptance:
 - `RUN_PARALLEL_ACCEPTANCE.cmd` refreshes every registered research-shadow track, applies frozen 14/30/45/60/90-day checkpoints, and writes `outputs/parallel_acceptance_status.json`.

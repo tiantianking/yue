@@ -4,6 +4,7 @@
 MANIFEST.in
 README.md
 RELEASE_FILES.txt
+CHECK_REMOTE_SYNC.cmd
 RUN_PARALLEL_ACCEPTANCE.cmd
 assets/icon.ico
 assets/icon.png
@@ -58,8 +59,10 @@ deployment/okx-signal.env.example
 deployment/systemd/okx-signal-health.service
 deployment/systemd/okx-signal-health.timer
 deployment/systemd/okx-signal.service
+docs/CHANGE_CONTROL_POLICY_CN.md
 docs/DEPLOYMENT_CHECKLIST_CN.md
 docs/PARALLEL_FORWARD_ACCEPTANCE_CN.md
+docs/PROJECT_OVERVIEW_CN.md
 docs/RELEASE_SAFETY.md
 docs/RESEARCH_ROBUSTNESS_SCREEN_CN.md
 docs/RUNTIME_VERIFICATION.md
@@ -89,6 +92,7 @@ docs/V3.56.16_RELEASE_CN.md
 docs/V3.56.17_RELEASE_CN.md
 docs/V3.56.18_RELEASE_CN.md
 docs/V3.56.19_RELEASE_CN.md
+docs/V3.56.20_RELEASE_CN.md
 gui.py
 hooks/hook-setuptools.py
 hooks/pyi_rth_custom.py
@@ -102,6 +106,8 @@ rthook_disable_pkg_resources.py
 scripts/backfill_5m_history_range.py
 scripts/backfill_recent_history.py
 scripts/build_release_zip.py
+scripts/check_change_governance.py
+scripts/refresh_failure_archive.py
 scripts/run_candidate_factory.py
 scripts/run_data_audit.ps1
 scripts/run_parallel_acceptance.py
@@ -181,6 +187,8 @@ tests/__init__.py
 tests/_integration.py
 tests/test_backtest.py
 tests/test_backtest_signal_only.py
+tests/test_candidate_factory.py
+tests/test_change_governance.py
 tests/test_config.py
 tests/test_costs.py
 tests/test_daily_learning_review.py
@@ -194,11 +202,14 @@ tests/test_leverage_advice.py
 tests/test_lifecycle_outbox_runtime.py
 tests/test_okx_mapping.py
 tests/test_panel_view.py
+tests/test_parallel_acceptance.py
 tests/test_realtime_research_isolation.py
 tests/test_release_safety.py
 tests/test_research_automation.py
 tests/test_reporting_signal.py
+tests/test_robustness_screen.py
 tests/test_scheduler_notifications.py
+tests/test_shadow_ensemble_acceptance.py
 tests/test_shadow_ensemble_runtime.py
 tests/test_shadow_trading.py
 tests/test_signal_lifecycle.py
