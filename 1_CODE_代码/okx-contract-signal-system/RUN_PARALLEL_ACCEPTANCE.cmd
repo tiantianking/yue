@@ -13,6 +13,13 @@ if not exist "%PYTHON_EXE%" (
 
 if not exist "logs" mkdir "logs"
 
+"%PYTHON_EXE%" scripts\update_momentum_fixed_3d_shadow.py >> "logs\parallel_acceptance.log" 2>&1
+set "FIXED3D_EXIT=%errorlevel%"
+if not "%FIXED3D_EXIT%"=="0" (
+    echo [ERROR] Fixed 3-day momentum shadow update failed. See logs\parallel_acceptance.log
+    exit /b %FIXED3D_EXIT%
+)
+
 "%PYTHON_EXE%" scripts\run_candidate_factory.py >> "logs\parallel_acceptance.log" 2>&1
 set "FACTORY_EXIT=%errorlevel%"
 if not "%FACTORY_EXIT%"=="0" (
@@ -28,6 +35,7 @@ if not "%EXIT_CODE%"=="0" (
 )
 
 echo [OK] Candidate factory and research shadows updated.
+echo      Fixed 3-day momentum: outputs\momentum_fixed_3d_forward_status.json
 echo      Factory: outputs\candidate_factory_status.json
 echo      Acceptance: outputs\parallel_acceptance_status.json
 exit /b 0

@@ -138,6 +138,20 @@
         "universe": "okx_usdt_swap_18_symbol_funding_complete_cross_section",
         "features": ["closed_return", "cross_sectional_rank", "hysteresis", "path_dependent_weight_drift", "membership_change_rebalance", "observed_funding_cashflow"]
       }
+    },
+    {
+      "family_id": "MOMENTUM_14D_FIXED_3D_REFRESH_HYSTERESIS6_V1",
+      "status": "historically_supported_forward_shadow_only",
+      "warning": "This is a low-turnover execution variant of the existing 14-day momentum family, not an independent Alpha. The 500-trial random-time p-value was a borderline 0.0499, so no historical promotion is allowed.",
+      "family": {
+        "core_signal": "existing_14_day_momentum_with_fixed_three_day_membership_refresh",
+        "direction": "inherit_parent_momentum_direction",
+        "holding_period_bars": 288,
+        "rebalance_bars": 288,
+        "selection": "top4_entry_top6_exit_refresh_every_three_utc_days",
+        "universe": "okx_usdt_swap_18_symbol_funding_complete_cross_section",
+        "features": ["closed_return", "cross_sectional_rank", "hysteresis", "fixed_calendar_cadence", "low_turnover_execution", "observed_funding_cashflow"]
+      }
     }
   ]
 }
