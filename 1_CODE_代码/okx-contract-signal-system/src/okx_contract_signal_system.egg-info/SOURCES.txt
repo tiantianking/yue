@@ -10,6 +10,7 @@ config/fees.yaml
 config/parallel_acceptance.yaml
 config/parallel_acceptance_early_stop_protocol.json
 config/shadow_ensemble_forward_acceptance_protocol.json
+config/research_candidates/h19_sector_rank_momentum.json
 config/research_candidates/v357_4h_donchian_shadow_candidate.json
 config/research_candidates/v357_shadow_ensemble_candidate.json
 config/risk.yaml
@@ -39,6 +40,7 @@ docs/V3.56.11_RELEASE_CN.md
 docs/V3.56.12_RELEASE_CN.md
 docs/V3.56.13_RELEASE_CN.md
 docs/V3.56.14_RELEASE_CN.md
+docs/V3.56.15_RELEASE_CN.md
 pyproject.toml
 requirements.lock
 requirements.txt

@@ -27,6 +27,8 @@ SYSTEM_CHECK = PROJECT_ROOT / "scripts" / "system_check.py"
 DEFAULT_CANDIDATE_DIR = PROJECT_ROOT / "config" / "research_candidates"
 DEFAULT_REPORT_ROOT = PROJECT_ROOT / "outputs" / "candidate_factory"
 DEFAULT_STATUS = PROJECT_ROOT / "outputs" / "candidate_factory_status.json"
+TERMINAL_STATUS_PREFIXES = ("REJECT_", "ARCHIVED_", "WITHDRAWN_")
+TERMINAL_STATUSES = {"FAIL_STOP_NO_RESCUE", "REJECT_AND_ARCHIVE_NO_RESCUE"}
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -45,8 +47,12 @@ def discover_candidates(root: Path) -> list[tuple[Path, dict[str, Any]]]:
             payload = _read_json(path)
         except Exception:
             continue
-        if payload.get("schema") == "okx_pre_pnl_candidate_v2":
-            candidates.append((path, payload))
+        if payload.get("schema") != "okx_pre_pnl_candidate_v2":
+            continue
+        status = str(payload.get("status", "")).strip().upper()
+        if status in TERMINAL_STATUSES or status.startswith(TERMINAL_STATUS_PREFIXES):
+            continue
+        candidates.append((path, payload))
     return candidates
 
 

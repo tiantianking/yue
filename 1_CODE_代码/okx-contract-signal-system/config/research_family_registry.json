@@ -1,6 +1,6 @@
 {
   "schema": "okx_research_family_registry_v1",
-  "updated_at": "2026-06-24T00:00:00Z",
+  "updated_at": "2026-06-26T00:00:00Z",
   "families": [
     {
       "family_id": "14_day_cross_sectional_momentum",
@@ -39,6 +39,20 @@
         "selection": "eligible_breakouts",
         "universe": "okx_usdt_swap_cross_section",
         "features": ["donchian", "atr_percentile", "relative_strength", "breadth", "volume_ratio"]
+      }
+    },
+    {
+      "family_id": "H19_FIXED_SECTOR_56D_RANK_MOMENTUM_V1",
+      "status": "rejected_calibration_no_rescue",
+      "failure_reason": "Calibration PF 0.9511, total return -10.33%, maximum drawdown 37.92%; validation and lock remained closed.",
+      "family": {
+        "core_signal": "fixed_sector_constituent_return_rank_aggregation",
+        "direction": "long_top_sector_short_bottom_sector",
+        "holding_period_bars": 672,
+        "rebalance_bars": 672,
+        "selection": "top_one_bottom_one_fixed_sector_equal_weight_members",
+        "universe": "okx_usdt_swap_18_symbol_funding_complete_cross_section",
+        "features": ["closed_return", "cross_sectional_rank", "fixed_sector_aggregation", "weekly_rebalance", "observed_funding_cashflow"]
       }
     }
   ]

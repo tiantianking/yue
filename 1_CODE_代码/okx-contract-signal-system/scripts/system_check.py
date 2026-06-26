@@ -1241,6 +1241,7 @@ def evaluate_data_readiness(
     timeframe: str,
     state_file: Path = DEFAULT_DATA_STATE,
     data_root: Path | None = None,
+    symbols: list[str] | tuple[str, ...] | None = None,
     min_symbols: int = DEFAULT_MIN_RESEARCH_SYMBOLS,
     min_history_days: float = DEFAULT_MIN_HISTORY_DAYS,
     min_new_days: float = DEFAULT_MIN_NEW_DATA_DAYS,
@@ -1257,9 +1258,10 @@ def evaluate_data_readiness(
     initial_research = not bool(previous_latest)
     required_new_bars = max(1, int(math.ceil(min_new_days * 86400.0 / _timeframe_seconds(timeframe))))
     roots = _research_data_roots(dataset, data_root)
+    target_symbols = list(dict.fromkeys(symbols or configured_symbols()))
     rows: list[dict[str, Any]] = []
     latest_closed_by_symbol: dict[str, str] = {}
-    for symbol in configured_symbols():
+    for symbol in target_symbols:
         baseline = _parse_time(previous_latest.get(symbol))
         candidates = [root / _runtime_filename(symbol, timeframe) for root in roots]
         available = [path for path in candidates if path.is_file()]
@@ -1284,7 +1286,7 @@ def evaluate_data_readiness(
         rows.append(best)
         if best.get("ok") and best.get("latest_closed"):
             latest_closed_by_symbol[symbol] = str(best["latest_closed"])
-    symbol_count = len(configured_symbols())
+    symbol_count = len(target_symbols)
     required_coverage = max(min_symbols, int(math.ceil(symbol_count * coverage_ratio)))
     covered = sum(bool(row.get("ok")) for row in rows)
     history_qualified = sum(bool(row.get("history_ok")) for row in rows)
@@ -1317,6 +1319,7 @@ def run_data_readiness(
     state_file: Path = DEFAULT_DATA_STATE,
     report_file: Path | None = DEFAULT_DATA_REPORT,
     data_root: Path | None = None,
+    symbols: list[str] | tuple[str, ...] | None = None,
     min_symbols: int = DEFAULT_MIN_RESEARCH_SYMBOLS,
     min_history_days: float = DEFAULT_MIN_HISTORY_DAYS,
     min_new_days: float = DEFAULT_MIN_NEW_DATA_DAYS,
@@ -1328,6 +1331,7 @@ def run_data_readiness(
         timeframe=timeframe,
         state_file=state_file,
         data_root=data_root,
+        symbols=symbols,
         min_symbols=min_symbols,
         min_history_days=min_history_days,
         min_new_days=min_new_days,
@@ -1543,6 +1547,12 @@ def main(argv: list[str] | None = None) -> int:
     base_data = base.get("data", {}) if isinstance(base.get("data"), dict) else {}
     candidate_data = candidate_payload.get("data") if isinstance(candidate_payload.get("data"), dict) else {}
     data_gate = candidate_payload.get("data_gate") if isinstance(candidate_payload.get("data_gate"), dict) else {}
+    candidate_symbols_raw = candidate_data.get("symbols")
+    candidate_symbols = (
+        [str(symbol) for symbol in candidate_symbols_raw if str(symbol).strip()]
+        if isinstance(candidate_symbols_raw, list)
+        else None
+    )
     dataset = str(args.dataset or candidate_data.get("dataset") or base_data.get("historical_dataset") or "okx_15m_extended")
     timeframe = str(args.timeframe or candidate_data.get("timeframe") or base_data.get("timeframe") or "15m")
     min_symbols = int(args.min_research_symbols if args.min_research_symbols is not None else data_gate.get("min_symbols", DEFAULT_MIN_RESEARCH_SYMBOLS))
@@ -1559,6 +1569,7 @@ def main(argv: list[str] | None = None) -> int:
             state_file=args.data_state,
             report_file=args.data_report,
             data_root=args.data_root,
+            symbols=candidate_symbols,
             min_symbols=min_symbols,
             min_history_days=min_history_days,
             min_new_days=min_new_days,

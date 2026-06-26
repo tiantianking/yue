@@ -198,6 +198,42 @@ def test_data_readiness_requires_increment_after_mark(tmp_path: Path, monkeypatc
     assert repeated.new_data_qualified_symbols == 0
 
 
+def test_data_readiness_respects_candidate_symbol_subset(tmp_path: Path, monkeypatch) -> None:
+    module = _load_system_check()
+    all_symbols = ["BTC-USDT-SWAP", "ETH-USDT-SWAP", "HYPE-USDT-SWAP"]
+    monkeypatch.setattr(module, "configured_symbols", lambda: all_symbols)
+    root = tmp_path / "dataset"
+    root.mkdir()
+    full = pd.date_range("2023-01-01", periods=370 * 24 * 4, freq="15min", tz="UTC")
+    short = pd.date_range("2026-01-01", periods=30 * 24 * 4, freq="15min", tz="UTC")
+    for symbol, timestamps in {
+        "BTC-USDT-SWAP": full,
+        "ETH-USDT-SWAP": full,
+        "HYPE-USDT-SWAP": short,
+    }.items():
+        pd.DataFrame({"ts": timestamps, "is_closed": True}).to_parquet(
+            root / module._runtime_filename(symbol, "15m"),
+            index=False,
+        )
+
+    readiness = module.evaluate_data_readiness(
+        dataset="test",
+        timeframe="15m",
+        state_file=tmp_path / "state.json",
+        data_root=root,
+        symbols=["BTC-USDT-SWAP", "ETH-USDT-SWAP"],
+        min_symbols=2,
+        min_history_days=365,
+        min_new_days=1,
+        max_gap_ratio=0.0,
+        coverage_ratio=1.0,
+    )
+
+    assert readiness.ready is True
+    assert readiness.symbol_count == 2
+    assert {row["symbol"] for row in readiness.rows} == {"BTC-USDT-SWAP", "ETH-USDT-SWAP"}
+
+
 def test_failed_research_archive_is_idempotent(tmp_path: Path) -> None:
     module = _load_system_check()
     candidate = tmp_path / "candidate.json"

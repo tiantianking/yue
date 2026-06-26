@@ -1,0 +1,144 @@
+{
+  "schema": "okx_pre_pnl_candidate_v2",
+  "candidate_id": "H19_FIXED_SECTOR_56D_RANK_MOMENTUM_V1",
+  "status": "REJECT_CALIBRATION_NO_RESCUE",
+  "mechanism": {
+    "payer": "Slow-moving thematic allocators and leveraged sector followers that rebalance after public sector performance has become visible.",
+    "direction": "Long the highest-ranked fixed crypto sector and short the lowest-ranked fixed crypto sector at the weekly rebalance.",
+    "observable_proxy": "Closed-only 4-hour returns over 56 days, converted to cross-sectional constituent ranks and averaged inside a fixed sector taxonomy.",
+    "persistence_reason": "Theme-level capital and attention can diffuse across related contracts over weeks rather than being incorporated simultaneously."
+  },
+  "family": {
+    "core_signal": "fixed_sector_constituent_return_rank_aggregation",
+    "direction": "long_top_sector_short_bottom_sector",
+    "holding_period_bars": 672,
+    "rebalance_bars": 672,
+    "selection": "top_one_bottom_one_fixed_sector_equal_weight_members",
+    "universe": "okx_usdt_swap_18_symbol_funding_complete_cross_section",
+    "features": [
+      "closed_return",
+      "cross_sectional_rank",
+      "fixed_sector_aggregation",
+      "weekly_rebalance",
+      "observed_funding_cashflow"
+    ]
+  },
+  "data": {
+    "exchange": "OKX",
+    "cross_exchange": false,
+    "local_only": true,
+    "dataset": "okx_15m_extended",
+    "timeframe": "15m",
+    "symbols": [
+      "BTC-USDT-SWAP",
+      "XRP-USDT-SWAP",
+      "DOGE-USDT-SWAP",
+      "LTC-USDT-SWAP",
+      "BCH-USDT-SWAP",
+      "TRX-USDT-SWAP",
+      "ETC-USDT-SWAP",
+      "ETH-USDT-SWAP",
+      "SOL-USDT-SWAP",
+      "ADA-USDT-SWAP",
+      "AVAX-USDT-SWAP",
+      "DOT-USDT-SWAP",
+      "ATOM-USDT-SWAP",
+      "NEAR-USDT-SWAP",
+      "OP-USDT-SWAP",
+      "LINK-USDT-SWAP",
+      "UNI-USDT-SWAP",
+      "FIL-USDT-SWAP"
+    ],
+    "fields": [
+      "ts",
+      "open",
+      "high",
+      "low",
+      "close",
+      "is_closed",
+      "funding_time",
+      "funding_rate"
+    ],
+    "start_utc": "2023-06-15T00:00:00Z",
+    "end_utc": "2026-06-16T12:00:00Z",
+    "closed_only": true
+  },
+  "data_gate": {
+    "min_symbols": 18,
+    "coverage_ratio": 1.0,
+    "min_history_days": 1000,
+    "min_new_days": 30,
+    "max_gap_ratio": 0.02
+  },
+  "parameter_space": {
+    "all_choices_declared_before_pnl": true,
+    "declared_free_parameters": 0,
+    "declared_combinations": 1,
+    "parameters": [
+      {
+        "name": "lookback_days",
+        "value": 56,
+        "tuned": false
+      },
+      {
+        "name": "rebalance_days",
+        "value": 7,
+        "tuned": false
+      },
+      {
+        "name": "long_sector_count",
+        "value": 1,
+        "tuned": false
+      },
+      {
+        "name": "short_sector_count",
+        "value": 1,
+        "tuned": false
+      },
+      {
+        "name": "sector_taxonomy_version",
+        "value": "H19_THREE_SECTOR_V1",
+        "tuned": false
+      }
+    ]
+  },
+  "representation_invariance_passed": true,
+  "measurement_semantics_passed": true,
+  "leakage": {
+    "future_returns_opened": false,
+    "pnl_opened": false,
+    "entry_uses_next_tradable_price": true
+  },
+  "code_files": [
+    "D:\\JIAOYI-CX\\HISTORY_PACKAGES_20260621\\RESEARCH\\h19_sector_rank_momentum\\h19_sector_rank_momentum.py"
+  ],
+  "predeclared_costs": {
+    "round_trip_baseline_bps": 16,
+    "stress_multipliers": [
+      1.0,
+      1.5,
+      2.0
+    ],
+    "observed_okx_funding_included": true
+  },
+  "pre_pnl_audit": {
+    "comparison_family": "14_day_cross_sectional_momentum",
+    "mean_same_direction_weight_overlap": 0.24452380952380953,
+    "maximum_overlap": 0.25,
+    "mean_weight_correlation": 0.15217866680158176,
+    "representation_full_agreement": 1.0,
+    "maximum_average_single_symbol_absolute_exposure": 0.11333333333333322,
+    "passed": true
+  },
+  "decision": "PERMANENTLY_REJECTED_AFTER_CALIBRATION_FAILURE_NO_PARAMETER_RESCUE",
+  "result_summary": {
+    "opened_segments": ["calibration"],
+    "validation_opened": false,
+    "lock_opened": false,
+    "baseline_profit_factor": 0.9511367800213705,
+    "baseline_total_return": -0.1032699663428237,
+    "baseline_maximum_drawdown": -0.3792278706428621,
+    "stress_1_5x_profit_factor": 0.892013491263813,
+    "stress_2x_profit_factor": 0.8369652195409006
+  }
+}

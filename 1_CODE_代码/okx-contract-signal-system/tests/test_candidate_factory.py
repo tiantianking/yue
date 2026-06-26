@@ -47,6 +47,16 @@ def test_discover_candidates_only_accepts_schema_v2(tmp_path: Path) -> None:
         json.dumps({"schema": "okx_pre_pnl_candidate_v2", "candidate_id": "template"}),
         encoding="utf-8",
     )
+    (tmp_path / "rejected.json").write_text(
+        json.dumps(
+            {
+                "schema": "okx_pre_pnl_candidate_v2",
+                "candidate_id": "rejected",
+                "status": "REJECT_CALIBRATION_NO_RESCUE",
+            }
+        ),
+        encoding="utf-8",
+    )
     (tmp_path / "broken.json").write_text("not-json", encoding="utf-8")
 
     found = module.discover_candidates(tmp_path)
