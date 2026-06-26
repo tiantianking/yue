@@ -1,6 +1,6 @@
 {
   "schema": "okx_research_family_registry_v1",
-  "updated_at": "2026-06-26T00:00:00Z",
+  "updated_at": "2026-06-26T12:10:00Z",
   "families": [
     {
       "family_id": "14_day_cross_sectional_momentum",
@@ -53,6 +53,62 @@
         "selection": "top_one_bottom_one_fixed_sector_equal_weight_members",
         "universe": "okx_usdt_swap_18_symbol_funding_complete_cross_section",
         "features": ["closed_return", "cross_sectional_rank", "fixed_sector_aggregation", "weekly_rebalance", "observed_funding_cashflow"]
+      }
+    },
+    {
+      "family_id": "MOMENTUM_14D_SECTOR_CAP2_HYSTERESIS6_V1",
+      "status": "rejected_portfolio_variant_no_rescue",
+      "failure_reason": "All historical, falsification, neighborhood and incremental-value gates passed, but mean turnover increased 17.57% versus the frozen 15% maximum.",
+      "family": {
+        "core_signal": "existing_14_day_momentum_with_fixed_sector_membership_cap",
+        "direction": "inherit_parent_momentum_direction",
+        "holding_period_bars": 96,
+        "rebalance_bars": 96,
+        "selection": "top4_entry_top6_exit_max2_members_per_sector_per_side",
+        "universe": "okx_usdt_swap_18_symbol_funding_complete_cross_section",
+        "features": ["closed_return", "cross_sectional_rank", "hysteresis", "fixed_sector_cap", "observed_funding_cashflow"]
+      }
+    },
+    {
+      "family_id": "MOMENTUM_14D_ES7_RISK_WEIGHT_HYSTERESIS6_V1",
+      "status": "rejected_portfolio_variant_no_rescue",
+      "failure_reason": "Random-time empirical p-value was 0.0559, above the frozen 0.05 maximum; the 50/50 portfolio combination also increased the maximum loss streak from 10 to 13 and produced no material incremental improvement.",
+      "family": {
+        "core_signal": "existing_14_day_momentum_with_inverse_expected_shortfall_weighting",
+        "direction": "inherit_parent_momentum_direction",
+        "holding_period_bars": 96,
+        "rebalance_bars": 96,
+        "selection": "top4_entry_top6_exit_membership_unchanged",
+        "universe": "okx_usdt_swap_18_symbol_funding_complete_cross_section",
+        "features": ["closed_return", "cross_sectional_rank", "hysteresis", "7_day_expected_shortfall", "inverse_risk_weighting", "observed_funding_cashflow"]
+      }
+    },
+    {
+      "family_id": "MOMENTUM_14D_RANK_CONVICTION_HYSTERESIS6_V1",
+      "status": "rejected_portfolio_variant_no_rescue",
+      "failure_reason": "Mean turnover increased 32.43%; stress PF was 0.9804; maximum drawdown worsened to 36.75%; random-time empirical p-value was 0.0758; portfolio increment failed.",
+      "family": {
+        "core_signal": "existing_14_day_momentum_with_fixed_rank_conviction_weights",
+        "direction": "inherit_parent_momentum_direction",
+        "holding_period_bars": 96,
+        "rebalance_bars": 96,
+        "selection": "top4_entry_top6_exit_membership_unchanged",
+        "universe": "okx_usdt_swap_18_symbol_funding_complete_cross_section",
+        "features": ["closed_return", "cross_sectional_rank", "hysteresis", "fixed_rank_weights", "observed_funding_cashflow"]
+      }
+    },
+    {
+      "family_id": "MOMENTUM_14D_FUNDING_CARRY_TILT_HYSTERESIS6_V1",
+      "status": "rejected_before_pnl_no_rescue",
+      "failure_reason": "Causal funding coverage and ambiguity gates passed, but target turnover increased 24.68% versus the frozen 15% maximum; future returns and PnL remained closed.",
+      "family": {
+        "core_signal": "existing_14_day_momentum_with_causal_funding_carry_tilt",
+        "direction": "inherit_parent_momentum_direction",
+        "holding_period_bars": 96,
+        "rebalance_bars": 96,
+        "selection": "top4_entry_top6_exit_membership_unchanged",
+        "universe": "okx_usdt_swap_18_symbol_funding_complete_cross_section",
+        "features": ["closed_return", "cross_sectional_rank", "hysteresis", "last_three_known_funding_settlements", "holding_cost_tilt"]
       }
     }
   ]

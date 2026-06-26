@@ -1,0 +1,179 @@
+{
+  "schema": "okx_existing_alpha_portfolio_variant_protocol_v1",
+  "protocol_id": "MOMENTUM_14D_SECTOR_CAP2_HYSTERESIS6_V1",
+  "status": "LOCKED_BEFORE_PNL",
+  "locked_at_utc": "2026-06-26T10:20:00Z",
+  "purpose": "Test a portfolio-construction variant of the existing 14-day cross-sectional momentum research shadow. This is not an independent Alpha family.",
+  "production_effect": "NONE",
+  "automatic_ordering": false,
+  "formal_a_allowed": false,
+  "family_relationship": {
+    "parent": "14_day_cross_sectional_momentum",
+    "independent_family_claim": false,
+    "new_h_number_allowed": false,
+    "success_ceiling": "HISTORICALLY_SUPPORTED_RESEARCH_SHADOW_ONLY"
+  },
+  "universe": {
+    "exchange": "OKX",
+    "instrument_type": "USDT perpetual swaps",
+    "symbols": [
+      "BTC-USDT-SWAP",
+      "ETH-USDT-SWAP",
+      "SOL-USDT-SWAP",
+      "XRP-USDT-SWAP",
+      "DOGE-USDT-SWAP",
+      "ADA-USDT-SWAP",
+      "LINK-USDT-SWAP",
+      "AVAX-USDT-SWAP",
+      "LTC-USDT-SWAP",
+      "DOT-USDT-SWAP",
+      "BCH-USDT-SWAP",
+      "TRX-USDT-SWAP",
+      "UNI-USDT-SWAP",
+      "ETC-USDT-SWAP",
+      "FIL-USDT-SWAP",
+      "ATOM-USDT-SWAP",
+      "NEAR-USDT-SWAP",
+      "OP-USDT-SWAP"
+    ],
+    "sectors": {
+      "PAYMENTS_POW": [
+        "BTC-USDT-SWAP",
+        "XRP-USDT-SWAP",
+        "DOGE-USDT-SWAP",
+        "LTC-USDT-SWAP",
+        "BCH-USDT-SWAP",
+        "TRX-USDT-SWAP",
+        "ETC-USDT-SWAP"
+      ],
+      "SMART_CONTRACT_EXECUTION_SCALING": [
+        "ETH-USDT-SWAP",
+        "SOL-USDT-SWAP",
+        "ADA-USDT-SWAP",
+        "AVAX-USDT-SWAP",
+        "DOT-USDT-SWAP",
+        "ATOM-USDT-SWAP",
+        "NEAR-USDT-SWAP",
+        "OP-USDT-SWAP"
+      ],
+      "DEFI_DATA_STORAGE": [
+        "LINK-USDT-SWAP",
+        "UNI-USDT-SWAP",
+        "FIL-USDT-SWAP"
+      ]
+    }
+  },
+  "signal": {
+    "source": "strictly closed 15-minute OKX bars resampled to closed 4-hour bars, restricted to the 18 mature contracts with complete archived OKX funding history",
+    "formation_bars_4h": 84,
+    "formation_days": 14,
+    "signal_bar": "00:00 UTC 4-hour bar",
+    "known_at": "04:00 UTC after the signal bar closes",
+    "entry": "04:00 UTC open, with 15-minute delayed execution used only as a frozen falsification",
+    "holding_period_hours": 24,
+    "long_count": 4,
+    "short_count": 4,
+    "gross_exposure": 1.0,
+    "net_exposure": 0.0
+  },
+  "primary_variant": {
+    "entry_rank": 4,
+    "exit_rank": 6,
+    "maximum_members_per_sector_per_side": 2,
+    "weighting": "equal weight within each side"
+  },
+  "baseline": {
+    "name": "14-day momentum top-4 entry top-6 exit hysteresis without sector cap",
+    "relationship": "existing research shadow"
+  },
+  "parameter_neighborhood": [
+    {
+      "config_id": "primary_cap2_hysteresis6",
+      "is_primary": true,
+      "distance": 0.0,
+      "maximum_members_per_sector_per_side": 2,
+      "exit_rank": 6
+    },
+    {
+      "config_id": "neighbor_cap3_hysteresis6",
+      "is_primary": false,
+      "distance": 0.5,
+      "maximum_members_per_sector_per_side": 3,
+      "exit_rank": 6
+    },
+    {
+      "config_id": "neighbor_cap2_plain",
+      "is_primary": false,
+      "distance": 1.0,
+      "maximum_members_per_sector_per_side": 2,
+      "exit_rank": 4
+    },
+    {
+      "config_id": "neighbor_cap3_plain",
+      "is_primary": false,
+      "distance": 1.0,
+      "maximum_members_per_sector_per_side": 3,
+      "exit_rank": 4
+    }
+  ],
+  "costs": {
+    "one_way_baseline": 0.0008,
+    "round_trip_reference_bps": 16,
+    "one_way_stress": 0.0016,
+    "round_trip_stress_bps": 32
+  },
+  "falsification": {
+    "random_time_trials": 500,
+    "random_seed": 20260626,
+    "randomization": "circularly shift the complete target-weight path against the original tradable daily entry times",
+    "direction_reversal": true,
+    "entry_delay_minutes": 15,
+    "empirical_alpha": 0.05
+  },
+  "structural_gates": {
+    "minimum_representation_agreement": 0.95,
+    "minimum_sector_cap_binding_fraction": 0.10,
+    "maximum_single_symbol_slot_share": 0.20,
+    "maximum_sector_slot_share_per_side": 0.50,
+    "maximum_turnover_increase_vs_baseline": 0.15
+  },
+  "historical_gates": {
+    "minimum_base_profit_factor": 1.05,
+    "minimum_stress_profit_factor": 1.00,
+    "maximum_base_pf_loss_vs_baseline": 0.03,
+    "maximum_drawdown_increase_vs_baseline": 0.02,
+    "minimum_positive_chronological_segments": 2
+  },
+  "robustness_gates": {
+    "observed_above_random_95th_percentile": true,
+    "maximum_random_time_empirical_p": 0.05,
+    "minimum_reverse_pf_gap": 0.10,
+    "maximum_reverse_net_r_fraction": 0.25,
+    "minimum_delayed_profit_factor": 1.0,
+    "minimum_delayed_net_r_retention": 0.35,
+    "minimum_positive_neighbor_ratio": 0.6666666666666666,
+    "minimum_neighbor_median_profit_factor": 1.0,
+    "maximum_primary_to_neighbor_median_pf_ratio": 2.0
+  },
+  "portfolio_increment_gates": {
+    "comparison": "50 percent existing hysteresis plus 50 percent primary sector-capped hysteresis at unchanged unit gross exposure",
+    "maximum_pf_deterioration": 0.03,
+    "maximum_drawdown_deterioration": 0.02,
+    "maximum_loss_streak_increase": 1,
+    "required_improvements_any": {
+      "profit_factor": 0.03,
+      "maximum_drawdown": 0.02,
+      "maximum_loss_streak": 2,
+      "effective_signal_fraction": 0.10,
+      "effective_signal_absolute": 5,
+      "positive_regime_count": 1
+    }
+  },
+  "prohibitions": [
+    "Do not change the sector taxonomy, cap, lookback, entry phase, holding period, direction, universe, costs, or neighborhood after opening outcomes.",
+    "Do not remove symbols or sectors to rescue a failure.",
+    "Do not claim an independent Alpha family or assign a new H number.",
+    "Do not promote to formal A-tier from historical results.",
+    "Do not enable automatic ordering or position management."
+  ]
+}

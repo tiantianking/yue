@@ -1,0 +1,98 @@
+{
+  "schema": "okx_existing_alpha_portfolio_variant_protocol_v1",
+  "protocol_id": "MOMENTUM_14D_FUNDING_CARRY_TILT_HYSTERESIS6_V1",
+  "status": "LOCKED_BEFORE_PNL",
+  "locked_at_utc": "2026-06-26T11:45:00Z",
+  "purpose": "Test a mild causal funding-carry tilt inside the existing 14-day momentum memberships. This optimizes an observable holding cost and does not claim a new Alpha family.",
+  "production_effect": "NONE",
+  "automatic_ordering": false,
+  "formal_a_allowed": false,
+  "family_relationship": {
+    "parent": "14_day_cross_sectional_momentum",
+    "independent_family_claim": false,
+    "new_h_number_allowed": false,
+    "success_ceiling": "HISTORICALLY_SUPPORTED_RESEARCH_SHADOW_ONLY"
+  },
+  "universe": {
+    "exchange": "OKX",
+    "instrument_type": "USDT perpetual swaps",
+    "symbols": [
+      "BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "XRP-USDT-SWAP",
+      "DOGE-USDT-SWAP", "ADA-USDT-SWAP", "LINK-USDT-SWAP", "AVAX-USDT-SWAP",
+      "LTC-USDT-SWAP", "DOT-USDT-SWAP", "BCH-USDT-SWAP", "TRX-USDT-SWAP",
+      "UNI-USDT-SWAP", "ETC-USDT-SWAP", "FIL-USDT-SWAP", "ATOM-USDT-SWAP",
+      "NEAR-USDT-SWAP", "OP-USDT-SWAP"
+    ]
+  },
+  "signal": {
+    "membership_rule": "14-day momentum top-4 entry, top-6 exit hysteresis",
+    "funding_proxy": "mean of the last three OKX funding settlements whose funding_time is not later than the 04:00 UTC entry",
+    "unit_carry_benefit": "negative position sign multiplied by the causal funding mean",
+    "holding_period_hours": 24,
+    "gross_exposure": 1.0,
+    "net_exposure": 0.0
+  },
+  "primary_variant": {
+    "side_weights_by_carry_benefit": [0.15, 0.13, 0.12, 0.10],
+    "maximum_absolute_symbol_weight": 0.15,
+    "refresh": "refresh only when either long or short membership changes"
+  },
+  "parameter_neighborhood": [
+    {"config_id": "primary_15_13_12_10", "is_primary": true, "distance": 0.0, "side_weights": [0.15, 0.13, 0.12, 0.10]},
+    {"config_id": "neighbor_mild_14_13_12_11", "is_primary": false, "distance": 0.5, "side_weights": [0.14, 0.13, 0.12, 0.11]},
+    {"config_id": "neighbor_16_13_11_10", "is_primary": false, "distance": 0.75, "side_weights": [0.16, 0.13, 0.11, 0.10]},
+    {"config_id": "neighbor_15_14_11_10", "is_primary": false, "distance": 1.0, "side_weights": [0.15, 0.14, 0.11, 0.10]}
+  ],
+  "pre_pnl_gates": {
+    "minimum_complete_score_fraction": 1.0,
+    "maximum_ambiguous_refresh_fraction": 0.15,
+    "minimum_nonzero_dispersion_fraction": 0.80,
+    "maximum_target_turnover_increase_vs_baseline": 0.15
+  },
+  "costs": {
+    "one_way_baseline": 0.0008,
+    "one_way_stress": 0.0016
+  },
+  "falsification": {
+    "random_time_trials": 500,
+    "random_seed": 20260629,
+    "entry_delay_minutes": 15
+  },
+  "historical_gates": {
+    "minimum_base_profit_factor": 1.05,
+    "minimum_stress_profit_factor": 1.00,
+    "maximum_base_pf_loss_vs_baseline": 0.03,
+    "maximum_drawdown_increase_vs_baseline": 0.02,
+    "minimum_positive_chronological_segments": 2
+  },
+  "robustness_gates": {
+    "maximum_random_time_empirical_p": 0.05,
+    "minimum_reverse_pf_gap": 0.10,
+    "maximum_reverse_net_r_fraction": 0.25,
+    "minimum_delayed_profit_factor": 1.0,
+    "minimum_delayed_net_r_retention": 0.35,
+    "minimum_positive_neighbor_ratio": 0.6666666666666666,
+    "minimum_neighbor_median_profit_factor": 1.0,
+    "maximum_primary_to_neighbor_median_pf_ratio": 2.0
+  },
+  "portfolio_increment_gates": {
+    "maximum_pf_deterioration": 0.03,
+    "maximum_drawdown_deterioration": 0.02,
+    "maximum_loss_streak_increase": 1,
+    "required_improvements_any": {
+      "profit_factor": 0.03,
+      "maximum_drawdown": 0.02,
+      "maximum_loss_streak": 2,
+      "effective_signal_fraction": 0.10,
+      "effective_signal_absolute": 5,
+      "positive_regime_count": 1
+    }
+  },
+  "prohibitions": [
+    "Do not change the funding lookback, side-weight vectors, tie rule, refresh rule, membership rule, universe, costs, or gates after the audit starts.",
+    "If the pre-PnL score ambiguity or turnover gate fails, do not open future returns or PnL.",
+    "Do not claim an independent Alpha family or assign a new H number.",
+    "Do not promote to formal A-tier from historical results.",
+    "Do not enable automatic ordering or position management."
+  ]
+}

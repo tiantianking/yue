@@ -94,7 +94,7 @@ def test_release_version_sources_stay_consistent() -> None:
     gui_text = _read("gui.py")
     start_text = _read("start.bat")
 
-    assert package_version == "3.56.20"
+    assert package_version == "3.56.22"
     assert pyproject["project"]["version"] == package_version
     assert APPROVED_STRATEGY_VERSION == "3.56.15"
     assert f"Version: {package_version}" in pkg_info
@@ -136,8 +136,12 @@ def test_research_package_is_in_distribution_sources() -> None:
     for path in [
         "src/okx_signal_system/research/__init__.py",
         "src/okx_signal_system/research/approved_strategy_manifest.py",
+        "src/okx_signal_system/research/downside_risk_weighting.py",
+        "src/okx_signal_system/research/funding_carry_tilt.py",
         "src/okx_signal_system/research/parallel_acceptance.py",
         "src/okx_signal_system/research/promote.py",
+        "src/okx_signal_system/research/rank_conviction_weighting.py",
+        "src/okx_signal_system/research/sector_balanced_momentum.py",
         "src/okx_signal_system/research/shadow_ensemble_acceptance.py",
     ]:
         assert path in sources
@@ -192,7 +196,7 @@ def test_release_file_manifest_is_present_and_self_including() -> None:
     assert "docs/CHANGE_CONTROL_POLICY_CN.md" in lines
     assert "docs/DEPLOYMENT_CHECKLIST_CN.md" in lines
     assert "docs/PROJECT_OVERVIEW_CN.md" in lines
-    assert "docs/V3.56.20_RELEASE_CN.md" in lines
+    assert "docs/V3.56.22_RELEASE_CN.md" in lines
     assert len(lines) == len(set(lines))
     assert all("\\" not in line and not line.startswith("/") and ".." not in Path(line).parts for line in lines)
 

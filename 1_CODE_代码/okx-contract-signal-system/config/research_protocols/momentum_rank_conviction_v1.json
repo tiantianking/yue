@@ -1,0 +1,147 @@
+{
+  "schema": "okx_existing_alpha_portfolio_variant_protocol_v1",
+  "protocol_id": "MOMENTUM_14D_RANK_CONVICTION_HYSTERESIS6_V1",
+  "status": "LOCKED_BEFORE_PNL",
+  "locked_at_utc": "2026-06-26T11:20:00Z",
+  "purpose": "Test fixed within-side rank-conviction weights for the existing 14-day cross-sectional momentum research shadow without changing membership, direction, or claiming a new Alpha family.",
+  "production_effect": "NONE",
+  "automatic_ordering": false,
+  "formal_a_allowed": false,
+  "family_relationship": {
+    "parent": "14_day_cross_sectional_momentum",
+    "independent_family_claim": false,
+    "new_h_number_allowed": false,
+    "success_ceiling": "HISTORICALLY_SUPPORTED_RESEARCH_SHADOW_ONLY"
+  },
+  "universe": {
+    "exchange": "OKX",
+    "instrument_type": "USDT perpetual swaps",
+    "symbols": [
+      "BTC-USDT-SWAP",
+      "ETH-USDT-SWAP",
+      "SOL-USDT-SWAP",
+      "XRP-USDT-SWAP",
+      "DOGE-USDT-SWAP",
+      "ADA-USDT-SWAP",
+      "LINK-USDT-SWAP",
+      "AVAX-USDT-SWAP",
+      "LTC-USDT-SWAP",
+      "DOT-USDT-SWAP",
+      "BCH-USDT-SWAP",
+      "TRX-USDT-SWAP",
+      "UNI-USDT-SWAP",
+      "ETC-USDT-SWAP",
+      "FIL-USDT-SWAP",
+      "ATOM-USDT-SWAP",
+      "NEAR-USDT-SWAP",
+      "OP-USDT-SWAP"
+    ]
+  },
+  "signal": {
+    "source": "strictly closed 15-minute OKX bars resampled to closed 4-hour bars",
+    "formation_bars_4h": 84,
+    "formation_days": 14,
+    "membership_rule": "top-4 entry, top-6 exit hysteresis; four long and four short",
+    "signal_bar": "00:00 UTC 4-hour bar",
+    "known_at": "04:00 UTC after the signal bar closes",
+    "entry": "04:00 UTC open, with 15-minute delayed execution used only as a frozen falsification",
+    "holding_period_hours": 24,
+    "gross_exposure": 1.0,
+    "net_exposure": 0.0
+  },
+  "primary_variant": {
+    "within_side_order": "strongest selected long to weakest selected long; weakest selected short to strongest selected short",
+    "side_weights": [0.20, 0.15, 0.10, 0.05],
+    "maximum_absolute_symbol_weight": 0.20,
+    "refresh": "refresh conviction weights only when either long or short membership changes"
+  },
+  "baseline": {
+    "name": "14-day momentum top-4 entry top-6 exit equal-weight hysteresis",
+    "relationship": "existing research shadow"
+  },
+  "parameter_neighborhood": [
+    {
+      "config_id": "primary_20_15_10_05",
+      "is_primary": true,
+      "distance": 0.0,
+      "side_weights": [0.20, 0.15, 0.10, 0.05]
+    },
+    {
+      "config_id": "neighbor_mild_175_15_10_075",
+      "is_primary": false,
+      "distance": 0.5,
+      "side_weights": [0.175, 0.15, 0.10, 0.075]
+    },
+    {
+      "config_id": "neighbor_middle_19_15_09_07",
+      "is_primary": false,
+      "distance": 0.75,
+      "side_weights": [0.19, 0.15, 0.09, 0.07]
+    },
+    {
+      "config_id": "neighbor_steep_20_175_075_05",
+      "is_primary": false,
+      "distance": 1.0,
+      "side_weights": [0.20, 0.175, 0.075, 0.05]
+    }
+  ],
+  "costs": {
+    "one_way_baseline": 0.0008,
+    "round_trip_reference_bps": 16,
+    "one_way_stress": 0.0016,
+    "round_trip_stress_bps": 32
+  },
+  "falsification": {
+    "random_time_trials": 500,
+    "random_seed": 20260628,
+    "randomization": "circularly shift the complete conviction-weight target path against the original tradable daily entry times",
+    "direction_reversal": true,
+    "entry_delay_minutes": 15,
+    "empirical_alpha": 0.05
+  },
+  "structural_gates": {
+    "minimum_representation_agreement": 0.95,
+    "minimum_active_weight_deviation_fraction": 0.10,
+    "maximum_absolute_symbol_weight": 0.20,
+    "maximum_turnover_increase_vs_baseline": 0.15
+  },
+  "historical_gates": {
+    "minimum_base_profit_factor": 1.05,
+    "minimum_stress_profit_factor": 1.00,
+    "maximum_base_pf_loss_vs_baseline": 0.03,
+    "maximum_drawdown_increase_vs_baseline": 0.02,
+    "minimum_positive_chronological_segments": 2
+  },
+  "robustness_gates": {
+    "observed_above_random_95th_percentile": true,
+    "maximum_random_time_empirical_p": 0.05,
+    "minimum_reverse_pf_gap": 0.10,
+    "maximum_reverse_net_r_fraction": 0.25,
+    "minimum_delayed_profit_factor": 1.0,
+    "minimum_delayed_net_r_retention": 0.35,
+    "minimum_positive_neighbor_ratio": 0.6666666666666666,
+    "minimum_neighbor_median_profit_factor": 1.0,
+    "maximum_primary_to_neighbor_median_pf_ratio": 2.0
+  },
+  "portfolio_increment_gates": {
+    "comparison": "50 percent existing equal-weight hysteresis plus 50 percent primary rank-conviction hysteresis at unchanged unit gross exposure",
+    "maximum_pf_deterioration": 0.03,
+    "maximum_drawdown_deterioration": 0.02,
+    "maximum_loss_streak_increase": 1,
+    "required_improvements_any": {
+      "profit_factor": 0.03,
+      "maximum_drawdown": 0.02,
+      "maximum_loss_streak": 2,
+      "effective_signal_fraction": 0.10,
+      "effective_signal_absolute": 5,
+      "positive_regime_count": 1
+    }
+  },
+  "prohibitions": [
+    "Do not change the side-weight vector, refresh rule, membership rule, direction, universe, costs, or neighborhood after opening outcomes.",
+    "Do not choose a historically superior weight vector outside the predeclared neighborhood to rescue a failure.",
+    "Do not claim an independent Alpha family or assign a new H number.",
+    "Do not promote to formal A-tier from historical results.",
+    "Do not enable automatic ordering or position management."
+  ]
+}
