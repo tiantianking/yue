@@ -1,0 +1,155 @@
+{
+  "register_id": "TWELFTH_WAVE_OFFICIAL_FIELD_REFRESH_20260627",
+  "status": "COMPLETE_NO_NEW_OFFICIAL_FIELD_ROUTE",
+  "completed_at_utc": "2026-06-27T05:37:46.995102Z",
+  "research_scope": {
+    "exchange": "OKX only",
+    "official_public_fields_only": true,
+    "future_returns_opened": false,
+    "pnl_opened": false,
+    "validation_opened": false,
+    "locked_holdout_opened": false,
+    "production_changed": false,
+    "automatic_orders": false
+  },
+  "purpose": "Refresh the frozen Stage4 official-field scanner, resolve the distinction between short local hourly OI imports and long official daily OI history, and test whether apparent 180-day API windows can be paginated backward before registering any new candidate.",
+  "stage4_refresh": {
+    "source": "STAGE4_OFFICIAL_FIELD_COVERAGE_RESULT.json",
+    "status": "STAGE4_COMPLETE_NO_NEW_INDEPENDENT_DATA_ROUTE",
+    "ready_route_count": 0,
+    "history_valid_failed_family_count": 1,
+    "data_rejected_route_count": 6,
+    "routes": {
+      "F07_DAILY_OPEN_INTEREST": {
+        "eligible_targets": 18,
+        "target_count": 18,
+        "common_timestamp_count": 908,
+        "common_start_utc": "2023-12-31T16:00:00Z",
+        "common_end_utc": "2026-06-26T16:00:00Z",
+        "history_gate_passed": true,
+        "failure_fingerprints": ["FP12_OPEN_INTEREST_LEVERAGE_PROXY"],
+        "decision": "HISTORY_VALID_BUT_EXISTING_FAILED_FAMILY_NO_PNL"
+      },
+      "F13_MARGIN_LOAN_RATIO": {
+        "rows_per_target": 180,
+        "calendar_days": 179,
+        "common_start_utc": "2025-12-29T16:00:00Z",
+        "common_end_utc": "2026-06-26T16:00:00Z",
+        "history_gate_passed": false,
+        "decision": "REJECT_DATA_HISTORY_GATE_NO_PNL"
+      },
+      "F18_TAKER_VOLUME_AGGREGATE": {
+        "rows_per_target": 180,
+        "calendar_days": 179,
+        "history_gate_passed": false,
+        "failure_fingerprints": ["FP08_ORDERFLOW_CONTINUATION", "FP09_ORDERFLOW_ABSORPTION"],
+        "decision": "REJECT_DATA_HISTORY_GATE_NO_PNL"
+      },
+      "F19_CONTRACT_OI_VOLUME_AGGREGATE": {
+        "rows_per_target": 180,
+        "calendar_days": 179,
+        "history_gate_passed": false,
+        "failure_fingerprints": ["FP05_VOLUME_LIQUIDITY", "FP12_OPEN_INTEREST_LEVERAGE_PROXY"],
+        "decision": "REJECT_DATA_HISTORY_GATE_NO_PNL"
+      },
+      "F20_OPTION_OI_VOLUME": {
+        "rows_per_target": 72,
+        "calendar_days": 71,
+        "history_gate_passed": false,
+        "failure_fingerprints": ["FP14_OPTION_DIRECTIONAL_FLOW"],
+        "decision": "REJECT_DATA_HISTORY_GATE_NO_PNL"
+      },
+      "F21_OPTION_PUT_CALL_RATIO": {
+        "rows_per_target": 72,
+        "calendar_days": 71,
+        "history_gate_passed": false,
+        "decision": "REJECT_DATA_HISTORY_GATE_NO_PNL"
+      },
+      "F16_INSURANCE_FUND": {
+        "scanner_mode": "current_nested_snapshot",
+        "observed_rows": 100,
+        "observed_span_minutes": 99,
+        "history_gate_passed": false,
+        "failure_fingerprints": ["FP13_LIQUIDATION_PROXY", "FP23_INSURANCE_FUND_PRESSURE"],
+        "decision": "REJECT_SHORT_OR_UNAUDITED_HISTORY_AND_CLOSED_RARE_EVENT_FAMILY_NO_PNL"
+      }
+    }
+  },
+  "manual_pagination_probe": {
+    "margin_loan_ratio": {
+      "base_rows": 180,
+      "base_range_utc": ["2025-12-29T16:00:00Z", "2026-06-26T16:00:00Z"],
+      "end_older_than_oldest_rows": 0,
+      "before_parameter_changed_window": false,
+      "after_parameter_changed_window": false,
+      "begin_parameter_changed_window": false,
+      "conclusion": "The public route exposes a rolling 180-row daily window under the tested parameters; no backward history route was found."
+    },
+    "taker_volume_aggregate": {
+      "base_rows": 180,
+      "base_range_utc": ["2025-12-29T16:00:00Z", "2026-06-26T16:00:00Z"],
+      "end_older_than_oldest_rows": 0,
+      "before_parameter_changed_window": false,
+      "after_parameter_changed_window": false,
+      "begin_parameter_changed_window": false,
+      "conclusion": "The public route exposes a rolling 180-row daily window under the tested parameters and remains below the frozen 365-day gate."
+    },
+    "insurance_fund": {
+      "base_details": 100,
+      "base_range_utc": ["2026-06-27T03:54:32Z", "2026-06-27T05:33:32Z"],
+      "after_parameter_returned_older_page": true,
+      "older_page_range_utc": ["2026-06-27T02:14:32Z", "2026-06-27T03:53:32Z"],
+      "conclusion": "Backward paging exists, but the field is a system-level insurance-fund state rather than a mature per-contract cross-section; it also belongs to closed liquidation/insurance-pressure rare-event families. No bulk history collection is authorized."
+    },
+    "liquidation_orders": {
+      "base_detail_count": 1600,
+      "base_range_utc": ["2026-06-26T10:47:33.115Z", "2026-06-27T05:31:20.327Z"],
+      "after_parameter_returned_older_page": true,
+      "older_page_detail_count": 668,
+      "older_page_range_utc": ["2026-06-26T06:03:43.074Z", "2026-06-26T10:47:33.094Z"],
+      "conclusion": "Recent liquidation records can page backward, but the route is short-window, event-driven and directly duplicates the closed forced-flow/liquidation family. No data download or candidate registration is allowed."
+    }
+  },
+  "state_correction": {
+    "superseded_statement": "Native OI is simply waiting for more data.",
+    "correct_distinction": {
+      "local_imported_hourly_oi": "Short and uneven 16-base archive from roughly 2026-04 to 2026-06; not the authoritative reason for closing the family.",
+      "official_okx_daily_oi": "Mature 18-symbol, 908-common-day history from 2023-12-31 through 2026-06-26."
+    },
+    "current_decision": "Do not wait for more daily OI history. I023-I025 are closed because their price-plus-OI continuation, reversal and deleveraging mechanisms hit FP12 and prior momentum/reversal/liquidation duplicates, with cost scale or direction not independently identified before PnL."
+  },
+  "primary_evidence": [
+    {
+      "identifier": "arXiv:2310.14973",
+      "title": "Reconciling Open Interest with Traded Volume in Perpetual Swaps",
+      "use": "Supports caution about exchange OI measurement and leverage interpretation; it does not establish a unique cross-sectional return direction from OI."
+    },
+    {
+      "identifier": "arXiv:2602.00776",
+      "title": "Explainable Patterns in Cryptocurrency Microstructure",
+      "use": "Predictive microstructure evidence relies on continuous one-second order-book and trade features, not daily aggregate taker or OI fields."
+    },
+    {
+      "identifier": "arXiv:2212.06888",
+      "title": "Fundamentals of Perpetual Futures",
+      "use": "Provides a theoretical basis for perpetual/spot/funding convergence, a family already closed in this project; it does not create an independent OI Alpha."
+    }
+  ],
+  "counts": {
+    "official_routes_refreshed": 7,
+    "manual_pagination_routes_probed": 4,
+    "new_routes_passing_history_and_independence": 0,
+    "new_candidates_registered": 0,
+    "return_blind_audits_opened": 0,
+    "pnl_opened": 0,
+    "production_changes": 0
+  },
+  "formal_decision": "NO_NEW_OFFICIAL_OKX_FIELD_ROUTE_PASSES_HISTORY_INDEPENDENCE_PAYER_AND_DIRECTION_GATES",
+  "allowed_next_work": [
+    "continue H22, V357 and H27 prospective evidence updates",
+    "retain mature official daily OI as a closed-family diagnostic control rather than waiting for more data",
+    "passively recheck the rolling 180-day and 72-day official routes only when the API itself exposes materially longer history; do not collect duplicate daily snapshots expecting the public window to grow",
+    "search for a genuinely different OKX point-in-time field with a direct per-contract payer and unique ex-ante direction"
+  ],
+  "production_effect": "NONE"
+}

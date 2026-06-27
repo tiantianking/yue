@@ -834,3 +834,25 @@
 ### Current recovery point
 - Keep positioning ratios as diagnostic controls only. Recheck native OI only after local coverage materially extends; do not repeatedly rerun the same short sample.
 - Continue H22, V357 and H27 forward evidence and continue searching only for a new OKX point-in-time field with an observable payer and unique ex-ante direction.
+
+## 2026-06-27 - Task: twelfth-wave official OKX field refresh and OI state correction
+### What was done
+- Re-ran the frozen Stage4 official-field scanner instead of generating another strategy family. Seven official OKX routes were refreshed and four pagination semantics were probed directly without reading returns or PnL.
+- Corrected the OI state distinction. The short local imported hourly OI archive remains uneven and covers roughly 16 bases from 2026-04 to 2026-06, but the official OKX daily OI route now has 18/18 symbols and 908 exact common daily timestamps from 2023-12-31 through 2026-06-26.
+- Daily OI therefore no longer fails the history gate. It remains closed because I023-I025 are price-plus-OI continuation, reversal or deleveraging expressions that hit `FP12_OPEN_INTEREST_LEVERAGE_PROXY` and prior momentum, reversal and liquidation families; payer, direction and cost compensation are not independently identified before PnL.
+- Margin loan ratio, aggregate taker volume and aggregate contract OI/volume still expose 180 daily rows and 179 calendar days. Direct tests with `end`, `before`, `after` and `begin` did not retrieve older windows for margin or taker routes.
+- BTC/ETH option OI, volume and put/call aggregate routes expose 72 daily rows and 71 days, below the frozen 365-day history gate.
+- Insurance-fund and liquidation endpoints can move to an older recent page with the `after` parameter, but they remain system-level or short-window event records, duplicate the closed liquidation/insurance-pressure families and violate the no-rare-marginal-event research policy. No bulk download or candidate was opened.
+### Evidence and artifacts
+- Added `TWELFTH_WAVE_OFFICIAL_FIELD_REFRESH_20260627.json` and `TWELFTH_WAVE_OFFICIAL_FIELD_REFRESH_20260627_CN.md` under the local-only discovery archive.
+- Refreshed Stage4 measured `ready_route_count=0`, one history-valid failed family and six data-rejected routes.
+- Primary evidence recorded: `arXiv:2310.14973`, `arXiv:2602.00776` and `arXiv:2212.06888`. These support OI measurement caution, continuous-L2 microstructure or perpetual/spot/funding convergence, not an independent daily-OI Alpha.
+- Added a concise Chinese note to the Desktop `失败策略` folder and updated its JSON index.
+### Safety boundary
+- No future return, PnL, validation segment or locked holdout was opened.
+- No I023-I025 parameter, sign, horizon, symbol subset or filter was changed after the 908-day history correction.
+- No new data collector, bulk download, runtime strategy, formal signal, A-grade, Feishu, leverage, account, position, order or approved-manifest logic was introduced.
+- Application version remains `3.56.28`.
+### Current recovery point
+- Treat positioning ratios and official daily OI as closed-family diagnostics, not waiting candidates. Do not rerun them merely because more dates arrive.
+- Recheck the current 179-day and 71-day official routes only if the API itself exposes materially longer history. Continue H22, V357 and H27 forward evidence and search only for a genuinely different OKX contract-level field with an observable payer and unique ex-ante direction.
