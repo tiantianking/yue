@@ -1,0 +1,148 @@
+{
+  "register_id": "TENTH_WAVE_LITERATURE_INTAKE_20260627",
+  "status": "COMPLETE_NO_ADMISSIBLE_NEW_ALPHA",
+  "completed_at_utc": "2026-06-27T05:13:47Z",
+  "research_scope": {
+    "exchange": "OKX only",
+    "existing_local_data_only": true,
+    "cross_venue_strategy": false,
+    "new_bulk_data": false,
+    "continuous_l2": false,
+    "future_returns_opened": false,
+    "pnl_opened": false,
+    "production_changed": false,
+    "automatic_orders": false
+  },
+  "funnel": {
+    "stage_1_primary_evidence_search": "PASS",
+    "stage_2_distinct_payer_and_unique_direction": "NO_IDEA_PASSED",
+    "stage_3_local_point_in_time_data": "NO_IDEA_PASSED",
+    "stage_4_family_alias_and_failure_fingerprint": "ALL_REMAINING_IDEAS_REJECTED",
+    "stage_5_return_blind_structural_audit": "NOT_OPENED",
+    "stage_6_pnl": "SEALED"
+  },
+  "primary_evidence": [
+    {
+      "identifier": "arXiv:2601.07664",
+      "title": "Crypto Pricing with Hidden Factors",
+      "relevance": "Latent crypto and equity-industry factor exposure, plus external sentiment, rotation and security-shock state variables."
+    },
+    {
+      "identifier": "arXiv:2510.14435",
+      "title": "Cryptocurrency as an Investable Asset Class: Coming of Age",
+      "relevance": "Broad asset-pricing evidence that jumps and blockchain information are economically important."
+    },
+    {
+      "identifier": "arXiv:2602.00776",
+      "title": "Explainable Patterns in Cryptocurrency Microstructure",
+      "relevance": "Stable short-horizon predictive structure from one-second limit-order-book and trade features."
+    },
+    {
+      "identifier": "arXiv:2405.15716",
+      "title": "Empirical Crypto Asset Pricing",
+      "relevance": "Large characteristic screen in which statistically significant long-short evidence was concentrated in functions of past returns."
+    },
+    {
+      "identifier": "arXiv:2212.06888",
+      "title": "Fundamentals of Perpetual Futures",
+      "relevance": "Perpetual-versus-spot theoretical pricing bounds and convergence mechanism."
+    },
+    {
+      "identifier": "arXiv:2310.04907",
+      "title": "An Information Theory Approach to the Stock and Cryptocurrency Market",
+      "relevance": "Cross-sectional return-distribution and informational-efficiency description, not an identified directional trading premium."
+    }
+  ],
+  "idea_screens": [
+    {
+      "idea_id": "TW01",
+      "name": "latent_crypto_factor_exposure_premium",
+      "proposed_mechanism": "contracts with different exposure to hidden common crypto factors may earn different risk premia",
+      "payer_and_direction": "not uniquely identified before outcomes; an unsupervised factor sign is arbitrary and does not identify who pays",
+      "local_data": "computable from returns only, but requires model-order, factor-number and rotation choices",
+      "duplicate_or_fingerprint": ["FP04_PRICE_PATH_RISK_FACTORS", "FP26_CROSS_ASSET_PRICE_LEAD_LAG"],
+      "decision": "REJECT_AT_INTAKE_NO_UNIQUE_DIRECTION_AND_EXCESS_MODEL_FREEDOM"
+    },
+    {
+      "idea_id": "TW02",
+      "name": "equity_technology_integration_beta",
+      "proposed_mechanism": "crypto contracts exposed to technology and profitability equity factors may command a premium",
+      "payer_and_direction": "risk-compensation sign is not fixed for the local perpetual universe",
+      "local_data": "requires point-in-time external equity-industry factor history, which is outside the frozen local-OKX boundary",
+      "duplicate_or_fingerprint": ["FP27_MACRO_EVENT_DIFFUSION", "FP28_CROSS_VENUE_CONSENSUS"],
+      "decision": "REJECT_AT_INTAKE_EXTERNAL_CROSS_ASSET_DATA_DISALLOWED"
+    },
+    {
+      "idea_id": "TW03",
+      "name": "sentiment_rotation_and_security_shock_state",
+      "proposed_mechanism": "fear-greed, altcoin rotation and hacked-value shocks may change expected crypto returns",
+      "payer_and_direction": "state variables have competing risk-off, rebound and continuation interpretations",
+      "local_data": "requires external sentiment indexes, rotation indexes and event databases; none are present point in time locally",
+      "duplicate_or_fingerprint": ["FP27_MACRO_EVENT_DIFFUSION"],
+      "decision": "REJECT_AT_INTAKE_EXTERNAL_EVENT_DATA_AND_DIRECTION_AMBIGUITY"
+    },
+    {
+      "idea_id": "TW04",
+      "name": "blockchain_fundamental_activity_premium",
+      "proposed_mechanism": "network usage and blockchain fundamentals may lead token valuation and returns",
+      "payer_and_direction": "plausible, but each field requires separate economic sign and token-specific normalization",
+      "local_data": "no point-in-time chain activity, fees, addresses, supply or protocol-revenue history exists in the approved local dataset",
+      "duplicate_or_fingerprint": [],
+      "decision": "REJECT_AT_INTAKE_REQUIRED_CAUSAL_FIELD_UNAVAILABLE"
+    },
+    {
+      "idea_id": "TW05",
+      "name": "portable_limit_order_book_microstructure",
+      "proposed_mechanism": "queue imbalance, spread, depth and adverse-selection features predict very short-horizon returns",
+      "payer_and_direction": "liquidity takers and informed flow provide a clear microstructure payer",
+      "local_data": "requires continuous one-second L2 and trade history; the cited evidence uses Binance Futures and a CatBoost pipeline",
+      "duplicate_or_fingerprint": ["FP08_ORDERFLOW_CONTINUATION", "FP09_ORDERFLOW_ABSORPTION", "FP25_L2_QUEUE_IMBALANCE"],
+      "decision": "REJECT_AT_INTAKE_L2_DISALLOWED_AND_EXISTING_ORDERFLOW_FAMILIES_CLOSED"
+    },
+    {
+      "idea_id": "TW06",
+      "name": "expanded_ohlcv_return_characteristic_screen",
+      "proposed_mechanism": "screen additional lagged-return transformations for cross-sectional predictability",
+      "payer_and_direction": "speculative underreaction or overreaction, but direction depends on the chosen return transformation",
+      "local_data": "fully available",
+      "duplicate_or_fingerprint": ["FP01_CROSS_SECTIONAL_MOMENTUM", "FP02_CROSS_SECTIONAL_REVERSAL", "FP03_BREAKOUT_COMPRESSION", "FP04_PRICE_PATH_RISK_FACTORS"],
+      "decision": "REJECT_AT_INTAKE_DIRECT_DUPLICATE_OF_CLOSED_PRICE_FAMILIES"
+    },
+    {
+      "idea_id": "TW07",
+      "name": "perpetual_theoretical_price_bound_convergence",
+      "proposed_mechanism": "perpetual prices outside friction-adjusted spot and funding bounds should converge",
+      "payer_and_direction": "leveraged directional demand pays arbitrageurs",
+      "local_data": "spot, perpetual and funding observations exist, but this mechanism has already been studied and closed under the project rules",
+      "duplicate_or_fingerprint": ["FP06_SPOT_PERP_RELATIVE", "FP11_FUNDING_CARRY_CROWDING"],
+      "decision": "REJECT_AT_INTAKE_HARD_DUPLICATE_OF_R1_R2_AND_FUNDING_FAMILIES"
+    },
+    {
+      "idea_id": "TW08",
+      "name": "cross_sectional_return_entropy_state",
+      "proposed_mechanism": "changes in the cross-sectional return distribution may indicate information efficiency or stress",
+      "payer_and_direction": "the descriptive state does not uniquely imply continuation or convergence before outcomes",
+      "local_data": "computable from closed returns",
+      "duplicate_or_fingerprint": ["MC05_DISPERSION_EXPANSION_DECAY_OR_PERSISTENCE", "FP04_PRICE_PATH_RISK_FACTORS"],
+      "decision": "REJECT_AT_INTAKE_NO_UNIQUE_DIRECTION_AND_DISPERSION_DUPLICATE"
+    }
+  ],
+  "counts": {
+    "primary_sources_reviewed": 6,
+    "ideas_screened": 8,
+    "ideas_passed_payer_direction": 1,
+    "ideas_passed_local_data": 0,
+    "ideas_passed_family_dedup": 0,
+    "return_blind_audits_opened": 0,
+    "pnl_opened": 0,
+    "production_changes": 0
+  },
+  "formal_decision": "DO_NOT_CREATE_ANOTHER_OHLCV_TRANSFORMATION_OR_IMPORT_DISALLOWED_EXTERNAL_DATA_TO_MANUFACTURE_A_CANDIDATE",
+  "allowed_next_work": [
+    "continue H22, V357 and H27 frozen forward evidence updates",
+    "continue primary-evidence search for a genuinely new causal field available point in time on OKX with sufficient multi-year history",
+    "run structured-family, historical-alias and failure-fingerprint gates before implementation",
+    "keep PnL sealed until a candidate passes payer, direction, data, independence, cost-scale and freedom gates"
+  ],
+  "production_effect": "NONE"
+}

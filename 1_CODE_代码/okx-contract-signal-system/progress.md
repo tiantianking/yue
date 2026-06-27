@@ -795,3 +795,23 @@
 ### Current recovery point
 - Continue refreshing H22, V357 and H27 in that order. Do not evaluate H22 performance until the first fully prospective observation closes, and do not evaluate H27 diversification until its frozen day/trade sample gates are due.
 - New Alpha implementation remains blocked unless a genuinely new causal field with adequate point-in-time history passes structured-family, historical-alias and failure-fingerprint gates before any PnL access.
+
+## 2026-06-27 - Task: tenth-wave literature funnel for independent strategy intake
+### What was done
+- Continued the strategy search through the frozen funnel instead of generating another indicator grid. Reviewed six primary research directions covering hidden crypto factors, traditional-asset integration, sentiment/rotation/security shocks, blockchain information, portable limit-order-book microstructure, broad crypto characteristics, perpetual pricing bounds and information-theory market states.
+- Screened eight candidate mechanisms in `TENTH_WAVE_LITERATURE_INTAKE_20260627.json` before any return or PnL access.
+- TW01 latent-factor exposure failed because factor sign, payer and direction were not uniquely identified and factor-number/rotation choices exceeded the freedom budget.
+- TW02 equity-technology integration, TW03 sentiment/rotation/security shocks and TW04 blockchain fundamentals failed because they require external point-in-time fields outside the frozen local-OKX boundary; TW03 also had competing continuation/reversal interpretations.
+- TW05 portable order-book microstructure had the clearest payer, but required continuous one-second L2 and trade history, used cross-venue Binance evidence and duplicated closed order-flow/L2 fingerprints.
+- TW06 expanded OHLCV characteristic screening mapped directly to momentum, reversal, breakout and price-path risk fingerprints. TW07 perpetual theoretical-bound convergence duplicated closed spot/perpetual and funding families. TW08 return entropy lacked a unique direction and duplicated the rejected dispersion family.
+- No candidate passed payer, direction, local data and global family de-duplication together. No implementation, return-blind audit, backtest, PnL, validation or locked holdout was opened.
+### Evidence and artifacts
+- Added `TENTH_WAVE_LITERATURE_INTAKE_20260627.json` and its Chinese explanation `TENTH_WAVE_LITERATURE_INTAKE_20260627_CN.md` under the local-only discovery archive.
+- Primary evidence identifiers recorded in the register: `arXiv:2601.07664`, `arXiv:2510.14435`, `arXiv:2602.00776`, `arXiv:2405.15716`, `arXiv:2212.06888` and `arXiv:2310.04907`.
+- JSON syntax validation passed.
+### Safety boundary
+- Application version remains `3.56.28`; no runtime, formal signal, A-grade, Feishu, leverage, account, position, order or approved-manifest logic changed.
+- No new external dataset, cross-venue strategy, continuous L2 collection or bulk download was introduced.
+### Current recovery point
+- Continue the funnel, but search for a genuinely new causal field rather than another OHLCV transformation. A candidate may be implemented only after distinct payer, unique direction, sufficient point-in-time OKX history, acceptable costs and the three de-duplication gates all pass.
+- Continue refreshing H22, V357 and H27 independently; their frozen rules and sample gates remain unchanged.
