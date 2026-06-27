@@ -780,3 +780,18 @@
 ### Current recovery point
 - Commit and push the reviewed v3.56.28 research-gate release after final diff and staged-scope checks.
 - After release, keep refreshing H22, v357 and H27. New Alpha implementation remains forbidden unless a genuinely new causal field with adequate point-in-time history passes structure, alias and fingerprint gates.
+
+## 2026-06-27 - Task: H22/V357/H27 forward evidence refresh after v3.56.28 release
+### What was done
+- Confirmed local `master` and `origin/master` both point to commit `7e1fb642` for the pushed v3.56.28 research-gate release before touching forward evidence.
+- Refreshed the frozen H22 staggered 3x3 ledger. Closed data advanced through `2026-06-27T04:15:00Z`; one fully prospective refresh is now active from the frozen `2026-06-27T04:00:00Z` entry, but no observation has closed yet.
+- H22 remains `RECORD_ONLY_SAMPLE_INCOMPLETE`; protocol, ledger, data-quality and daily-snapshot-chain integrity all pass. No PF, return, drawdown or concentration judgment was produced from the still-open first observation.
+- Refreshed the frozen V357 shadow ensemble and acceptance adapter. Coverage remains 21/21 symbols, elapsed closed-data days increased to 5, and fully prospective observations remain 6.
+- Refreshed H27 only after both source ledgers. H27 remains `RECORD_ONLY_SAMPLE_INCOMPLETE`: H22 closed observations 0, V357 closed trades 2 under the frozen adapter, common daily rows increased from 1 to 2, and data quality passes.
+### Safety boundary
+- No strategy, parameter, formal signal, A-grade, Feishu, leverage, account, position, order or approved-manifest logic changed.
+- H22/V357 weights were not searched or combined; H27 remains observation-only and cannot promote automatically.
+- Application version remains `3.56.28`; this is a documentation continuity update only.
+### Current recovery point
+- Continue refreshing H22, V357 and H27 in that order. Do not evaluate H22 performance until the first fully prospective observation closes, and do not evaluate H27 diversification until its frozen day/trade sample gates are due.
+- New Alpha implementation remains blocked unless a genuinely new causal field with adequate point-in-time history passes structured-family, historical-alias and failure-fingerprint gates before any PnL access.

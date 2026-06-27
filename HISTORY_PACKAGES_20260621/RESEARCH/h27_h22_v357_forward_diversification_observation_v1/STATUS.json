@@ -1,8 +1,8 @@
 {
   "schema": "okx_forward_diversification_observation_status_v1",
   "protocol_id": "H27_H22_V357_FORWARD_DIVERSIFICATION_OBSERVATION_V1",
-  "generated_at_utc": "2026-06-26T17:51:13.835530Z",
-  "closed_data_through_utc": "2026-06-26T12:00:00+00:00",
+  "generated_at_utc": "2026-06-27T05:07:52.096723Z",
+  "closed_data_through_utc": "2026-06-27T04:00:00+00:00",
   "elapsed_calendar_days": 0,
   "h22_closed_observations": 0,
   "v357_closed_trades": 2,
@@ -11,7 +11,7 @@
   "decision": "RECORD_ONLY_SAMPLE_INCOMPLETE",
   "all_pass": null,
   "statistics": {
-    "common_daily_rows": 1,
+    "common_daily_rows": 2,
     "base_pearson": null,
     "base_spearman": null,
     "stress_pearson": null,
