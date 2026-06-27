@@ -856,3 +856,26 @@
 ### Current recovery point
 - Treat positioning ratios and official daily OI as closed-family diagnostics, not waiting candidates. Do not rerun them merely because more dates arrive.
 - Recheck the current 179-day and 71-day official routes only if the API itself exposes materially longer history. Continue H22, V357 and H27 forward evidence and search only for a genuinely different OKX contract-level field with an observable payer and unique ex-ante direction.
+
+## 2026-06-27 - Task: thirteenth-wave participant-constraint, inventory-hedging and contract-structure screen
+### What was done
+- Continued the independent strategy-search line in parallel with H22, V357 and H27. Screened three economically distinct families and nine ideas before any return or PnL access: risk-tier boundary pressure, collateral haircut pressure, loan quota/rate constraints, dealer inventory externalization, funding-aware inventory rebalancing, index-component hedging, contract granularity, platform position-limit saturation and premium-rule pressure.
+- Probed current official OKX field semantics. BTC-USDT position tiers expose 99 current risk tiers with IMR/MMR, size ranges and maximum leverage, but no historical schedule or account-position distribution. Current instrument metadata expose tick, lot, minimum size, leverage and partial position-limit fields, but not their point-in-time history.
+- The interest-rate/loan-quota and collateral-discount endpoints are current snapshots without historical timestamps or actual account utilization. The collateral route returned roughly 950 currency/tier records, but applying the current schedule to prior years would be look-ahead bias.
+- The BTC-USDT index-component route returned a current five-venue basket including Coinbase, Bitget, Binance, OKX and Bybit. Historical component weights are unavailable and the route is explicitly cross-venue, outside the frozen boundary.
+- Premium history paginates backward, but its economic identity is still perpetual premium, mark-index and funding convergence; it therefore hits the already closed FP06/FP07/FP11 families rather than creating a new contract-rule Alpha.
+- Dealer inventory and inventory-hedging mechanisms are economically valid, but public trades, OHLCV, positioning ratios and current rules do not reveal dealer inventory, customer/dealer identity, hedge legs or the sign of forced externalization. The proposed expressions therefore duplicate closed order-flow, L2, funding, positioning and option-hedging families.
+### Evidence and artifacts
+- Added `THIRTEENTH_WAVE_CONSTRAINT_INVENTORY_CONTRACT_SCREEN_20260627.json` and `THIRTEENTH_WAVE_CONSTRAINT_INVENTORY_CONTRACT_SCREEN_20260627_CN.md` under the local-only discovery archive.
+- Recorded primary evidence from `arXiv:2102.04591`, `arXiv:2106.06974`, `arXiv:2605.06405`, `arXiv:2212.06888`, `arXiv:1009.2329` and `arXiv:2605.29309`.
+- Added a concise Chinese failure note to the Desktop `失败策略` folder and updated its JSON index.
+### Decision
+- All nine ideas have an economically plausible story, but zero have point-in-time observable constrained exposure, zero have a unique ex-ante trade direction, and zero pass the global failure-family de-duplication gate.
+- No return-blind implementation, PnL, validation or locked holdout was opened. No T13 idea receives a C or H number.
+### Safety boundary
+- Current risk tiers, collateral haircuts, loan quotas, index weights and instrument rules were not retroactively applied to historical returns.
+- No dealer inventory was inferred from OHLCV or aggregate trades; no cross-venue constituent history, continuous L2 or rare rule-change/liquidation event archive was collected.
+- Runtime, formal signal, A-grade, Feishu, leverage, account, position, order and approved-manifest logic remain unchanged. Application version remains `3.56.28`.
+### Current recovery point
+- Continue H22, V357 and H27 forward evidence independently while keeping a separate mechanism-intake line active.
+- Treat position tiers, collateral schedules, loan quotas, dealer-inventory proxies, index components and current contract rules as diagnostics only. Admit a new implementation only when a genuinely new OKX contract-level field has point-in-time history, observable utilization or exposure, a unique payer/direction and passes all three de-duplication gates before PnL.

@@ -1,0 +1,303 @@
+{
+  "register_id": "THIRTEENTH_WAVE_CONSTRAINT_INVENTORY_CONTRACT_SCREEN_20260627",
+  "status": "COMPLETE_NO_ADMISSIBLE_NEW_ALPHA",
+  "completed_at_utc": "2026-06-27T06:05:00Z",
+  "research_scope": {
+    "exchange": "OKX only",
+    "existing_local_data_first": true,
+    "official_public_api_semantics_probed": true,
+    "future_returns_opened": false,
+    "pnl_opened": false,
+    "validation_opened": false,
+    "locked_holdout_opened": false,
+    "production_changed": false,
+    "automatic_orders": false
+  },
+  "target_families": [
+    "participant balance-sheet and margin constraints",
+    "market-maker or dealer inventory hedging",
+    "contract rules and market-design constraints"
+  ],
+  "official_field_observations": {
+    "position_tiers": {
+      "endpoint": "/api/v5/public/position-tiers",
+      "btc_usdt_rows_observed": 99,
+      "fields": ["tier", "minSz", "maxSz", "imr", "mmr", "maxLever"],
+      "historical_timestamp_present": false,
+      "trader_position_distribution_present": false,
+      "conclusion": "Current risk schedule only; it cannot identify how much open interest sits near a tier boundary or reconstruct past schedules."
+    },
+    "instrument_rules": {
+      "endpoint": "/api/v5/public/instruments",
+      "btc_usdt_swap_rows_observed": 1,
+      "fields": ["tickSz", "lotSz", "minSz", "lever", "posLmtAmt", "posLmtPct", "maxPlatOILmt", "maxPlatOICoinLmt"],
+      "historical_rule_versions_present": false,
+      "conclusion": "The current instrument record includes listing time but not point-in-time histories of rule, leverage, tick, lot or position-limit changes."
+    },
+    "interest_rate_and_loan_quota": {
+      "endpoint": "/api/v5/public/interest-rate-loan-quota",
+      "current_snapshot_only": true,
+      "historical_timestamp_present": false,
+      "conclusion": "Current currency-level loan rates and quotas do not reveal historical utilization or a direct perpetual-contract payer."
+    },
+    "collateral_discount_schedule": {
+      "endpoint": "/api/v5/public/discount-rate-interest-free-quota",
+      "rows_observed": 950,
+      "fields": ["ccy", "discountRate", "liqPenaltyRate", "minAmt", "maxAmt", "tier"],
+      "historical_timestamp_present": false,
+      "conclusion": "Current collateral haircut schedules cannot be retroactively applied to past returns and do not reveal actual collateral holdings."
+    },
+    "index_components": {
+      "endpoint": "/api/v5/market/index-components",
+      "btc_usdt_component_count_observed": 5,
+      "component_venues_observed": ["Coinbase", "Bitget", "Binance", "OKX", "Bybit"],
+      "current_timestamp_present": true,
+      "historical_component_weights_present": false,
+      "cross_venue_dependency": true,
+      "conclusion": "The current index basket is explicitly cross-venue and has no historical component-weight route in the audited boundary."
+    },
+    "premium_history": {
+      "endpoint": "/api/v5/public/premium-history",
+      "page_rows_observed": 100,
+      "backward_pagination_with_after_observed": true,
+      "family_identity": "perpetual premium, mark-index and funding convergence",
+      "conclusion": "History exists, but the signal is not independent of FP07 mark-index deviation and FP11 funding carry/crowding."
+    }
+  },
+  "ideas": [
+    {
+      "idea_id": "T13-C01",
+      "name_cn": "风险档位边界挤压",
+      "family": "participant_constraints",
+      "mechanism": "Positions close to a higher maintenance-margin tier may be forced to reduce risk when volatility rises or the tier boundary is crossed.",
+      "potential_payer": "large leveraged accounts near a maintenance-margin boundary",
+      "direction_candidate": "trade in the direction of forced position reduction",
+      "data_failures": [
+        "only the current tier schedule is observable",
+        "the distribution of account positions across tiers is unobservable",
+        "historical tier schedules and rule changes are unavailable"
+      ],
+      "mechanism_failures": [
+        "the side of constrained positions is not observable",
+        "a tier crossing can cause reduction, added collateral or hedging",
+        "direction and timing cannot be fixed before returns"
+      ],
+      "duplicate_fingerprints": ["FP12_OPEN_INTEREST_LEVERAGE_PROXY", "FP13_LIQUIDATION_PROXY"],
+      "decision": "REJECT_BEFORE_PNL_NO_POINT_IN_TIME_EXPOSURE_OR_UNIQUE_DIRECTION"
+    },
+    {
+      "idea_id": "T13-C02",
+      "name_cn": "抵押品折扣与折价压力",
+      "family": "participant_constraints",
+      "mechanism": "A lower collateral discount rate or higher liquidation penalty may make a token less useful as margin and induce balance-sheet pressure.",
+      "potential_payer": "accounts relying on the asset as collateral",
+      "direction_candidate": "short assets facing tighter collateral treatment",
+      "data_failures": [
+        "only the current discount schedule is observable",
+        "actual user collateral balances are not public",
+        "historical point-in-time discount schedules are unavailable"
+      ],
+      "mechanism_failures": [
+        "current haircuts may reflect risk rather than cause future returns",
+        "collateral users can substitute assets instead of trading the perpetual",
+        "the forced-flow amount and horizon are not observable"
+      ],
+      "duplicate_fingerprints": ["FP04_PRICE_PATH_RISK_FACTORS", "FP13_LIQUIDATION_PROXY", "FP24_INSTRUMENT_GRANULARITY"],
+      "decision": "REJECT_BEFORE_PNL_CURRENT_SNAPSHOT_AND_ENDOGENEITY"
+    },
+    {
+      "idea_id": "T13-C03",
+      "name_cn": "借贷额度与利率约束压力",
+      "family": "participant_constraints",
+      "mechanism": "High borrowing costs or a tight loan quota can constrain leveraged demand and require position reduction.",
+      "potential_payer": "borrowers consuming scarce stablecoin or crypto credit",
+      "direction_candidate": "follow capital scarcity or fade crowded borrowers",
+      "data_failures": [
+        "public quota and rate fields are current snapshots without utilization history",
+        "the separate margin-loan-ratio route exposes only 180 daily rows and 179 days",
+        "spot-margin borrowing does not identify a perpetual hedge leg"
+      ],
+      "mechanism_failures": [
+        "continuation and reversal interpretations are both plausible",
+        "borrowing the coin can support shorting while borrowing stablecoins can support buying",
+        "no unique perpetual direction exists"
+      ],
+      "duplicate_fingerprints": ["FP21_BORROW_DEMAND", "FP11_FUNDING_CARRY_CROWDING"],
+      "decision": "REJECT_BEFORE_PNL_SHORT_OR_CURRENT_DATA_AND_DIRECTION_AMBIGUOUS"
+    },
+    {
+      "idea_id": "T13-I01",
+      "name_cn": "做市商库存外部化",
+      "family": "inventory_hedging",
+      "mechanism": "A dealer internalizes customer flow within an inventory band and hedges externally after inventory exceeds the band.",
+      "potential_payer": "liquidity providers forced to externalize adverse inventory",
+      "direction_candidate": "follow the dealer hedge flow",
+      "data_failures": [
+        "dealer inventory is not public",
+        "public trades do not identify dealer versus customer",
+        "hedge linkage across spot, options and perpetual legs is unavailable"
+      ],
+      "mechanism_failures": [
+        "the same aggressive trade can be customer information or dealer hedging",
+        "internalization can delay or reverse the apparent direction",
+        "continuous L2 or identified flow would be required"
+      ],
+      "duplicate_fingerprints": ["FP08_ORDERFLOW_CONTINUATION", "FP09_ORDERFLOW_ABSORPTION", "FP17_LARGE_TRADE_FLOW", "FP25_L2_QUEUE_IMBALANCE"],
+      "decision": "REJECT_BEFORE_PNL_INVENTORY_UNOBSERVABLE_AND_CLOSED_ORDERFLOW_FAMILY"
+    },
+    {
+      "idea_id": "T13-I02",
+      "name_cn": "资金费感知的库存再平衡",
+      "family": "inventory_hedging",
+      "mechanism": "Market makers adjust inventory because holding a perpetual position incurs both mark-to-market risk and state-dependent funding cash flows.",
+      "potential_payer": "liquidity providers carrying inventory against an adverse funding state",
+      "direction_candidate": "anticipate inventory reduction when funding and inventory costs align",
+      "data_failures": [
+        "market-maker inventory sign and magnitude are not observable",
+        "public positioning ratios do not identify market makers",
+        "the available observable state collapses back to funding and price premium"
+      ],
+      "mechanism_failures": [
+        "funding-aware optimization is a market-making control problem, not a unique directional Alpha",
+        "without inventory sign, the hedge direction is not identifiable"
+      ],
+      "duplicate_fingerprints": ["FP11_FUNDING_CARRY_CROWDING", "FP18_POSITION_RATIO_CROWDING"],
+      "decision": "REJECT_BEFORE_PNL_UNOBSERVED_INVENTORY_AND_FUNDING_DUPLICATE"
+    },
+    {
+      "idea_id": "T13-I03",
+      "name_cn": "指数成分对冲失衡",
+      "family": "inventory_hedging",
+      "mechanism": "Changes in index composition or constituent reliability may force hedge or replication adjustments around the perpetual index.",
+      "potential_payer": "index replicators and arbitrageurs rebalancing hedge inventories",
+      "direction_candidate": "trade the direction implied by constituent weight changes",
+      "data_failures": [
+        "only current component weights and prices are observable",
+        "historical point-in-time component weights are unavailable",
+        "the index explicitly depends on multiple external venues"
+      ],
+      "mechanism_failures": [
+        "component rebalancing is an event rather than a recurring direct contract signal",
+        "hedge direction depends on the old and new weights and existing inventory"
+      ],
+      "duplicate_fingerprints": ["FP28_CROSS_VENUE_CONSENSUS", "FP06_SPOT_PERP_RELATIVE"],
+      "decision": "REJECT_BEFORE_PNL_CROSS_VENUE_AND_NO_HISTORICAL_WEIGHTS"
+    },
+    {
+      "idea_id": "T13-S01",
+      "name_cn": "交易粒度与规则摩擦补偿",
+      "family": "contract_structure",
+      "mechanism": "Coarse tick size, lot size or minimum order size can change spreads, depth and execution costs.",
+      "potential_payer": "participants forced to cross coarse price and quantity grids",
+      "direction_candidate": "earn a risk premium from coarse-granularity contracts",
+      "data_failures": [
+        "only current instrument rules are observable",
+        "historical tick, lot and minimum-size changes are unavailable",
+        "continuous order-book depth is unavailable"
+      ],
+      "mechanism_failures": [
+        "microstructure effects do not determine a unique long or short return direction",
+        "a coarse tick can improve displayed depth while increasing spread costs"
+      ],
+      "duplicate_fingerprints": ["FP24_INSTRUMENT_GRANULARITY", "FP05_VOLUME_LIQUIDITY"],
+      "decision": "REJECT_BEFORE_PNL_NO_HISTORICAL_RULES_AND_NO_DIRECTION"
+    },
+    {
+      "idea_id": "T13-S02",
+      "name_cn": "平台持仓上限饱和压力",
+      "family": "contract_structure",
+      "mechanism": "Approaching an exchange-level position or open-interest limit may cap new risk and create asymmetric closing pressure.",
+      "potential_payer": "accounts or market makers unable to add exposure near platform limits",
+      "direction_candidate": "trade in the direction of net closing pressure",
+      "data_failures": [
+        "current max platform OI and position-limit fields are often blank or current-only",
+        "historical limits are unavailable",
+        "actual utilization relative to the limits is unavailable"
+      ],
+      "mechanism_failures": [
+        "the side of saturated demand is not observable",
+        "participants can shift collateral, accounts or hedge venues",
+        "the event is not a stable recurring signal"
+      ],
+      "duplicate_fingerprints": ["FP12_OPEN_INTEREST_LEVERAGE_PROXY", "FP24_INSTRUMENT_GRANULARITY"],
+      "decision": "REJECT_BEFORE_PNL_NO_UTILIZATION_HISTORY_OR_SIDE"
+    },
+    {
+      "idea_id": "T13-S03",
+      "name_cn": "Premium指数钳制与规则压力",
+      "family": "contract_structure",
+      "mechanism": "The premium index and funding mechanism pull the perpetual toward its reference index and can affect inventory carrying costs.",
+      "potential_payer": "leveraged traders holding the expensive side of the perpetual premium",
+      "direction_candidate": "trade convergence or funding-induced inventory adjustment",
+      "data_failures": [
+        "premium history is observable and paginates, but no new independent field is introduced"
+      ],
+      "mechanism_failures": [
+        "the mechanism is exactly the existing perpetual premium, mark-index and funding family",
+        "convergence and crowding reversal variants were already closed"
+      ],
+      "duplicate_fingerprints": ["FP07_MARK_INDEX_DEVIATION", "FP11_FUNDING_CARRY_CROWDING", "FP06_SPOT_PERP_RELATIVE"],
+      "decision": "REJECT_AT_GLOBAL_DEDUP_BEFORE_NEW_AUDIT"
+    }
+  ],
+  "primary_evidence": [
+    {
+      "identifier": "arXiv:2102.04591",
+      "title": "Liquidation, Leverage and Optimal Margin in Bitcoin Futures Markets",
+      "finding": "Margin and liquidation constraints are economically real, but the study estimates liquidation risk and optimal margins rather than a unique cross-sectional return direction from public risk tiers."
+    },
+    {
+      "identifier": "arXiv:2106.06974",
+      "title": "Algorithmic market making in dealer markets with hedging and market impact",
+      "finding": "Dealers may internalize flow inside an inventory band and externalize risk outside it; implementation requires observing dealer inventory or identified hedging flow, neither of which is available."
+    },
+    {
+      "identifier": "arXiv:2605.06405",
+      "title": "Funding-Aware Optimal Market Making for Perpetual DEXs",
+      "finding": "Funding affects optimal inventory control, but the signal requires the market maker's own inventory state and is not a standalone public directional Alpha."
+    },
+    {
+      "identifier": "arXiv:2212.06888",
+      "title": "Fundamentals of Perpetual Futures",
+      "finding": "Perpetual premium and funding convergence have a theoretical basis, but they belong to the already closed spot-perpetual, mark-index and funding families."
+    },
+    {
+      "identifier": "arXiv:1009.2329",
+      "title": "Tick size and price diffusion",
+      "finding": "Tick size affects microstructure and return distributions, but it does not supply a unique directional premium and requires point-in-time rule histories for causal testing."
+    },
+    {
+      "identifier": "arXiv:2605.29309",
+      "title": "Implied ETF Carry Rates and the Limits of Arbitrage in Segmented Bitcoin Markets",
+      "finding": "Collateral and margin segmentation can sustain carry wedges across products, but the evidence is cross-market and requires external ETF, option and CME fields outside the local OKX-only boundary."
+    }
+  ],
+  "funnel_counts": {
+    "mechanism_families_screened": 3,
+    "ideas_screened": 9,
+    "ideas_with_economically_real_constraints": 9,
+    "ideas_with_observable_point_in_time_exposure": 0,
+    "ideas_with_unique_direction": 0,
+    "ideas_passing_global_dedup": 0,
+    "return_blind_audits_opened": 0,
+    "pnl_opened": 0,
+    "production_changes": 0
+  },
+  "prohibited_rescue_actions": [
+    "apply current risk tiers, collateral haircuts, loan quotas or instrument rules retroactively to historical returns",
+    "infer dealer inventory from OHLCV or aggregate public trades",
+    "use current index component weights as if they existed historically",
+    "reopen premium, funding or mark-index convergence under a contract-rule name",
+    "download cross-venue index constituent histories",
+    "use rare rule-change, ADL, insurance or liquidation events as a recurring Alpha",
+    "open PnL to decide whether a constraint should imply continuation or reversal"
+  ],
+  "formal_decision": "ECONOMIC_MECHANISMS_EXIST_BUT_NO_POINT_IN_TIME_OBSERVABLE_EXPOSURE_WITH_UNIQUE_DIRECTION_EXISTS_INSIDE_THE_FROZEN_OKX_DATA_BOUNDARY",
+  "allowed_next_work": [
+    "continue H22, V357 and H27 prospective evidence independently",
+    "continue literature and official-field intake for genuinely new recurring OKX contract-level fields",
+    "treat risk tiers, collateral schedules, loan quotas and instrument rules as diagnostics until point-in-time histories and actual utilization become available",
+    "do not implement or backtest any T13 idea"
+  ],
+  "production_effect": "NONE"
+}
