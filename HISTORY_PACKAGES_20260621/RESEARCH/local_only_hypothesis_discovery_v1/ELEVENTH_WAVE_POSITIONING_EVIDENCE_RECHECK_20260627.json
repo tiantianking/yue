@@ -1,0 +1,119 @@
+{
+  "register_id": "ELEVENTH_WAVE_POSITIONING_EVIDENCE_RECHECK_20260627",
+  "status": "COMPLETE_NO_POSITIONING_CANDIDATE_ADMITTED",
+  "completed_at_utc": "2026-06-27T05:30:00Z",
+  "research_scope": {
+    "exchange": "OKX only",
+    "existing_local_data_first": true,
+    "future_returns_opened": false,
+    "pnl_opened": false,
+    "validation_opened": false,
+    "locked_holdout_opened": false,
+    "production_changed": false,
+    "automatic_orders": false
+  },
+  "funnel_target": "Reassess whether existing OKX positioning or native open-interest fields now have enough data and independent primary evidence to pass the pre-PnL mechanism gate.",
+  "local_field_rechecks": {
+    "positioning_ratios": {
+      "source_result": "STAGE3_POSITIONING_FIELD_RESULT.json",
+      "data_gate_passed": true,
+      "eligible_symbol_count": 18,
+      "common_date_count": 826,
+      "common_start_utc": "2024-03-22T00:00:00+00:00",
+      "common_end_utc": "2026-06-25T00:00:00+00:00",
+      "exact_timestamp_join": true,
+      "forward_fill_used": false,
+      "ideas": {
+        "I055": {
+          "name_cn": "大户平均多空仓位尺寸差",
+          "field_identity": "log(top_position_ratio)-log(top_account_ratio)",
+          "structural_gate_passed": true,
+          "direction_claim": "follow the side with larger average position size among top traders",
+          "mechanism_failures": [
+            "top-trader classification does not identify informed speculation versus hedging",
+            "the losing counterparty or payer is not observable from aggregate ratios",
+            "no independent primary evidence was found that fixes follow-versus-contrarian direction for this exact OKX field",
+            "cost scale cannot be justified as compensation from an identified payer before PnL"
+          ],
+          "decision": "KEEP_REJECTED_BEFORE_PNL_NO_SIGN_REVERSAL_OR_SMOOTHING_RESCUE"
+        },
+        "I056": {
+          "name_cn": "大户账户方向相对全体账户分歧",
+          "field_identity": "log(top_account_ratio)-log(all_account_ratio)",
+          "structural_gate_passed": true,
+          "mechanism_failures": [
+            "top traders may be informed directional traders, basis hedgers, market makers or inventory hedgers",
+            "agreement can imply information continuation while crowding can imply reversal",
+            "the aggregate ratio does not reveal entry prices, leverage, horizon or hedge legs",
+            "no independent primary evidence was found that fixes a unique executable direction for this exact field"
+          ],
+          "decision": "KEEP_REJECTED_BEFORE_PNL_DIRECTION_AMBIGUOUS"
+        },
+        "I057": {
+          "name_cn": "大户持仓比相对全体账户比",
+          "identity": "I055+I056",
+          "decision": "KEEP_REJECTED_ALGEBRAIC_COMBINATION_NO_NEW_PAYER"
+        }
+      }
+    },
+    "native_open_interest": {
+      "source_result": "NATIVE_OKX_OI_PRE_PNL_RESULT_V1.json",
+      "common_base_count": 16,
+      "common_start_utc": "2026-04-07T07:00:00+00:00",
+      "common_end_utc": "2026-06-04T17:00:00+00:00",
+      "recheck_result": {
+        "I023": "DEFER_SHORT_SAMPLE_WITH_DUPLICATE_WARNING_NO_PNL",
+        "I024": "DEFER_SHORT_SAMPLE_SIGNAL_NOT_OBSERVABLE_NO_PNL",
+        "I025": "DEFER_SHORT_SAMPLE_WITH_DUPLICATE_WARNING_NO_PNL"
+      },
+      "held_for_more_data": [],
+      "decision": "NO_OI_CANDIDATE_MATURED"
+    }
+  },
+  "primary_evidence_search": [
+    {
+      "identifier": "arXiv:2602.00776",
+      "title": "Explainable Patterns in Cryptocurrency Microstructure",
+      "finding_for_this_gate": "Predictive evidence comes from one-second order-book and trade features such as imbalance, spread and adverse selection, not aggregate top-trader positioning ratios."
+    },
+    {
+      "identifier": "arXiv:2601.07664",
+      "title": "Crypto Pricing with Hidden Factors",
+      "finding_for_this_gate": "Cross-sectional premia are linked to latent factors and external equity, sentiment, rotation and security-shock variables; the study does not identify OKX top-trader ratios as an informed directional factor."
+    },
+    {
+      "identifier": "arXiv:2606.00060",
+      "title": "Machine Learning-Based Bitcoin Trading Under Transaction Costs: Evidence From Walk-Forward Forecasting",
+      "finding_for_this_gate": "Selected hourly price-feature models can survive costs only with model-specific cost-aware filters; this is a single-asset machine-learning price strategy and provides no directional evidence for positioning ratios."
+    },
+    {
+      "identifier": "arXiv:2310.14973",
+      "title": "Reconciling Open Interest with Traded Volume in Perpetual Swaps",
+      "finding_for_this_gate": "Open-interest reporting can be inconsistent across exchanges, reinforcing the need for same-exchange point-in-time validation; it does not establish a return-prediction direction for top-trader ratios."
+    }
+  ],
+  "search_outcome": {
+    "direct_primary_study_of_okx_top_trader_ratio_return_direction_found": false,
+    "grade_b_or_better_external_evidence_gate_passed": false,
+    "unique_direction_gate_passed": false,
+    "observable_payer_gate_passed": false,
+    "candidate_admitted_to_return_blind_audit": false,
+    "candidate_admitted_to_pnl": false
+  },
+  "prohibited_rescue_actions": [
+    "reverse the I055 or I056 sign after seeing returns",
+    "smooth or transform the ratios until a direction appears",
+    "change weekly rebalance frequency",
+    "exclude hedging-heavy symbols",
+    "combine I055 and I056 into a renamed factor",
+    "open PnL to decide whether top traders should be followed or faded"
+  ],
+  "formal_decision": "POSITIONING_DATA_ARE_MATURE_BUT_THE_ECONOMIC_DIRECTION_IS_NOT_IDENTIFIED;_KEEP_THE_FAMILY_CLOSED_BEFORE_PNL",
+  "allowed_next_work": [
+    "continue H22, V357 and H27 forward evidence",
+    "continue searching for a new point-in-time OKX causal field with an observable payer and unique direction",
+    "recheck native OI only after genuinely longer local coverage exists; do not repeatedly rerun unchanged short samples",
+    "keep aggregate positioning ratios available as diagnostic controls, not Alpha"
+  ],
+  "production_effect": "NONE"
+}

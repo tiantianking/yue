@@ -815,3 +815,22 @@
 ### Current recovery point
 - Continue the funnel, but search for a genuinely new causal field rather than another OHLCV transformation. A candidate may be implemented only after distinct payer, unique direction, sufficient point-in-time OKX history, acceptable costs and the three de-duplication gates all pass.
 - Continue refreshing H22, V357 and H27 independently; their frozen rules and sample gates remain unchanged.
+
+## 2026-06-27 - Task: eleventh-wave OKX positioning and native-OI evidence recheck
+### What was done
+- Rechecked the most promising existing non-price fields instead of generating another indicator family: official OKX all-account long/short ratio, top-trader account ratio, top-trader position ratio and the existing local native-open-interest archive.
+- Confirmed that the positioning-ratio data gate is mature: 18 eligible OKX swaps, 826 exact common daily timestamps from 2024-03-22 through 2026-06-25, no forward fill and no cross-exchange data.
+- I055 top-trader average long-versus-short position-size difference and I056 top-trader-versus-all-account disagreement still pass their frozen structural screens, but both fail the economic mechanism gate. Aggregate ratios cannot distinguish informed directional speculation from market making, basis, spot, option or cross-market hedging; the payer, entry price, leverage, holding horizon and hedge legs remain unobserved.
+- A targeted primary-evidence search found no grade-B-or-better study that fixes follow-versus-contrarian direction for these exact OKX positioning fields. I055 and I056 therefore remain rejected before PnL; I057 remains a prohibited algebraic recombination of the two.
+- Re-ran the existing local native-OI pre-PnL screen. The common native sample remains 16 bases from 2026-04-07 through 2026-06-04. I023 and I025 remain short-sample duplicate warnings; I024 remains unobservable under the frozen rule. No OI candidate matured.
+### Evidence and artifacts
+- Added `ELEVENTH_WAVE_POSITIONING_EVIDENCE_RECHECK_20260627.json` and `ELEVENTH_WAVE_POSITIONING_EVIDENCE_RECHECK_20260627_CN.md` under the local-only discovery archive.
+- Evidence reviewed includes `arXiv:2602.00776`, `arXiv:2601.07664`, `arXiv:2606.00060` and `arXiv:2310.14973`. These support L2/trade microstructure, latent/external factors, cost-aware price forecasting or OI data-quality concerns, but not a unique directional top-trader-ratio Alpha.
+- Added a concise Chinese failure note to the Desktop `失败策略` folder and updated its JSON index.
+### Safety boundary
+- No future return, PnL, validation segment or locked holdout was opened.
+- No sign reversal, smoothing, frequency change, symbol exclusion or I055/I056 recombination was attempted.
+- Application version remains `3.56.28`; runtime, formal signal, A-grade, Feishu, leverage, account, position, order and approved-manifest logic are unchanged.
+### Current recovery point
+- Keep positioning ratios as diagnostic controls only. Recheck native OI only after local coverage materially extends; do not repeatedly rerun the same short sample.
+- Continue H22, V357 and H27 forward evidence and continue searching only for a new OKX point-in-time field with an observable payer and unique ex-ante direction.
