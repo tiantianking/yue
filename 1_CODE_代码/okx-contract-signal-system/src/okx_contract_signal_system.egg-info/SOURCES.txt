@@ -57,6 +57,7 @@ docs/V3.56.25_RELEASE_CN.md
 docs/V3.56.26_RELEASE_CN.md
 docs/V3.56.27_RELEASE_CN.md
 docs/V3.56.28_RELEASE_CN.md
+docs/V3.56.29_RELEASE_CN.md
 pyproject.toml
 requirements.lock
 requirements.txt

@@ -1,0 +1,137 @@
+{
+  "schema": "h22_dynamic_universe_survivorship_audit_protocol_v1",
+  "protocol_id": "H22_DYNAMIC_UNIVERSE_SURVIVORSHIP_AUDIT_V1",
+  "status": "LOCKED_BEFORE_RESULTS",
+  "locked_at_utc": "2026-06-28T12:03:51Z",
+  "pre_result_data_replication_amendment": {
+    "amended_at_utc": "2026-06-28T12:11:00Z",
+    "trigger": "The first attempted run stopped before any return simulation because ETC-USDT-SWAP lacked the dynamic dataset's consecutive point-in-time spot-eligibility history at 2024-06-05 04:00 UTC.",
+    "change": "The fixed survivor baseline is rebuilt from the parent H22 closed local 15-minute source, while the dynamic panel remains on the validated point-in-time dataset. Overlapping fixed-symbol 4h prices must pass a separate source-consistency audit.",
+    "unchanged": "All signal, universe, cost, concentration and decision gates remain unchanged. No PnL or return result existed before this amendment."
+  },
+  "classification": "PARENT_STRATEGY_ROBUSTNESS_AND_SURVIVORSHIP_AUDIT_ONLY_NOT_NEW_ALPHA",
+  "purpose": "Test whether the frozen H22 14-day momentum evidence survives replacement of the current fixed survivor list with a causal point-in-time OKX universe. The dynamic universe is not an optimizer and cannot change H22 parameters.",
+  "production_effect": "NONE",
+  "formal_signal_effect": "NONE",
+  "automatic_promotion": false,
+  "parent_protocol_id": "MOMENTUM_14D_STAGGERED_3X3_REFRESH_HYSTERESIS6_V1",
+  "parent_protocol_sha256": "9db3f9e4906202137bf6d290c7999e24721cf747965872dd8868c39f03642f4a",
+  "dataset": {
+    "dataset_id": "OKX_DYNAMIC_UNIVERSE_4H_20230701_20260616_V1",
+    "dataset_manifest_sha256": "acbc5afa26002a9048ba50ce6024904d307a0f99947d5a5b515ce704b98c5e89",
+    "source_calendar_timezone": "Asia/Shanghai",
+    "bar_timezone": "UTC",
+    "quality_status_required": "PASS",
+    "raw_archives_persisted": false
+  },
+  "frozen_parent_signal": {
+    "formation_bars_4h": 84,
+    "signal_hour_utc": 0,
+    "entry_delay_hours": 4,
+    "entry_rank": 4,
+    "exit_rank": 6,
+    "cohort_offsets_days": [0, 1, 2],
+    "cohort_refresh_days": 3,
+    "base_anchor_utc": "2023-09-01T04:00:00Z",
+    "research_gross_exposure": 0.4,
+    "long_gross_exposure": 0.2,
+    "short_gross_exposure": 0.2,
+    "weighting": "equal within each side and equal across three cohorts",
+    "warmup_entries_excluded": 2
+  },
+  "point_in_time_universe": {
+    "minimum_listing_history": "Require 85 consecutive closed 4h bars ending at the signal bar, which is the minimum needed for an exact 84-bar return without gaps.",
+    "minimum_consecutive_closed_bars": 85,
+    "liquidity_measure": "Sum of vol_quote over the latest 84 closed 4h bars ending at the signal bar.",
+    "liquidity_selection": "Select the top 18 eligible instruments by trailing 84-bar quote volume, using stable mergesort and instrument name as deterministic tie order.",
+    "matched_universe_size": 18,
+    "matched_size_reason": "The frozen H22 parent panel contains 18 instruments; matching the count isolates survivor-list composition rather than breadth.",
+    "stablecoin_and_pegged_exclusions": [
+      "USDC-USDT-SWAP",
+      "XAUT-USDT-SWAP"
+    ],
+    "spot_presence": "Already enforced at each 4h bar by the validated dataset.",
+    "entry_open_required": true,
+    "future_listing_or_delisting_information_used": false
+  },
+  "dynamic_membership_handling": {
+    "scheduled_refresh": "At each cohort's frozen 3-day refresh, apply the unchanged 4-in/6-out momentum hysteresis within the current top-18 liquid point-in-time universe.",
+    "unscheduled_forced_exit": "If an incumbent is no longer point-in-time eligible or lacks the next entry open, remove it causally at that decision time even when the cohort is not scheduled to refresh.",
+    "vacancy_between_refreshes": "Remain in cash until that cohort's next scheduled refresh; do not fill a forced-exit vacancy early.",
+    "delisting_during_holding_interval": "Use the last available complete 4h close before the next decision as the terminal exit price, charge one-way exit cost, and hold cash thereafter.",
+    "no_future_tradability_filter": true
+  },
+  "comparison_panels": {
+    "fixed_survivor_panel": [
+      "BTC-USDT-SWAP",
+      "ETH-USDT-SWAP",
+      "SOL-USDT-SWAP",
+      "XRP-USDT-SWAP",
+      "DOGE-USDT-SWAP",
+      "ADA-USDT-SWAP",
+      "LINK-USDT-SWAP",
+      "AVAX-USDT-SWAP",
+      "LTC-USDT-SWAP",
+      "DOT-USDT-SWAP",
+      "BCH-USDT-SWAP",
+      "TRX-USDT-SWAP",
+      "UNI-USDT-SWAP",
+      "ETC-USDT-SWAP",
+      "FIL-USDT-SWAP",
+      "ATOM-USDT-SWAP",
+      "NEAR-USDT-SWAP",
+      "OP-USDT-SWAP"
+    ],
+    "fixed_panel_source": "Parent H22 closed local 15-minute candles strictly resampled to complete 4-hour bars.",
+    "fixed_panel_purpose": "Rebuild the parent fixed survivor selection from its original source under the same reserve cost model. A separate overlapping-price consistency audit guards against source differences.",
+    "dynamic_panel_purpose": "Replace only the current survivor list with the frozen point-in-time policy."
+  },
+  "history": {
+    "first_signal_entry_utc": "2023-09-01T04:00:00Z",
+    "reported_start_after_warmup_utc": "2023-09-03T04:00:00Z",
+    "last_available_entry_utc": "2026-06-16T04:00:00Z",
+    "segments": [
+      {"name": "S1", "start_utc": "2023-09-01T04:00:00Z", "end_utc_exclusive": "2024-07-01T00:00:00Z"},
+      {"name": "S2", "start_utc": "2024-07-01T00:00:00Z", "end_utc_exclusive": "2025-07-01T00:00:00Z"},
+      {"name": "S3", "start_utc": "2025-07-01T00:00:00Z", "end_utc_exclusive": "2026-06-17T00:00:00Z"}
+    ]
+  },
+  "costs": {
+    "base_one_way_per_unit_turnover": 0.0008,
+    "stress_one_way_per_unit_turnover": 0.0016,
+    "base_adverse_funding_reserve_per_24h_full_gross": 0.0003,
+    "stress_adverse_funding_reserve_per_24h_full_gross": 0.0006,
+    "funding_reserve_reason": "Observed funding history is currently complete only for the fixed 18-symbol panel. The same conservative reserve is therefore applied to both panels to isolate universe composition without adding another download or asymmetric data quality.",
+    "final_liquidation_included": true
+  },
+  "fixed_gates": {
+    "dynamic_base_profit_factor_min": 1.1,
+    "dynamic_stress_profit_factor_min": 1.03,
+    "dynamic_base_total_return_gt_zero": true,
+    "dynamic_stress_total_return_gt_zero": true,
+    "dynamic_base_maximum_drawdown_abs_max": 0.15,
+    "dynamic_stress_maximum_drawdown_abs_max": 0.15,
+    "dynamic_positive_base_segments_min": 2,
+    "dynamic_positive_stress_segments_min": 2,
+    "maximum_single_symbol_positive_net_contribution_share": 0.25,
+    "maximum_single_month_positive_net_contribution_share": 0.25,
+    "minimum_mean_fixed_panel_overlap_count": 6.0,
+    "maximum_fixed_symbol_overlapping_open_relative_difference": 0.000001,
+    "maximum_fixed_symbol_overlapping_close_relative_difference": 0.000001
+  },
+  "decision_rules": {
+    "all_gates_pass": "SURVIVORSHIP_ROBUST_HISTORICAL_SUPPORT_FORWARD_SHADOW_ONLY",
+    "positive_but_gate_failure": "SURVIVORSHIP_SENSITIVE_HISTORICAL_SUPPORT_WEAKENED_NO_REDESIGN",
+    "nonpositive_or_profit_factor_below_one": "SURVIVORSHIP_DEPENDENT_HISTORICAL_SUPPORT_REJECTED_NO_RESCUE"
+  },
+  "prohibited_actions": [
+    "change the top-18 liquidity count after viewing returns",
+    "change the 84-bar formation or volume window",
+    "change entry rank 4 or exit rank 6",
+    "change cohort cadence, offsets, anchor or gross exposure",
+    "select a best subset of dynamic symbols, dates, months or regimes",
+    "replace the reserve model asymmetrically between fixed and dynamic panels",
+    "use future listing, delisting, volume or price information",
+    "promote the result to A-grade signals or order execution"
+  ]
+}

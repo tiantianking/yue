@@ -140,6 +140,24 @@ def test_registered_alias_rejects_relabelled_historical_candidate(tmp_path: Path
     assert "MC02_DOWNSIDE_BETA_ASYMMETRY_PREMIUM" in alias_gate.detail
 
 
+def test_h22_registry_rejects_survivor_history_as_promotion_evidence() -> None:
+    registry = json.loads(
+        (ROOT / "config" / "research_family_registry.json").read_text(encoding="utf-8")
+    )
+    h22 = next(
+        item
+        for item in registry["families"]
+        if item["family_id"] == "MOMENTUM_14D_STAGGERED_3X3_REFRESH_HYSTERESIS6_V1"
+    )
+
+    assert h22["status"] == (
+        "historical_support_rejected_survivorship_dependent_forward_observation_only"
+    )
+    assert "survivor-list dependent" in h22["warning"]
+    assert "base PF 0.9247" in h22["failure_reason"]
+    assert "Parameter, universe and date rescue are prohibited" in h22["failure_reason"]
+
+
 def test_failure_fingerprint_rejects_option_surface_relabel(tmp_path: Path) -> None:
     module = _load_system_check()
     registry = tmp_path / "registry.json"

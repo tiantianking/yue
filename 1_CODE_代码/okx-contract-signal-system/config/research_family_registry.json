@@ -282,8 +282,9 @@
     },
     {
       "family_id": "MOMENTUM_14D_STAGGERED_3X3_REFRESH_HYSTERESIS6_V1",
-      "status": "historically_supported_forward_shadow_only",
-      "warning": "H22 is a staggered execution variant of the existing 14-day momentum family, not independent Alpha. Historical evidence permits only fully prospective shadow observation.",
+      "status": "historical_support_rejected_survivorship_dependent_forward_observation_only",
+      "warning": "H22 is a staggered execution variant of the existing 14-day momentum family, not independent Alpha. The frozen point-in-time dynamic-universe audit rejected its historical support as survivor-list dependent. The existing shadow may continue only as prospective observation and cannot use prior historical evidence for promotion.",
+      "failure_reason": "Under the frozen top-18 point-in-time liquidity universe, H22 produced base PF 0.9247, return -26.74 percent and drawdown -38.93 percent; stress PF 0.8730, return -39.75 percent and drawdown -47.71 percent, with zero positive segments out of three at both cost levels. Parameter, universe and date rescue are prohibited.",
       "family": {
         "core_signal": "existing_14_day_momentum_three_equal_cohorts_staggered_zero_one_two_days",
         "direction": "inherit_parent_momentum_direction",

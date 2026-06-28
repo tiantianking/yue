@@ -1,0 +1,1661 @@
+{
+  "schema": "h22_dynamic_universe_survivorship_audit_result_v1",
+  "protocol_id": "H22_DYNAMIC_UNIVERSE_SURVIVORSHIP_AUDIT_V1",
+  "protocol_sha256": "44e26b1590bf0de4e40e539a63654ed1a1a0a248bfffe1628503dd70b4ec0519",
+  "script_sha256": "71fa76e5a64ac67c5b42f16be4a9e2620b79a0f5ef8a8af857205d675c636b56",
+  "dataset_manifest_sha256": "acbc5afa26002a9048ba50ce6024904d307a0f99947d5a5b515ce704b98c5e89",
+  "parent_protocol_sha256": "9db3f9e4906202137bf6d290c7999e24721cf747965872dd8868c39f03642f4a",
+  "status": "COMPLETE",
+  "decision": "SURVIVORSHIP_DEPENDENT_HISTORICAL_SUPPORT_REJECTED_NO_RESCUE",
+  "all_fixed_gates_pass": false,
+  "fixed_gate_checks": {
+    "dynamic_base_profit_factor": false,
+    "dynamic_stress_profit_factor": false,
+    "dynamic_base_total_return_gt_zero": false,
+    "dynamic_stress_total_return_gt_zero": false,
+    "dynamic_base_maximum_drawdown": false,
+    "dynamic_stress_maximum_drawdown": false,
+    "dynamic_positive_base_segments": false,
+    "dynamic_positive_stress_segments": false,
+    "maximum_single_symbol_positive_net_contribution_share": true,
+    "maximum_single_month_positive_net_contribution_share": true,
+    "minimum_mean_fixed_panel_overlap_count": true,
+    "maximum_fixed_symbol_overlapping_open_relative_difference": false,
+    "maximum_fixed_symbol_overlapping_close_relative_difference": true
+  },
+  "dataset_summary": {
+    "dataset_id": "OKX_DYNAMIC_UNIVERSE_4H_20230701_20260616_V1",
+    "rows": 1203424,
+    "unique_instruments": 307,
+    "quality_status": "PASS"
+  },
+  "signal_timeline": {
+    "raw_entries": 1020,
+    "warmup_entries_excluded": 2,
+    "reported_entries": 1018,
+    "first_entry_utc": "2023-09-03T04:00:00+00:00",
+    "last_entry_utc": "2026-06-16T04:00:00+00:00"
+  },
+  "universe_diagnostics": {
+    "mean_fixed_panel_overlap_count": 7.5892156862745095,
+    "minimum_fixed_panel_overlap_count": 4,
+    "maximum_fixed_panel_overlap_count": 11,
+    "mean_fixed_panel_jaccard": 0.27068700249273436,
+    "eligible_count_min": 92,
+    "eligible_count_median": 193.0,
+    "eligible_count_max": 216,
+    "distinct_dynamic_universe_symbols": 174,
+    "top_universe_frequency": [
+      [
+        "BTC-USDT-SWAP",
+        1020
+      ],
+      [
+        "ETH-USDT-SWAP",
+        1020
+      ],
+      [
+        "SOL-USDT-SWAP",
+        1020
+      ],
+      [
+        "DOGE-USDT-SWAP",
+        1016
+      ],
+      [
+        "XRP-USDT-SWAP",
+        953
+      ],
+      [
+        "PEPE-USDT-SWAP",
+        915
+      ],
+      [
+        "SUI-USDT-SWAP",
+        747
+      ],
+      [
+        "WLD-USDT-SWAP",
+        681
+      ],
+      [
+        "ADA-USDT-SWAP",
+        579
+      ],
+      [
+        "LTC-USDT-SWAP",
+        502
+      ],
+      [
+        "ORDI-USDT-SWAP",
+        451
+      ],
+      [
+        "LINK-USDT-SWAP",
+        368
+      ],
+      [
+        "BNB-USDT-SWAP",
+        364
+      ],
+      [
+        "BCH-USDT-SWAP",
+        340
+      ],
+      [
+        "WIF-USDT-SWAP",
+        336
+      ],
+      [
+        "TRUMP-USDT-SWAP",
+        304
+      ],
+      [
+        "FIL-USDT-SWAP",
+        289
+      ],
+      [
+        "TRB-USDT-SWAP",
+        258
+      ],
+      [
+        "AAVE-USDT-SWAP",
+        242
+      ],
+      [
+        "PEOPLE-USDT-SWAP",
+        229
+      ],
+      [
+        "PUMP-USDT-SWAP",
+        220
+      ],
+      [
+        "HYPE-USDT-SWAP",
+        210
+      ],
+      [
+        "SHIB-USDT-SWAP",
+        203
+      ],
+      [
+        "ZEC-USDT-SWAP",
+        190
+      ],
+      [
+        "OP-USDT-SWAP",
+        175
+      ],
+      [
+        "TURBO-USDT-SWAP",
+        171
+      ],
+      [
+        "TIA-USDT-SWAP",
+        164
+      ],
+      [
+        "CRV-USDT-SWAP",
+        163
+      ],
+      [
+        "AVAX-USDT-SWAP",
+        162
+      ],
+      [
+        "PNUT-USDT-SWAP",
+        151
+      ]
+    ],
+    "top_selected_position_frequency": [
+      [
+        "PEPE-USDT-SWAP",
+        586
+      ],
+      [
+        "WLD-USDT-SWAP",
+        442
+      ],
+      [
+        "XRP-USDT-SWAP",
+        432
+      ],
+      [
+        "SUI-USDT-SWAP",
+        417
+      ],
+      [
+        "BTC-USDT-SWAP",
+        354
+      ],
+      [
+        "SOL-USDT-SWAP",
+        352
+      ],
+      [
+        "DOGE-USDT-SWAP",
+        334
+      ],
+      [
+        "ETH-USDT-SWAP",
+        317
+      ],
+      [
+        "ORDI-USDT-SWAP",
+        267
+      ],
+      [
+        "ADA-USDT-SWAP",
+        234
+      ],
+      [
+        "BCH-USDT-SWAP",
+        231
+      ],
+      [
+        "TRUMP-USDT-SWAP",
+        231
+      ],
+      [
+        "TRB-USDT-SWAP",
+        230
+      ],
+      [
+        "WIF-USDT-SWAP",
+        198
+      ],
+      [
+        "PEOPLE-USDT-SWAP",
+        182
+      ],
+      [
+        "LTC-USDT-SWAP",
+        173
+      ],
+      [
+        "LINK-USDT-SWAP",
+        167
+      ],
+      [
+        "PUMP-USDT-SWAP",
+        167
+      ],
+      [
+        "HYPE-USDT-SWAP",
+        164
+      ],
+      [
+        "ZEC-USDT-SWAP",
+        160
+      ],
+      [
+        "TURBO-USDT-SWAP",
+        145
+      ],
+      [
+        "BNB-USDT-SWAP",
+        141
+      ],
+      [
+        "AAVE-USDT-SWAP",
+        135
+      ],
+      [
+        "PNUT-USDT-SWAP",
+        127
+      ],
+      [
+        "FIL-USDT-SWAP",
+        124
+      ],
+      [
+        "AVAX-USDT-SWAP",
+        111
+      ],
+      [
+        "CRV-USDT-SWAP",
+        110
+      ],
+      [
+        "SHIB-USDT-SWAP",
+        110
+      ],
+      [
+        "PENGU-USDT-SWAP",
+        106
+      ],
+      [
+        "OP-USDT-SWAP",
+        103
+      ]
+    ],
+    "universe_change_days": 550,
+    "largest_universe_changes": [
+      {
+        "entry_utc": "2024-05-16T04:00:00+00:00",
+        "entered": [
+          "JTO-USDT-SWAP",
+          "PEOPLE-USDT-SWAP",
+          "UMA-USDT-SWAP"
+        ],
+        "exited": [
+          "OP-USDT-SWAP",
+          "W-USDT-SWAP",
+          "XRP-USDT-SWAP"
+        ],
+        "turnover_count": 6
+      },
+      {
+        "entry_utc": "2025-05-10T04:00:00+00:00",
+        "entered": [
+          "LAYER-USDT-SWAP",
+          "MOODENG-USDT-SWAP",
+          "PNUT-USDT-SWAP"
+        ],
+        "exited": [
+          "AAVE-USDT-SWAP",
+          "AIXBT-USDT-SWAP",
+          "PROMPT-USDT-SWAP"
+        ],
+        "turnover_count": 6
+      },
+      {
+        "entry_utc": "2025-11-19T04:00:00+00:00",
+        "entered": [
+          "HYPE-USDT-SWAP",
+          "MMT-USDT-SWAP",
+          "STRK-USDT-SWAP"
+        ],
+        "exited": [
+          "ADA-USDT-SWAP",
+          "SUI-USDT-SWAP",
+          "WLFI-USDT-SWAP"
+        ],
+        "turnover_count": 6
+      },
+      {
+        "entry_utc": "2023-10-20T04:00:00+00:00",
+        "entered": [
+          "BLUR-USDT-SWAP",
+          "BSV-USDT-SWAP"
+        ],
+        "exited": [
+          "MKR-USDT-SWAP",
+          "PEPE-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2023-11-08T04:00:00+00:00",
+        "entered": [
+          "GAS-USDT-SWAP",
+          "ORDI-USDT-SWAP"
+        ],
+        "exited": [
+          "APT-USDT-SWAP",
+          "GALA-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2023-11-13T04:00:00+00:00",
+        "entered": [
+          "FIL-USDT-SWAP",
+          "STORJ-USDT-SWAP"
+        ],
+        "exited": [
+          "GALA-USDT-SWAP",
+          "WLD-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2023-11-15T04:00:00+00:00",
+        "entered": [
+          "OP-USDT-SWAP",
+          "TIA-USDT-SWAP"
+        ],
+        "exited": [
+          "CFX-USDT-SWAP",
+          "PEPE-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2023-11-16T04:00:00+00:00",
+        "entered": [
+          "DYDX-USDT-SWAP",
+          "MATIC-USDT-SWAP"
+        ],
+        "exited": [
+          "OP-USDT-SWAP",
+          "SUSHI-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2023-12-05T04:00:00+00:00",
+        "entered": [
+          "BIGTIME-USDT-SWAP",
+          "LUNA-USDT-SWAP"
+        ],
+        "exited": [
+          "MATIC-USDT-SWAP",
+          "UNI-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2023-12-09T04:00:00+00:00",
+        "entered": [
+          "OP-USDT-SWAP",
+          "TRB-USDT-SWAP"
+        ],
+        "exited": [
+          "DYDX-USDT-SWAP",
+          "PEPE-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2023-12-23T04:00:00+00:00",
+        "entered": [
+          "ARB-USDT-SWAP",
+          "AUCTION-USDT-SWAP"
+        ],
+        "exited": [
+          "DOT-USDT-SWAP",
+          "MEME-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2023-12-28T04:00:00+00:00",
+        "entered": [
+          "ARB-USDT-SWAP",
+          "MATIC-USDT-SWAP"
+        ],
+        "exited": [
+          "ADA-USDT-SWAP",
+          "BIGTIME-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2024-01-05T04:00:00+00:00",
+        "entered": [
+          "BCH-USDT-SWAP",
+          "PEOPLE-USDT-SWAP"
+        ],
+        "exited": [
+          "DOT-USDT-SWAP",
+          "NEAR-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2024-01-12T04:00:00+00:00",
+        "entered": [
+          "ETC-USDT-SWAP",
+          "MASK-USDT-SWAP"
+        ],
+        "exited": [
+          "ADA-USDT-SWAP",
+          "LTC-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2024-02-11T04:00:00+00:00",
+        "entered": [
+          "ID-USDT-SWAP",
+          "XRP-USDT-SWAP"
+        ],
+        "exited": [
+          "DOGE-USDT-SWAP",
+          "UMA-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2024-02-13T04:00:00+00:00",
+        "entered": [
+          "ETC-USDT-SWAP",
+          "UMA-USDT-SWAP"
+        ],
+        "exited": [
+          "CFX-USDT-SWAP",
+          "DOGE-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2024-02-15T04:00:00+00:00",
+        "entered": [
+          "DOGE-USDT-SWAP",
+          "JUP-USDT-SWAP"
+        ],
+        "exited": [
+          "TRB-USDT-SWAP",
+          "UMA-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2024-02-20T04:00:00+00:00",
+        "entered": [
+          "FIL-USDT-SWAP",
+          "STX-USDT-SWAP"
+        ],
+        "exited": [
+          "ARB-USDT-SWAP",
+          "SATS-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2024-02-29T04:00:00+00:00",
+        "entered": [
+          "ARB-USDT-SWAP",
+          "TIA-USDT-SWAP"
+        ],
+        "exited": [
+          "API3-USDT-SWAP",
+          "ZETA-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2024-03-01T04:00:00+00:00",
+        "entered": [
+          "ADA-USDT-SWAP",
+          "LTC-USDT-SWAP"
+        ],
+        "exited": [
+          "STX-USDT-SWAP",
+          "TIA-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2024-03-03T04:00:00+00:00",
+        "entered": [
+          "BCH-USDT-SWAP",
+          "SHIB-USDT-SWAP"
+        ],
+        "exited": [
+          "AGIX-USDT-SWAP",
+          "ARB-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2024-03-04T04:00:00+00:00",
+        "entered": [
+          "ARB-USDT-SWAP",
+          "PEOPLE-USDT-SWAP"
+        ],
+        "exited": [
+          "ADA-USDT-SWAP",
+          "LPT-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2024-03-06T04:00:00+00:00",
+        "entered": [
+          "ARB-USDT-SWAP",
+          "STRK-USDT-SWAP"
+        ],
+        "exited": [
+          "MATIC-USDT-SWAP",
+          "SUI-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2024-03-17T04:00:00+00:00",
+        "entered": [
+          "AVAX-USDT-SWAP",
+          "JUP-USDT-SWAP"
+        ],
+        "exited": [
+          "BONK-USDT-SWAP",
+          "ETC-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2024-03-18T04:00:00+00:00",
+        "entered": [
+          "BNB-USDT-SWAP",
+          "NEAR-USDT-SWAP"
+        ],
+        "exited": [
+          "ARB-USDT-SWAP",
+          "OP-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2024-03-22T04:00:00+00:00",
+        "entered": [
+          "SUI-USDT-SWAP",
+          "ZRX-USDT-SWAP"
+        ],
+        "exited": [
+          "ARB-USDT-SWAP",
+          "RNDR-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2024-03-30T04:00:00+00:00",
+        "entered": [
+          "FLOKI-USDT-SWAP",
+          "LTC-USDT-SWAP"
+        ],
+        "exited": [
+          "FRONT-USDT-SWAP",
+          "NEAR-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2024-04-02T04:00:00+00:00",
+        "entered": [
+          "CORE-USDT-SWAP",
+          "ETHFI-USDT-SWAP"
+        ],
+        "exited": [
+          "AVAX-USDT-SWAP",
+          "JUP-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2024-04-29T04:00:00+00:00",
+        "entered": [
+          "BONK-USDT-SWAP",
+          "ETHFI-USDT-SWAP"
+        ],
+        "exited": [
+          "BNB-USDT-SWAP",
+          "FIL-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      },
+      {
+        "entry_utc": "2024-04-30T04:00:00+00:00",
+        "entered": [
+          "MEW-USDT-SWAP",
+          "WIF-USDT-SWAP"
+        ],
+        "exited": [
+          "LTC-USDT-SWAP",
+          "TIA-USDT-SWAP"
+        ],
+        "turnover_count": 4
+      }
+    ]
+  },
+  "fixed_source_price_consistency": {
+    "symbols": {
+      "BTC-USDT-SWAP": {
+        "overlapping_bars": 6492,
+        "open_relative_difference_max": 0.0,
+        "open_relative_difference_median": 0.0,
+        "close_relative_difference_max": 0.0,
+        "close_relative_difference_median": 0.0
+      },
+      "ETH-USDT-SWAP": {
+        "overlapping_bars": 6492,
+        "open_relative_difference_max": 0.0,
+        "open_relative_difference_median": 0.0,
+        "close_relative_difference_max": 0.0,
+        "close_relative_difference_median": 0.0
+      },
+      "SOL-USDT-SWAP": {
+        "overlapping_bars": 6492,
+        "open_relative_difference_max": 0.0,
+        "open_relative_difference_median": 0.0,
+        "close_relative_difference_max": 0.0,
+        "close_relative_difference_median": 0.0
+      },
+      "XRP-USDT-SWAP": {
+        "overlapping_bars": 6492,
+        "open_relative_difference_max": 2.39633719970895e-16,
+        "open_relative_difference_median": 0.0,
+        "close_relative_difference_max": 2.3965958437672027e-16,
+        "close_relative_difference_median": 0.0
+      },
+      "DOGE-USDT-SWAP": {
+        "overlapping_bars": 6492,
+        "open_relative_difference_max": 1.5444278959411956e-15,
+        "open_relative_difference_median": 0.0,
+        "close_relative_difference_max": 1.5938394529073208e-15,
+        "close_relative_difference_median": 0.0
+      },
+      "ADA-USDT-SWAP": {
+        "overlapping_bars": 6492,
+        "open_relative_difference_max": 4.2252360504839267e-16,
+        "open_relative_difference_median": 0.0,
+        "close_relative_difference_max": 4.352279684131705e-16,
+        "close_relative_difference_median": 0.0
+      },
+      "LINK-USDT-SWAP": {
+        "overlapping_bars": 6492,
+        "open_relative_difference_max": 2.463057181642056e-16,
+        "open_relative_difference_median": 0.0,
+        "close_relative_difference_max": 2.463057181642056e-16,
+        "close_relative_difference_median": 0.0
+      },
+      "AVAX-USDT-SWAP": {
+        "overlapping_bars": 6492,
+        "open_relative_difference_max": 0.0,
+        "open_relative_difference_median": 0.0,
+        "close_relative_difference_max": 0.0,
+        "close_relative_difference_median": 0.0
+      },
+      "LTC-USDT-SWAP": {
+        "overlapping_bars": 6492,
+        "open_relative_difference_max": 1.9316099925515843e-16,
+        "open_relative_difference_median": 0.0,
+        "close_relative_difference_max": 1.9316099925515843e-16,
+        "close_relative_difference_median": 0.0
+      },
+      "DOT-USDT-SWAP": {
+        "overlapping_bars": 6492,
+        "open_relative_difference_max": 0.0,
+        "open_relative_difference_median": 0.0,
+        "close_relative_difference_max": 0.0,
+        "close_relative_difference_median": 0.0
+      },
+      "BCH-USDT-SWAP": {
+        "overlapping_bars": 6492,
+        "open_relative_difference_max": 0.0,
+        "open_relative_difference_median": 0.0,
+        "close_relative_difference_max": 0.0,
+        "close_relative_difference_median": 0.0
+      },
+      "TRX-USDT-SWAP": {
+        "overlapping_bars": 6492,
+        "open_relative_difference_max": 0.0003469010175763442,
+        "open_relative_difference_median": 0.0,
+        "close_relative_difference_max": 1.3460511937744382e-15,
+        "close_relative_difference_median": 0.0
+      },
+      "UNI-USDT-SWAP": {
+        "overlapping_bars": 6492,
+        "open_relative_difference_max": 0.0,
+        "open_relative_difference_median": 0.0,
+        "close_relative_difference_max": 0.0,
+        "close_relative_difference_median": 0.0
+      },
+      "ETC-USDT-SWAP": {
+        "overlapping_bars": 6491,
+        "open_relative_difference_max": 0.0006123698714022053,
+        "open_relative_difference_median": 0.0,
+        "close_relative_difference_max": 0.0,
+        "close_relative_difference_median": 0.0
+      },
+      "FIL-USDT-SWAP": {
+        "overlapping_bars": 6492,
+        "open_relative_difference_max": 0.0,
+        "open_relative_difference_median": 0.0,
+        "close_relative_difference_max": 0.0,
+        "close_relative_difference_median": 0.0
+      },
+      "ATOM-USDT-SWAP": {
+        "overlapping_bars": 6492,
+        "open_relative_difference_max": 0.0006093845216332187,
+        "open_relative_difference_median": 0.0,
+        "close_relative_difference_max": 2.4027550918439745e-16,
+        "close_relative_difference_median": 0.0
+      },
+      "NEAR-USDT-SWAP": {
+        "overlapping_bars": 6492,
+        "open_relative_difference_max": 9.93640699522943e-05,
+        "open_relative_difference_median": 0.0,
+        "close_relative_difference_max": 0.0,
+        "close_relative_difference_median": 0.0
+      },
+      "OP-USDT-SWAP": {
+        "overlapping_bars": 6492,
+        "open_relative_difference_max": 0.0,
+        "open_relative_difference_median": 0.0,
+        "close_relative_difference_max": 0.0,
+        "close_relative_difference_median": 0.0
+      }
+    },
+    "total_symbol_bars_compared": 116855,
+    "maximum_open_relative_difference": 0.0006123698714022053,
+    "maximum_close_relative_difference": 1.5938394529073208e-15
+  },
+  "fixed_survivor_panel": {
+    "name": "fixed_survivor_panel",
+    "entries": 1018,
+    "periods": 1017,
+    "first_entry_utc": "2023-09-03T04:00:00+00:00",
+    "last_entry_utc": "2026-06-16T04:00:00+00:00",
+    "cohort_forced_exits": {
+      "0": 0,
+      "1": 0,
+      "2": 0
+    },
+    "forced_exit_events_at_decisions": 0,
+    "refresh_decisions": 1018,
+    "base": {
+      "metrics": {
+        "periods": 1017,
+        "net_r": 0.15857458990460244,
+        "mean": 0.00015592388387866514,
+        "profit_factor": 1.096991047676355,
+        "win_rate": 0.504424778761062,
+        "payoff_ratio": 1.0777455906995768,
+        "total_return": 0.15806720174111155,
+        "maximum_drawdown": -0.10003397703454131,
+        "maximum_loss_streak": 10,
+        "mean_turnover": 0.07556160914099655,
+        "transaction_cost": 0.0614769251971148,
+        "funding_reserve": 0.12069000000000005,
+        "mean_gross_exposure": 0.3955752212389381,
+        "terminal_exit_count": 0
+      },
+      "segments": {
+        "S1": {
+          "periods": 302,
+          "net_r": 0.12964260816568474,
+          "mean": 0.0004292801594890223,
+          "profit_factor": 1.2762796729406527,
+          "win_rate": 0.5463576158940397,
+          "payoff_ratio": 1.0596988799567844,
+          "total_return": 0.13400930482951523,
+          "maximum_drawdown": -0.03921951619829933,
+          "maximum_loss_streak": 6,
+          "mean_turnover": 0.07311110968262302,
+          "transaction_cost": 0.017663644099321727,
+          "funding_reserve": 0.035930000000000004,
+          "mean_gross_exposure": 0.39657836644591604,
+          "terminal_exit_count": 0
+        },
+        "S2": {
+          "periods": 365,
+          "net_r": 0.0043467079038523836,
+          "mean": 1.1908788777677763e-05,
+          "profit_factor": 1.0064677203859445,
+          "win_rate": 0.4712328767123288,
+          "payoff_ratio": 1.1293504071772518,
+          "total_return": -0.0007886022382096458,
+          "maximum_drawdown": -0.10003397703453998,
+          "maximum_loss_streak": 10,
+          "mean_turnover": 0.07875258576817641,
+          "transaction_cost": 0.022995755044307512,
+          "funding_reserve": 0.04325000000000001,
+          "mean_gross_exposure": 0.39497716894977164,
+          "terminal_exit_count": 0
+        },
+        "S3": {
+          "periods": 350,
+          "net_r": 0.024585273835065254,
+          "mean": 7.024363952875787e-05,
+          "profit_factor": 1.0498046044021028,
+          "win_rate": 0.5028571428571429,
+          "payoff_ratio": 1.0378750066248061,
+          "total_return": 0.022020870512602375,
+          "maximum_drawdown": -0.06889676985908744,
+          "maximum_loss_streak": 8,
+          "mean_turnover": 0.07434830733387696,
+          "transaction_cost": 0.02081752605348555,
+          "funding_reserve": 0.041510000000000005,
+          "mean_gross_exposure": 0.39533333333333337,
+          "terminal_exit_count": 0
+        }
+      },
+      "positive_segment_count": 2,
+      "symbol_net_contributions": {
+        "XRP-USDT-SWAP": 0.06975564798413922,
+        "ADA-USDT-SWAP": 0.049707403376927,
+        "BCH-USDT-SWAP": 0.047899800375681575,
+        "NEAR-USDT-SWAP": 0.043621219766343575,
+        "AVAX-USDT-SWAP": 0.03795926490537772,
+        "DOGE-USDT-SWAP": 0.03441825179103585,
+        "SOL-USDT-SWAP": 0.02718246999969098,
+        "DOT-USDT-SWAP": 0.026609635816159324,
+        "UNI-USDT-SWAP": 0.02169800471211819,
+        "ETH-USDT-SWAP": 0.008092439491721533,
+        "BTC-USDT-SWAP": 0.004899992442858346,
+        "LINK-USDT-SWAP": -0.01313304259983984,
+        "FIL-USDT-SWAP": -0.015457800144422678,
+        "OP-USDT-SWAP": -0.01988176432777231,
+        "TRX-USDT-SWAP": -0.02313042691897627,
+        "ATOM-USDT-SWAP": -0.04414035841573087,
+        "LTC-USDT-SWAP": -0.04463584987711202,
+        "ETC-USDT-SWAP": -0.0528902984735966
+      },
+      "maximum_single_symbol_positive_net_contribution_share": 0.18759378522377676,
+      "maximum_symbol": "XRP-USDT-SWAP",
+      "month_net_contributions": {
+        "2023-09": 0.015229570063743161,
+        "2023-10": 0.005617509301288638,
+        "2023-11": 0.02727668975231446,
+        "2023-12": 0.03807071277664435,
+        "2024-01": -0.015664772632748562,
+        "2024-02": 0.00532512542242414,
+        "2024-03": 0.05633454879542472,
+        "2024-04": 0.01060273759219512,
+        "2024-05": -0.008963421565814991,
+        "2024-06": -0.004186091339786286,
+        "2024-07": 0.007727114871024451,
+        "2024-08": -0.010207759522143239,
+        "2024-09": -0.02756649222408414,
+        "2024-10": -0.0054364585468717,
+        "2024-11": 0.05437907964513883,
+        "2024-12": 0.005684769855156613,
+        "2025-01": -0.004093457248814705,
+        "2025-02": 0.018208596579106295,
+        "2025-03": -0.03750086161411475,
+        "2025-04": -0.00831613949500172,
+        "2025-05": -0.018954166947461992,
+        "2025-06": 0.030422482551918425,
+        "2025-07": -0.010316010261058148,
+        "2025-08": -0.0042579964154216,
+        "2025-09": 0.009508430156689273,
+        "2025-10": 0.0060432136631753015,
+        "2025-11": 0.004213375042275116,
+        "2025-12": 0.011995244037547488,
+        "2026-01": -0.016088378768442487,
+        "2026-02": 0.025309634929763375,
+        "2026-03": -0.010655421758814482,
+        "2026-04": -0.01259692103932989,
+        "2026-05": 0.011888117605465074,
+        "2026-06": 0.009541986643216234
+      },
+      "maximum_single_month_positive_net_contribution_share": 0.15941682577203295,
+      "maximum_month": "2024-03",
+      "terminal_exit_count": 0,
+      "terminal_exit_symbols": {}
+    },
+    "stress": {
+      "metrics": {
+        "periods": 1017,
+        "net_r": -0.023592335292512617,
+        "mean": -2.3197969805813782e-05,
+        "profit_factor": 0.9863477598226784,
+        "win_rate": 0.48475909537856443,
+        "payoff_ratio": 1.0483696270731917,
+        "total_return": -0.03479468990443457,
+        "maximum_drawdown": -0.1686896686030359,
+        "maximum_loss_streak": 11,
+        "mean_turnover": 0.07556160914099655,
+        "transaction_cost": 0.1229538503942296,
+        "funding_reserve": 0.2413800000000001,
+        "mean_gross_exposure": 0.3955752212389381,
+        "terminal_exit_count": 0
+      },
+      "segments": {
+        "S1": {
+          "periods": 302,
+          "net_r": 0.07604896406636297,
+          "mean": 0.0002518177618091489,
+          "profit_factor": 1.1537062840981513,
+          "win_rate": 0.5165562913907285,
+          "payoff_ratio": 1.0797507530662187,
+          "total_return": 0.07485134110680547,
+          "maximum_drawdown": -0.04521785926680533,
+          "maximum_loss_streak": 6,
+          "mean_turnover": 0.07311110968262302,
+          "transaction_cost": 0.035327288198643454,
+          "funding_reserve": 0.07186000000000001,
+          "mean_gross_exposure": 0.39657836644591604,
+          "terminal_exit_count": 0
+        },
+        "S2": {
+          "periods": 365,
+          "net_r": -0.06189904714045519,
+          "mean": -0.00016958643052179502,
+          "profit_factor": 0.9125347929540589,
+          "win_rate": 0.4602739726027397,
+          "payoff_ratio": 1.0700556798330334,
+          "total_return": -0.06484635515726889,
+          "maximum_drawdown": -0.1287003641702179,
+          "maximum_loss_streak": 11,
+          "mean_turnover": 0.07875258576817641,
+          "transaction_cost": 0.045991510088615024,
+          "funding_reserve": 0.08650000000000002,
+          "mean_gross_exposure": 0.39497716894977164,
+          "terminal_exit_count": 0
+        },
+        "S3": {
+          "periods": 350,
+          "net_r": -0.03774225221842033,
+          "mean": -0.00010783500633834379,
+          "profit_factor": 0.9281955363463944,
+          "win_rate": 0.4828571428571429,
+          "payoff_ratio": 0.9941029117082685,
+          "total_return": -0.03974112672743502,
+          "maximum_drawdown": -0.0936695910121561,
+          "maximum_loss_streak": 8,
+          "mean_turnover": 0.07434830733387696,
+          "transaction_cost": 0.0416350521069711,
+          "funding_reserve": 0.08302000000000001,
+          "mean_gross_exposure": 0.39533333333333337,
+          "terminal_exit_count": 0
+        }
+      },
+      "positive_segment_count": 1,
+      "symbol_net_contributions": {
+        "XRP-USDT-SWAP": 0.06071290189967985,
+        "ADA-USDT-SWAP": 0.04266334949987212,
+        "BCH-USDT-SWAP": 0.03630217695017328,
+        "NEAR-USDT-SWAP": 0.030540164663895725,
+        "AVAX-USDT-SWAP": 0.02719592204307028,
+        "DOGE-USDT-SWAP": 0.02397513844436481,
+        "SOL-USDT-SWAP": 0.01726283353064825,
+        "DOT-USDT-SWAP": 0.01725042324648683,
+        "UNI-USDT-SWAP": 0.00864242483251978,
+        "ETH-USDT-SWAP": -0.000689460540947647,
+        "BTC-USDT-SWAP": -0.005607221795316881,
+        "LINK-USDT-SWAP": -0.021371800558104014,
+        "FIL-USDT-SWAP": -0.02539033761059687,
+        "OP-USDT-SWAP": -0.03234078781054923,
+        "TRX-USDT-SWAP": -0.03756251200289611,
+        "LTC-USDT-SWAP": -0.05290754987129726,
+        "ATOM-USDT-SWAP": -0.0539686007185687,
+        "ETC-USDT-SWAP": -0.05829939949494659
+      },
+      "maximum_single_symbol_positive_net_contribution_share": 0.22949904550111155,
+      "maximum_symbol": "XRP-USDT-SWAP",
+      "month_net_contributions": {
+        "2023-09": 0.010392390115387803,
+        "2023-10": 0.00046334664228201176,
+        "2023-11": 0.02213248588331278,
+        "2023-12": 0.032281508801166765,
+        "2024-01": -0.021500608531254028,
+        "2024-02": 0.0002249998024385809,
+        "2024-03": 0.050597917088915395,
+        "2024-04": 0.005490342806647881,
+        "2024-05": -0.014793163426082872,
+        "2024-06": -0.009240255116451353,
+        "2024-07": 0.002134878580076902,
+        "2024-08": -0.01580544124437843,
+        "2024-09": -0.033388659808944225,
+        "2024-10": -0.01125292277365828,
+        "2024-11": 0.0487671897337149,
+        "2024-12": 0.0002248059857038712,
+        "2025-01": -0.009897558942020063,
+        "2025-02": 0.013116820389304156,
+        "2025-03": -0.043144923422230655,
+        "2025-04": -0.013641297150160126,
+        "2025-05": -0.02485459309763642,
+        "2025-06": 0.025842654609773155,
+        "2025-07": -0.01594539260211894,
+        "2025-08": -0.009822949229350175,
+        "2025-09": 0.004290864581146626,
+        "2025-10": 0.0005837657106818716,
+        "2025-11": -0.0010414445106504706,
+        "2025-12": 0.007200084797744785,
+        "2026-01": -0.021987097241904577,
+        "2026-02": 0.02056269932060857,
+        "2026-03": -0.01625292532055305,
+        "2026-04": -0.01813276420672377,
+        "2026-05": 0.00629852393523244,
+        "2026-06": 0.006504382547466343
+      },
+      "maximum_single_month_positive_net_contribution_share": 0.1967950827940969,
+      "maximum_month": "2024-03",
+      "terminal_exit_count": 0,
+      "terminal_exit_symbols": {}
+    }
+  },
+  "dynamic_point_in_time_panel": {
+    "name": "dynamic_point_in_time_panel",
+    "entries": 1018,
+    "periods": 1017,
+    "first_entry_utc": "2023-09-03T04:00:00+00:00",
+    "last_entry_utc": "2026-06-16T04:00:00+00:00",
+    "cohort_forced_exits": {
+      "0": 284,
+      "1": 298,
+      "2": 270
+    },
+    "forced_exit_events_at_decisions": 851,
+    "refresh_decisions": 1018,
+    "base": {
+      "metrics": {
+        "periods": 1017,
+        "net_r": -0.2656921216127669,
+        "mean": -0.0002612508570430353,
+        "profit_factor": 0.9247156150697419,
+        "win_rate": 0.4837758112094395,
+        "payoff_ratio": 0.9867392233975905,
+        "total_return": -0.267378825673133,
+        "maximum_drawdown": -0.3893417418982058,
+        "maximum_loss_streak": 9,
+        "mean_turnover": 0.09813294386196698,
+        "transaction_cost": 0.07984096312609634,
+        "funding_reserve": 0.11562500000000003,
+        "mean_gross_exposure": 0.3789741068502131,
+        "terminal_exit_count": 2
+      },
+      "segments": {
+        "S1": {
+          "periods": 302,
+          "net_r": -0.05491942754490029,
+          "mean": -0.00018185240908907382,
+          "profit_factor": 0.9518168313264593,
+          "win_rate": 0.4900662251655629,
+          "payoff_ratio": 0.9904040001640184,
+          "total_return": -0.06972002601865812,
+          "maximum_drawdown": -0.18049566000576656,
+          "maximum_loss_streak": 6,
+          "mean_turnover": 0.0990557000721564,
+          "transaction_cost": 0.02393185713743299,
+          "funding_reserve": 0.034265000000000004,
+          "mean_gross_exposure": 0.3782008830022075,
+          "terminal_exit_count": 0
+        },
+        "S2": {
+          "periods": 365,
+          "net_r": -0.013037376973860038,
+          "mean": -3.5718841024274073e-05,
+          "profit_factor": 0.989865041836674,
+          "win_rate": 0.4931506849315068,
+          "payoff_ratio": 1.0173612929988038,
+          "total_return": -0.030582706808391147,
+          "maximum_drawdown": -0.12848830194693395,
+          "maximum_loss_streak": 8,
+          "mean_turnover": 0.10028296643825993,
+          "transaction_cost": 0.029282626199971906,
+          "funding_reserve": 0.041800000000000004,
+          "mean_gross_exposure": 0.3817351598173516,
+          "terminal_exit_count": 2
+        },
+        "S3": {
+          "periods": 350,
+          "net_r": -0.1977353170940066,
+          "mean": -0.0005649580488400189,
+          "profit_factor": 0.8207291280333067,
+          "win_rate": 0.4685714285714286,
+          "payoff_ratio": 0.930826937891433,
+          "total_return": -0.18762783988807064,
+          "maximum_drawdown": -0.26177956303685856,
+          "maximum_loss_streak": 9,
+          "mean_turnover": 0.09509457067389804,
+          "transaction_cost": 0.026626479788691447,
+          "funding_reserve": 0.039560000000000005,
+          "mean_gross_exposure": 0.3767619047619048,
+          "terminal_exit_count": 0
+        }
+      },
+      "positive_segment_count": 0,
+      "symbol_net_contributions": {
+        "SUI-USDT-SWAP": 0.11200408806502153,
+        "TRB-USDT-SWAP": 0.08242804171189402,
+        "PENGU-USDT-SWAP": 0.07221424450402143,
+        "MOODENG-USDT-SWAP": 0.059163065631288106,
+        "PEPE-USDT-SWAP": 0.050688514428594046,
+        "PNUT-USDT-SWAP": 0.04921297463189644,
+        "XPL-USDT-SWAP": 0.04046914716928361,
+        "AIXBT-USDT-SWAP": 0.035941376638513316,
+        "BONK-USDT-SWAP": 0.03336322432755961,
+        "ALLO-USDT-SWAP": 0.03191757652207431,
+        "AVAX-USDT-SWAP": 0.024198807278497728,
+        "BARD-USDT-SWAP": 0.023699518072967246,
+        "XRP-USDT-SWAP": 0.022159788659766373,
+        "ETHFI-USDT-SWAP": 0.02209055023854254,
+        "ONT-USDT-SWAP": 0.019387120981208768,
+        "SAND-USDT-SWAP": 0.018834131388554182,
+        "STARL-USDT-SWAP": 0.018605318460482786,
+        "UXLINK-USDT-SWAP": 0.0173636140809867,
+        "SATS-USDT-SWAP": 0.015266080615109173,
+        "PEOPLE-USDT-SWAP": 0.014517410524308976,
+        "BIO-USDT-SWAP": 0.013313256135100981,
+        "OM-USDT-SWAP": 0.013030401481832736,
+        "NOT-USDT-SWAP": 0.012989477702418073,
+        "LAYER-USDT-SWAP": 0.012862600127796516,
+        "PI-USDT-SWAP": 0.011276367288915994,
+        "DOGE-USDT-SWAP": 0.01043568313581608,
+        "DOGS-USDT-SWAP": 0.010200003776214953,
+        "SHIB-USDT-SWAP": 0.00923413939852494,
+        "NMR-USDT-SWAP": 0.009069579317687376,
+        "NEIRO-USDT-SWAP": 0.00894959711950222,
+        "HYPE-USDT-SWAP": 0.008767739354433705,
+        "MERL-USDT-SWAP": 0.008548485437979578,
+        "MASK-USDT-SWAP": 0.007757566030775445,
+        "ASTER-USDT-SWAP": 0.006848156321250661,
+        "IP-USDT-SWAP": 0.006422072651936765,
+        "SOL-USDT-SWAP": 0.006371244174591434,
+        "BNT-USDT-SWAP": 0.0060154654372906215,
+        "NIGHT-USDT-SWAP": 0.005546065966276359,
+        "ULTI-USDT-SWAP": 0.004879241946332041,
+        "LIT-USDT-SWAP": 0.004380665654876194,
+        "AIDOGE-USDT-SWAP": 0.0037269234210473567,
+        "USTC-USDT-SWAP": 0.0036467073804778583,
+        "WLFI-USDT-SWAP": 0.0031937182313948407,
+        "ORBS-USDT-SWAP": 0.003177628766106141,
+        "BTC-USDT-SWAP": 0.0026417655514852614,
+        "UNI-USDT-SWAP": 0.0025137835137866394,
+        "ACT-USDT-SWAP": 0.0022714051127758223,
+        "STX-USDT-SWAP": 0.002251918413438042,
+        "ZRX-USDT-SWAP": 0.0022030424271918094,
+        "AAVE-USDT-SWAP": 0.002067452871027594,
+        "MEMEFI-USDT-SWAP": 0.0020137422467082964,
+        "SONIC-USDT-SWAP": 0.0017932931370797614,
+        "AUCTION-USDT-SWAP": 0.0017062165776577534,
+        "ENJ-USDT-SWAP": 0.001517023664302914,
+        "LINEA-USDT-SWAP": 0.001438099926657112,
+        "STORJ-USDT-SWAP": 0.001322942385477061,
+        "ANIME-USDT-SWAP": 0.0010451700277765844,
+        "AEVO-USDT-SWAP": 0.0008279568518680796,
+        "EIGEN-USDT-SWAP": 0.0007923957379124358,
+        "SUSHI-USDT-SWAP": 0.0007618111208321827,
+        "ZETA-USDT-SWAP": 0.0007388708782580991,
+        "MMT-USDT-SWAP": 0.0007308754486505124,
+        "AGIX-USDT-SWAP": 0.000690154733352047,
+        "FLM-USDT-SWAP": 0.0006718473092789871,
+        "DYDX-USDT-SWAP": 0.0005779819934249427,
+        "SOPH-USDT-SWAP": 0.00047715708316431265,
+        "RNDR-USDT-SWAP": 0.0002783533228144036,
+        "VIRTUAL-USDT-SWAP": 0.0002280071954648251,
+        "CVC-USDT-SWAP": 8.363714904776008e-05,
+        "BREV-USDT-SWAP": 6.872008067840545e-05,
+        "PYTH-USDT-SWAP": -0.00011835330313871912,
+        "BNB-USDT-SWAP": -0.00013985799402616453,
+        "LDO-USDT-SWAP": -0.00025632380799692043,
+        "TNSR-USDT-SWAP": -0.0004059831102034593,
+        "CHIP-USDT-SWAP": -0.0004112150666994197,
+        "PARTI-USDT-SWAP": -0.0004228303655159864,
+        "ETC-USDT-SWAP": -0.0004888657224439354,
+        "HBAR-USDT-SWAP": -0.0005131038685069631,
+        "ID-USDT-SWAP": -0.0005141209517749136,
+        "CFX-USDT-SWAP": -0.0005356921720310569,
+        "NEO-USDT-SWAP": -0.0007225977266301299,
+        "BOME-USDT-SWAP": -0.0007335601444805538,
+        "FLOW-USDT-SWAP": -0.0009127585886087243,
+        "BCH-USDT-SWAP": -0.0011740755727146913,
+        "INJ-USDT-SWAP": -0.0012918630190584086,
+        "MATIC-USDT-SWAP": -0.0013809367941991458,
+        "KAT-USDT-SWAP": -0.0013931480405612157,
+        "MON-USDT-SWAP": -0.0014429025943980647,
+        "MKR-USDT-SWAP": -0.0015966002011997226,
+        "FLOKI-USDT-SWAP": -0.0017370758645014032,
+        "HMSTR-USDT-SWAP": -0.0018721682515069305,
+        "ME-USDT-SWAP": -0.0019443698850212256,
+        "TRX-USDT-SWAP": -0.0020908033549242185,
+        "API3-USDT-SWAP": -0.0029750739975678837,
+        "YB-USDT-SWAP": -0.0032022738937693084,
+        "WET-USDT-SWAP": -0.0035029031553745374,
+        "SENT-USDT-SWAP": -0.003550604048895485,
+        "DOT-USDT-SWAP": -0.003812496034832056,
+        "FRONT-USDT-SWAP": -0.003961967771655598,
+        "ARB-USDT-SWAP": -0.003975820362098169,
+        "SPACE-USDT-SWAP": -0.004754042326631811,
+        "BERA-USDT-SWAP": -0.005066787419999542,
+        "VINE-USDT-SWAP": -0.005292474614277252,
+        "TIA-USDT-SWAP": -0.005682673529913063,
+        "W-USDT-SWAP": -0.005732852480707435,
+        "KAITO-USDT-SWAP": -0.006243522050253375,
+        "ICP-USDT-SWAP": -0.0065751437036415785,
+        "TRUMP-USDT-SWAP": -0.006604896986899095,
+        "CRO-USDT-SWAP": -0.006741182240843659,
+        "ENS-USDT-SWAP": -0.006761475044965175,
+        "LUNC-USDT-SWAP": -0.007072516438589701,
+        "AXS-USDT-SWAP": -0.007272081060539543,
+        "JUP-USDT-SWAP": -0.0074608269669259675,
+        "FIL-USDT-SWAP": -0.00798600218056082,
+        "APT-USDT-SWAP": -0.008039876873355837,
+        "BSV-USDT-SWAP": -0.00847192929105295,
+        "ETH-USDT-SWAP": -0.008707073676447963,
+        "LTC-USDT-SWAP": -0.009336701228045367,
+        "SPK-USDT-SWAP": -0.009624350947186916,
+        "ZK-USDT-SWAP": -0.010266463272924561,
+        "TON-USDT-SWAP": -0.0104265209763918,
+        "OP-USDT-SWAP": -0.010777156346017428,
+        "CRV-USDT-SWAP": -0.010819371983284053,
+        "ONDO-USDT-SWAP": -0.010866694104775676,
+        "RVN-USDT-SWAP": -0.010917718021319373,
+        "DASH-USDT-SWAP": -0.011476760205234107,
+        "MEME-USDT-SWAP": -0.011488411527899662,
+        "BLUR-USDT-SWAP": -0.011610243115683577,
+        "OKB-USDT-SWAP": -0.011825511640942194,
+        "NEAR-USDT-SWAP": -0.011942927344179411,
+        "MORPHO-USDT-SWAP": -0.01239899231806044,
+        "MOVE-USDT-SWAP": -0.012424967508106628,
+        "LINK-USDT-SWAP": -0.012763020230042738,
+        "UMA-USDT-SWAP": -0.013449937122299648,
+        "AGLD-USDT-SWAP": -0.014550221998552765,
+        "BABY-USDT-SWAP": -0.014693406238169972,
+        "SAHARA-USDT-SWAP": -0.015395852578804433,
+        "X-USDT-SWAP": -0.016336779241638587,
+        "GFT-USDT-SWAP": -0.016660042415493376,
+        "ZRO-USDT-SWAP": -0.016926604723246516,
+        "MAGIC-USDT-SWAP": -0.0169913562484397,
+        "LUNA-USDT-SWAP": -0.01714455007605766,
+        "LPT-USDT-SWAP": -0.017222029163147103,
+        "BIGTIME-USDT-SWAP": -0.017224269456970184,
+        "XLM-USDT-SWAP": -0.01809903631040391,
+        "ZEC-USDT-SWAP": -0.01872858682280238,
+        "WIF-USDT-SWAP": -0.018821543602920564,
+        "EOS-USDT-SWAP": -0.019117154980435213,
+        "PERP-USDT-SWAP": -0.019497158753045876,
+        "JTO-USDT-SWAP": -0.019707962463041517,
+        "SNX-USDT-SWAP": -0.019903238215913572,
+        "APE-USDT-SWAP": -0.020455398878270865,
+        "ACH-USDT-SWAP": -0.020984999650383113,
+        "AVNT-USDT-SWAP": -0.02199228244524614,
+        "PUMP-USDT-SWAP": -0.021994700801100033,
+        "WCT-USDT-SWAP": -0.022217439928702766,
+        "GAS-USDT-SWAP": -0.022463368610359143,
+        "ADA-USDT-SWAP": -0.022885956180896366,
+        "STRK-USDT-SWAP": -0.024624889362035794,
+        "RESOLV-USDT-SWAP": -0.025486695919230223,
+        "OL-USDT-SWAP": -0.026796614358948263,
+        "PROMPT-USDT-SWAP": -0.02757728341650247,
+        "CORE-USDT-SWAP": -0.03353174321449571,
+        "BASED-USDT-SWAP": -0.034348002180255466,
+        "ORDI-USDT-SWAP": -0.03497008667966079,
+        "WLD-USDT-SWAP": -0.0372811232469536,
+        "MEW-USDT-SWAP": -0.037841297473382114,
+        "YGG-USDT-SWAP": -0.03971248589705119,
+        "TURBO-USDT-SWAP": -0.04028115177754851,
+        "CEL-USDT-SWAP": -0.0851463628095891
+      },
+      "maximum_single_symbol_positive_net_contribution_share": 0.11360812055688796,
+      "maximum_symbol": "SUI-USDT-SWAP",
+      "month_net_contributions": {
+        "2023-09": 0.04747479538518812,
+        "2023-10": -0.004748144865511445,
+        "2023-11": 0.017466788079965906,
+        "2023-12": -0.03345661768057155,
+        "2024-01": 0.0051409292653047355,
+        "2024-02": 0.009387458759175961,
+        "2024-03": 0.03155207577648846,
+        "2024-04": -0.05423444973315787,
+        "2024-05": -0.04662889200256611,
+        "2024-06": -0.02687337052921651,
+        "2024-07": -0.07380121328260589,
+        "2024-08": -0.036775079400361926,
+        "2024-09": 0.012238396419498934,
+        "2024-10": -0.019236602336976657,
+        "2024-11": 0.044395813675347784,
+        "2024-12": -0.002277100886676993,
+        "2025-01": 0.061239624259793825,
+        "2025-02": 0.033990270332574964,
+        "2025-03": -0.0037321870939665373,
+        "2025-04": -0.03210784623428606,
+        "2025-05": 0.009935569495345652,
+        "2025-06": -0.006907021921547164,
+        "2025-07": 0.026805065683790708,
+        "2025-08": -0.04188769403181824,
+        "2025-09": -0.034476739995637544,
+        "2025-10": 0.030153094855950063,
+        "2025-11": -0.09542358572153689,
+        "2025-12": 0.022936497315106833,
+        "2026-01": -0.02037795004414736,
+        "2026-02": -0.03762922621472277,
+        "2026-03": -0.02891782176401012,
+        "2026-04": -0.033748741477109594,
+        "2026-05": -0.008698257549542586,
+        "2026-06": 0.02353004184967092
+      },
+      "maximum_single_month_positive_net_contribution_share": 0.16276466915510623,
+      "maximum_month": "2025-01",
+      "terminal_exit_count": 2,
+      "terminal_exit_symbols": {
+        "CEL-USDT-SWAP": 1,
+        "MEMEFI-USDT-SWAP": 1
+      }
+    },
+    "stress": {
+      "metrics": {
+        "periods": 1017,
+        "net_r": -0.46115808473886344,
+        "mean": -0.000453449444187673,
+        "profit_factor": 0.8730239190151112,
+        "win_rate": 0.471976401179941,
+        "payoff_ratio": 0.9766955093981557,
+        "total_return": -0.39750800460833235,
+        "maximum_drawdown": -0.47706726222372065,
+        "maximum_loss_streak": 10,
+        "mean_turnover": 0.09813294386196698,
+        "transaction_cost": 0.15968192625219269,
+        "funding_reserve": 0.23125000000000007,
+        "mean_gross_exposure": 0.3789741068502131,
+        "terminal_exit_count": 2
+      },
+      "segments": {
+        "S1": {
+          "periods": 302,
+          "net_r": -0.11311628468233334,
+          "mean": -0.0003745572340474614,
+          "profit_factor": 0.9032955174119024,
+          "win_rate": 0.48344370860927155,
+          "payoff_ratio": 0.965165073399019,
+          "total_return": -0.12233785280318743,
+          "maximum_drawdown": -0.19944850402675762,
+          "maximum_loss_streak": 6,
+          "mean_turnover": 0.0990557000721564,
+          "transaction_cost": 0.04786371427486598,
+          "funding_reserve": 0.06853000000000001,
+          "mean_gross_exposure": 0.3782008830022075,
+          "terminal_exit_count": 0
+        },
+        "S2": {
+          "periods": 365,
+          "net_r": -0.08412000317383203,
+          "mean": -0.00023046576212008775,
+          "profit_factor": 0.9364056415581851,
+          "win_rate": 0.4849315068493151,
+          "payoff_ratio": 0.9946003424459818,
+          "total_return": -0.09710799893656819,
+          "maximum_drawdown": -0.14170264489738682,
+          "maximum_loss_streak": 8,
+          "mean_turnover": 0.10028296643825993,
+          "transaction_cost": 0.05856525239994381,
+          "funding_reserve": 0.08360000000000001,
+          "mean_gross_exposure": 0.3817351598173516,
+          "terminal_exit_count": 2
+        },
+        "S3": {
+          "periods": 350,
+          "net_r": -0.2639217968826981,
+          "mean": -0.0007540622768077089,
+          "profit_factor": 0.7683637299500923,
+          "win_rate": 0.44857142857142857,
+          "payoff_ratio": 0.9445490438239988,
+          "total_return": -0.23969454267140988,
+          "maximum_drawdown": -0.30210451649794057,
+          "maximum_loss_streak": 10,
+          "mean_turnover": 0.09509457067389804,
+          "transaction_cost": 0.053252959577382894,
+          "funding_reserve": 0.07912000000000001,
+          "mean_gross_exposure": 0.3767619047619048,
+          "terminal_exit_count": 0
+        }
+      },
+      "positive_segment_count": 0,
+      "symbol_net_contributions": {
+        "SUI-USDT-SWAP": 0.10481243026409393,
+        "TRB-USDT-SWAP": 0.07796128031170659,
+        "PENGU-USDT-SWAP": 0.07010906613952159,
+        "MOODENG-USDT-SWAP": 0.057836130517062746,
+        "PNUT-USDT-SWAP": 0.046721931011063,
+        "PEPE-USDT-SWAP": 0.041045519883511614,
+        "XPL-USDT-SWAP": 0.03865799082492504,
+        "AIXBT-USDT-SWAP": 0.03526808995459787,
+        "BONK-USDT-SWAP": 0.03167122913129054,
+        "ALLO-USDT-SWAP": 0.03152771583908003,
+        "BARD-USDT-SWAP": 0.02310974636375892,
+        "AVAX-USDT-SWAP": 0.022171879725428622,
+        "ETHFI-USDT-SWAP": 0.020725636666851847,
+        "ONT-USDT-SWAP": 0.01892018312554331,
+        "SAND-USDT-SWAP": 0.01857482315462696,
+        "STARL-USDT-SWAP": 0.01810523322896757,
+        "UXLINK-USDT-SWAP": 0.016352729321511005,
+        "XRP-USDT-SWAP": 0.01543851184527439,
+        "SATS-USDT-SWAP": 0.01339981951598031,
+        "LAYER-USDT-SWAP": 0.012622140651941033,
+        "OM-USDT-SWAP": 0.012379450275955743,
+        "BIO-USDT-SWAP": 0.01225880989181347,
+        "PEOPLE-USDT-SWAP": 0.011421996529199924,
+        "NOT-USDT-SWAP": 0.011372972203012241,
+        "PI-USDT-SWAP": 0.010018428439235916,
+        "DOGS-USDT-SWAP": 0.009408524090975522,
+        "NMR-USDT-SWAP": 0.008771904854111093,
+        "NEIRO-USDT-SWAP": 0.008559494600351084,
+        "MERL-USDT-SWAP": 0.007879029963863231,
+        "SHIB-USDT-SWAP": 0.007536700410392241,
+        "MASK-USDT-SWAP": 0.007325252254764644,
+        "HYPE-USDT-SWAP": 0.00614464538672184,
+        "ASTER-USDT-SWAP": 0.005961431207741011,
+        "BNT-USDT-SWAP": 0.005681729739638508,
+        "DOGE-USDT-SWAP": 0.005138725707845081,
+        "NIGHT-USDT-SWAP": 0.005111160219509545,
+        "IP-USDT-SWAP": 0.004726534184701234,
+        "ULTI-USDT-SWAP": 0.004520215076088774,
+        "LIT-USDT-SWAP": 0.004226667007375573,
+        "AIDOGE-USDT-SWAP": 0.0035155728201347663,
+        "USTC-USDT-SWAP": 0.0031979499037117073,
+        "ORBS-USDT-SWAP": 0.003111122192532868,
+        "WLFI-USDT-SWAP": 0.002327577409019548,
+        "STX-USDT-SWAP": 0.0021799695129765197,
+        "ZRX-USDT-SWAP": 0.0020882045052582703,
+        "ACT-USDT-SWAP": 0.0017250247994482267,
+        "SONIC-USDT-SWAP": 0.0016808893318126972,
+        "MEMEFI-USDT-SWAP": 0.0015415187161967213,
+        "LINEA-USDT-SWAP": 0.0013129305059463125,
+        "UNI-USDT-SWAP": 0.0012620065969058184,
+        "ENJ-USDT-SWAP": 0.0012046016018978471,
+        "AEVO-USDT-SWAP": 0.0007969393447618,
+        "AUCTION-USDT-SWAP": 0.0007880882034535767,
+        "EIGEN-USDT-SWAP": 0.0007613395654164405,
+        "ANIME-USDT-SWAP": 0.0007260057713194697,
+        "MMT-USDT-SWAP": 0.0006996894937922548,
+        "SUSHI-USDT-SWAP": 0.0006830528412032191,
+        "AGIX-USDT-SWAP": 0.0006579211782086555,
+        "STORJ-USDT-SWAP": 0.0006213250376295791,
+        "ZETA-USDT-SWAP": 0.00048475878778682493,
+        "SOL-USDT-SWAP": 0.00047840032760329326,
+        "SOPH-USDT-SWAP": 0.0004076561755880871,
+        "DYDX-USDT-SWAP": 0.0003495733594782442,
+        "RNDR-USDT-SWAP": 0.0002414611374536689,
+        "VIRTUAL-USDT-SWAP": 0.00019656190579557778,
+        "FLM-USDT-SWAP": 0.00011427493539165776,
+        "BREV-USDT-SWAP": 2.602572920783272e-05,
+        "CVC-USDT-SWAP": 2.09247956245487e-05,
+        "PYTH-USDT-SWAP": -0.0001870794471918952,
+        "LDO-USDT-SWAP": -0.00031892156145866293,
+        "AAVE-USDT-SWAP": -0.00032146985618748013,
+        "TNSR-USDT-SWAP": -0.0004379386919808278,
+        "CHIP-USDT-SWAP": -0.0004814194718214162,
+        "ETC-USDT-SWAP": -0.0005469400625696192,
+        "ID-USDT-SWAP": -0.0007530712116987889,
+        "PARTI-USDT-SWAP": -0.0007910811465799069,
+        "NEO-USDT-SWAP": -0.0009300761913170455,
+        "BOME-USDT-SWAP": -0.000959296622888402,
+        "HBAR-USDT-SWAP": -0.0011405698217211155,
+        "FLOW-USDT-SWAP": -0.0012298216342918548,
+        "INJ-USDT-SWAP": -0.0014081860731269798,
+        "MON-USDT-SWAP": -0.0014739127098387557,
+        "KAT-USDT-SWAP": -0.0016462892572679318,
+        "CFX-USDT-SWAP": -0.0016516753901801198,
+        "MKR-USDT-SWAP": -0.0016871042600698546,
+        "MATIC-USDT-SWAP": -0.0016979944566658917,
+        "HMSTR-USDT-SWAP": -0.0019802710963798056,
+        "ME-USDT-SWAP": -0.0020832224286234727,
+        "TRX-USDT-SWAP": -0.0021725182556252983,
+        "FLOKI-USDT-SWAP": -0.00219914446580688,
+        "BNB-USDT-SWAP": -0.0026635126845339935,
+        "BTC-USDT-SWAP": -0.003143876186891321,
+        "YB-USDT-SWAP": -0.0033649788111888646,
+        "WET-USDT-SWAP": -0.003631253630850164,
+        "SENT-USDT-SWAP": -0.0036535764546987387,
+        "API3-USDT-SWAP": -0.003905773517157721,
+        "DOT-USDT-SWAP": -0.004080714843699269,
+        "FRONT-USDT-SWAP": -0.004355193266457472,
+        "SPACE-USDT-SWAP": -0.005211498139237219,
+        "BCH-USDT-SWAP": -0.005401339616964942,
+        "BERA-USDT-SWAP": -0.005625766323805884,
+        "ARB-USDT-SWAP": -0.005659231208221255,
+        "W-USDT-SWAP": -0.0059299052688449524,
+        "VINE-USDT-SWAP": -0.006626950558648539,
+        "CRO-USDT-SWAP": -0.007052941157089869,
+        "KAITO-USDT-SWAP": -0.007207153744174571,
+        "ICP-USDT-SWAP": -0.007302974974352059,
+        "TIA-USDT-SWAP": -0.007386644961624318,
+        "LUNC-USDT-SWAP": -0.007407546354563633,
+        "ENS-USDT-SWAP": -0.007717446401963505,
+        "AXS-USDT-SWAP": -0.008048970098563082,
+        "JUP-USDT-SWAP": -0.008208062306974967,
+        "APT-USDT-SWAP": -0.008435323384968033,
+        "BSV-USDT-SWAP": -0.009089218218747783,
+        "FIL-USDT-SWAP": -0.010132137690024476,
+        "TRUMP-USDT-SWAP": -0.01045423620401943,
+        "SPK-USDT-SWAP": -0.010477073463878408,
+        "ZK-USDT-SWAP": -0.01053460540064845,
+        "RVN-USDT-SWAP": -0.011122496949420224,
+        "ONDO-USDT-SWAP": -0.01142884810851435,
+        "DASH-USDT-SWAP": -0.011893142774183203,
+        "MEME-USDT-SWAP": -0.012003453260824345,
+        "TON-USDT-SWAP": -0.012137603435111975,
+        "OKB-USDT-SWAP": -0.012211190043921762,
+        "LTC-USDT-SWAP": -0.012232004042352819,
+        "OP-USDT-SWAP": -0.012430016972024498,
+        "CRV-USDT-SWAP": -0.012552119452636701,
+        "BLUR-USDT-SWAP": -0.012637246544205939,
+        "MORPHO-USDT-SWAP": -0.012705154427356828,
+        "NEAR-USDT-SWAP": -0.012918856687318715,
+        "MOVE-USDT-SWAP": -0.01316317144066145,
+        "ETH-USDT-SWAP": -0.013424476203375427,
+        "UMA-USDT-SWAP": -0.014061428145594594,
+        "BABY-USDT-SWAP": -0.014874959996033962,
+        "AGLD-USDT-SWAP": -0.015155169276429584,
+        "LINK-USDT-SWAP": -0.015562188582662369,
+        "SAHARA-USDT-SWAP": -0.016127830376329914,
+        "GFT-USDT-SWAP": -0.017123529204606355,
+        "X-USDT-SWAP": -0.017267414529264405,
+        "LUNA-USDT-SWAP": -0.017535251540018316,
+        "ZRO-USDT-SWAP": -0.017589427030594115,
+        "BIGTIME-USDT-SWAP": -0.018034819762146288,
+        "MAGIC-USDT-SWAP": -0.018092800798729738,
+        "LPT-USDT-SWAP": -0.018229064410280327,
+        "XLM-USDT-SWAP": -0.019383526583860704,
+        "EOS-USDT-SWAP": -0.019610122790624667,
+        "PERP-USDT-SWAP": -0.019904105864834355,
+        "JTO-USDT-SWAP": -0.019942923414772107,
+        "SNX-USDT-SWAP": -0.02032056667488628,
+        "APE-USDT-SWAP": -0.021107939069041317,
+        "ACH-USDT-SWAP": -0.02124887832895331,
+        "ZEC-USDT-SWAP": -0.021710616366748262,
+        "AVNT-USDT-SWAP": -0.02241425098811147,
+        "WIF-USDT-SWAP": -0.022495636451721753,
+        "WCT-USDT-SWAP": -0.022684861343349006,
+        "GAS-USDT-SWAP": -0.023087569874917342,
+        "STRK-USDT-SWAP": -0.025048284264352228,
+        "PUMP-USDT-SWAP": -0.025474910537554848,
+        "ADA-USDT-SWAP": -0.026446804356153698,
+        "RESOLV-USDT-SWAP": -0.026593727005977556,
+        "OL-USDT-SWAP": -0.027573734020671682,
+        "PROMPT-USDT-SWAP": -0.028020331211650915,
+        "CORE-USDT-SWAP": -0.034241085856253545,
+        "BASED-USDT-SWAP": -0.035004506738275966,
+        "MEW-USDT-SWAP": -0.03913173381110935,
+        "ORDI-USDT-SWAP": -0.0396957829632518,
+        "YGG-USDT-SWAP": -0.040521439006685346,
+        "TURBO-USDT-SWAP": -0.04323892498586017,
+        "WLD-USDT-SWAP": -0.045211616348664836,
+        "CEL-USDT-SWAP": -0.08640175890548757
+      },
+      "maximum_single_symbol_positive_net_contribution_share": 0.11688982268455965,
+      "maximum_symbol": "SUI-USDT-SWAP",
+      "month_net_contributions": {
+        "2023-09": 0.042271377872153376,
+        "2023-10": -0.010550273397462168,
+        "2023-11": 0.01190769651261746,
+        "2023-12": -0.0394860541387789,
+        "2024-01": -0.0005840360512977417,
+        "2024-02": 0.0039232564841605476,
+        "2024-03": 0.025175199293529592,
+        "2024-04": -0.060409772222429985,
+        "2024-05": -0.052648592879516204,
+        "2024-06": -0.0327150861553093,
+        "2024-07": -0.08003384953653278,
+        "2024-08": -0.042876528634223254,
+        "2024-09": 0.006574771308449325,
+        "2024-10": -0.025597416320943117,
+        "2024-11": 0.03866367055863702,
+        "2024-12": -0.008265060156093833,
+        "2025-01": 0.055126068034279455,
+        "2025-02": 0.02875675084981403,
+        "2025-03": -0.009866638800882906,
+        "2025-04": -0.037973357609856595,
+        "2025-05": 0.0037918070925397063,
+        "2025-06": -0.012420219959019122,
+        "2025-07": 0.02092687252089048,
+        "2025-08": -0.04794041266984892,
+        "2025-09": -0.04018973752223569,
+        "2025-10": 0.0245995192346455,
+        "2025-11": -0.10095941465748878,
+        "2025-12": 0.017054281858054094,
+        "2026-01": -0.026229231827572454,
+        "2026-02": -0.042871725317813164,
+        "2026-03": -0.03499844189403059,
+        "2026-04": -0.03924178243957638,
+        "2026-05": -0.014489822708723947,
+        "2026-06": 0.020418098541001756
+      },
+      "maximum_single_month_positive_net_contribution_share": 0.18425142579315879,
+      "maximum_month": "2025-01",
+      "terminal_exit_count": 2,
+      "terminal_exit_symbols": {
+        "CEL-USDT-SWAP": 1,
+        "MEMEFI-USDT-SWAP": 1
+      }
+    }
+  },
+  "interpretation_boundary": "This audit changes only universe membership. It does not authorize parameter changes, symbol subset selection, production promotion or removal of the forward evidence requirement.",
+  "production_effect": "NONE",
+  "formal_signal_effect": "NONE",
+  "automatic_promotion": false
+}

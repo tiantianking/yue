@@ -1,0 +1,103 @@
+{
+  "schema": "fortieth_wave_h22_dynamic_universe_survivorship_audit_v1",
+  "date": "2026-06-28",
+  "status": "COMPLETE",
+  "decision": "SURVIVORSHIP_DEPENDENT_HISTORICAL_SUPPORT_REJECTED_NO_RESCUE",
+  "dataset": {
+    "dataset_id": "OKX_DYNAMIC_UNIVERSE_4H_20230701_20260616_V1",
+    "validation_status": "COMPLETE_VALIDATED",
+    "source_calendar_timezone": "Asia/Shanghai",
+    "bar_timezone": "UTC",
+    "natural_days": 1082,
+    "rows": 1203424,
+    "unique_instruments": 307,
+    "hard_validation_failures": 0,
+    "dataset_tree_sha256": "e1331b0d132f0d662c03e4f54574abec94391820fa1732055ac72be328590846"
+  },
+  "frozen_universe_policy": {
+    "minimum_consecutive_closed_4h_bars": 85,
+    "momentum_lookback_4h_bars": 84,
+    "liquidity_measure": "trailing 84 closed 4h bars vol_quote",
+    "dynamic_universe_size": 18,
+    "excluded_pegged_assets": [
+      "USDC-USDT-SWAP",
+      "XAUT-USDT-SWAP"
+    ],
+    "h22_parameters_changed": false
+  },
+  "comparison": {
+    "fixed_survivor_panel_base": {
+      "profit_factor": 1.096991047676355,
+      "win_rate": 0.504424778761062,
+      "payoff_ratio": 1.0777455906995768,
+      "total_return": 0.15806720174111155,
+      "maximum_drawdown": -0.10003397703454131,
+      "positive_segments": 2
+    },
+    "fixed_survivor_panel_stress": {
+      "profit_factor": 0.9863477598226784,
+      "win_rate": 0.48475909537856443,
+      "payoff_ratio": 1.0483696270731917,
+      "total_return": -0.03479468990443457,
+      "maximum_drawdown": -0.1686896686030359,
+      "positive_segments": 1
+    },
+    "dynamic_point_in_time_panel_base": {
+      "profit_factor": 0.9247156150697419,
+      "win_rate": 0.4837758112094395,
+      "payoff_ratio": 0.9867392233975905,
+      "total_return": -0.267378825673133,
+      "maximum_drawdown": -0.3893417418982058,
+      "positive_segments": 0
+    },
+    "dynamic_point_in_time_panel_stress": {
+      "profit_factor": 0.8730239190151112,
+      "win_rate": 0.471976401179941,
+      "payoff_ratio": 0.9766955093981557,
+      "total_return": -0.39750800460833235,
+      "maximum_drawdown": -0.47706726222372065,
+      "positive_segments": 0
+    }
+  },
+  "universe_diagnostics": {
+    "mean_fixed_panel_overlap_count": 7.5892156862745095,
+    "minimum_fixed_panel_overlap_count": 4,
+    "maximum_fixed_panel_overlap_count": 11,
+    "mean_jaccard": 0.27068700249273436,
+    "eligible_count_min": 92,
+    "eligible_count_median": 193.0,
+    "eligible_count_max": 216,
+    "distinct_dynamic_universe_symbols": 174,
+    "universe_change_signal_days": 550,
+    "forced_exit_events_at_decisions": 851,
+    "terminal_delisting_exits": 2
+  },
+  "concentration": {
+    "maximum_single_symbol_positive_contribution_share": 0.11360812055688796,
+    "maximum_symbol": "SUI-USDT-SWAP",
+    "maximum_single_month_positive_contribution_share": 0.16276466915510623,
+    "maximum_month": "2025-01",
+    "concentration_gates_passed": true
+  },
+  "source_consistency": {
+    "overlapping_fixed_symbol_bars": 116855,
+    "maximum_close_relative_difference": 1.5938394529073208e-15,
+    "maximum_open_relative_difference": 0.0006123698714022053,
+    "interpretation": "Close prices were effectively identical. A few isolated opens differed by at most about 6.12 basis points; this cannot explain the dynamic panel's 42 percentage-point base-return gap or the all-segment failure."
+  },
+  "strategy_status_change": {
+    "h22_historical_support": "REJECTED_AS_SURVIVORSHIP_DEPENDENT",
+    "h22_forward_shadow": "CONTINUE_OBSERVATION_ONLY_UNDER_ORIGINAL_FROZEN_PROTOCOL",
+    "formal_signal_or_a_grade_effect": "NONE",
+    "parameter_rescue_allowed": false,
+    "production_effect": "NONE"
+  },
+  "artifacts": {
+    "protocol": "h22_dynamic_universe_survivorship_audit_v1/PROTOCOL_LOCKED_BEFORE_RESULTS.json",
+    "script": "h22_dynamic_universe_survivorship_audit_v1/run_audit.py",
+    "result": "h22_dynamic_universe_survivorship_audit_v1/RESULT.json",
+    "report_cn": "h22_dynamic_universe_survivorship_audit_v1/RESULTS_CN.md",
+    "hashes": "h22_dynamic_universe_survivorship_audit_v1/HASHES.txt"
+  },
+  "next_action": "Downgrade H22 to forward-observation-only status, archive this failed historical robustness audit, continue V357 and H27 under their own frozen prospective protocols, and resume the independent mechanism funnel without H22 parameter rescue."
+}
