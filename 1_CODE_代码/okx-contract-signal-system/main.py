@@ -186,6 +186,9 @@ async def run_dashboard_5m_backfill_service(symbols: list[str]) -> None:
             settle_seconds=20,
             output_path=project_paths().output_dir / "closed_kline_backfill_status_5m.json",
             fetch_limit=300,
+            replace_with_latest_window=True,
+            max_symbol_attempts=3,
+            retry_delay_seconds=1.0,
         )
         await service.run_forever()
     except asyncio.CancelledError:

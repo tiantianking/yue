@@ -1567,3 +1567,32 @@
 ### Current recovery point
 - Treat H22 as `FORWARD_OBSERVATION_ONLY_HISTORICAL_SUPPORT_REJECTED_SURVIVORSHIP_DEPENDENT` and continue recording its frozen prospective shadow without early promotion or parameter rescue.
 - Continue V357 and H27 under their existing frozen forward protocols and resume the independent mechanism funnel. Do not reuse fixed-survivor historical evidence as proof for another cross-sectional strategy without a point-in-time universe audit.
+
+## 2026-06-28 - Task: v3.56.30 dashboard 5-minute backfill recovery
+### What was found
+- The 15-minute core closed-candle backfill, 21-symbol WebSocket coverage, signal scanner and shadow ensemble were live. A temporary OKX REST failure left HYPE and BCH one 15-minute bar behind, and the next scheduled cycle automatically repaired both with zero write failures and zero internal gaps.
+- The auxiliary 5-minute status file had not changed since 2026-06-18. Most 5-minute runtime caches ended on 2026-06-18 and five ended on 2026-06-21, leaving roughly 2,106 to 2,854 missing tail bars per symbol.
+- The primary root cause was runtime wiring: the desktop application uses the GUI path, while the existing 5-minute service was started only by the CLI signal loop. GUI background tasks launched the 15-minute service and outbox but never launched the 5-minute service.
+- A secondary scalability issue existed after reconnection: merging the latest 300 bars into a stale file created a multi-day internal gap, which the old code attempted to repair serially for every symbol before writing a new status cycle.
+- Initial live recovery proved the GUI wiring and latest-window rebuild worked, but transient OKX REST timeouts could still leave one or two symbols lagging until the next five-minute cycle.
+### What was changed
+- Added `replace_with_latest_window` support to `ClosedCandleBackfillService`. The 5-minute auxiliary cache now atomically replaces stale content with the latest contiguous confirmed window instead of backfilling thousands of nonessential dashboard-only bars.
+- Added `latest_window_rebuilt` and `attempts` to per-symbol status for observable recovery evidence.
+- Added bounded per-symbol retry controls. The 5-minute GUI and CLI services use at most three attempts with a one-second delay; the 15-minute core service keeps the default single request per scheduled cycle and its strict internal-gap repair behavior.
+- Added `_run_dashboard_5m_backfill_once` and `_dashboard_5m_backfill_loop` to the GUI and included the task in the live background task list. A 5-minute failure is reported as auxiliary degradation and cannot stop a healthy 15-minute core chain.
+- Added nonblocking runtime health checks for 5-minute status freshness, completion/write failures and configured 21-symbol coverage.
+- Bumped application/package metadata and release documentation to `3.56.30`; approved strategy remains `3.56.15` and strict research identity remains `v3.56-strict`.
+### Verification
+- Four focused regressions passed: stale latest-window rebuild without long-gap repair, transient single-symbol retry within one cycle, GUI task wiring/configuration and stale-status health warning.
+- Full Python suite: 471 collected, 453 passed, 18 skipped because external historical data is not configured, 0 failed.
+- Python compilation, source audit and change-governance checks passed. Source audit reports version 3.56.30, 265 unique released files, 21 configured swaps, 23 research families and 30 failure fingerprints.
+- Restarted the desktop runtime with a single clean process chain. The final 5-minute cycle completed all 21 symbols with zero write failures and zero internal gaps.
+- Directly inspected all 21 runtime-cache Parquet files: each contains 299 unique contiguous closed 5-minute bars, all terminate at `2026-06-28T14:00:00+00:00`, and no file has an internal gap.
+- `scripts/system_check.py runtime --json` returned `ok=true`; 5-minute freshness, completeness and symbol coverage all passed, while the 15-minute core backfill, WebSocket, signal status, outbox and 21-symbol coverage remained healthy.
+### Safety and scope
+- No strategy parameters, formal A-grade gate, approved manifest, Feishu policy, leverage, account, position or order behavior changed.
+- Formal multi-year historical data remains read-only and was not modified. Only the writable runtime 5-minute dashboard cache is rebuilt.
+- The system remains signal-only with live orders and automatic closing disabled.
+### Current recovery point
+- Keep the desktop runtime running under v3.56.30. The 5-minute dashboard cache should refresh after each confirmed five-minute close; any stale, incomplete or partial-coverage state is now visible in `system_check.py runtime` instead of being silently hidden.
+- Continue H22 only as forward observation with rejected survivor-dependent history, and continue V357/H27 under their frozen prospective protocols.

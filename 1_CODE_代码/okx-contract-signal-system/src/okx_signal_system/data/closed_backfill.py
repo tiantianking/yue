@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +43,8 @@ class ClosedBackfillSymbolStatus:
     required_history_bars: int = 0
     repair_attempted: bool = False
     internal_gaps_repaired: int = 0
+    latest_window_rebuilt: bool = False
+    attempts: int = 1
 
 
 @dataclass
@@ -335,6 +338,7 @@ def sync_latest_closed_symbol(
     limit: int = 100,
     required_history_bars: int = 0,
     minimum_continuous_tail: int = 0,
+    replace_with_latest_window: bool = False,
 ) -> ClosedBackfillSymbolStatus:
     spec = timeframe_spec(timeframe)
     dataset_name = dataset or f"okx_{spec.file_suffix}_extended"
@@ -356,6 +360,7 @@ def sync_latest_closed_symbol(
     sync_error = ""
     repair_attempted = False
     internal_gaps_repaired = 0
+    latest_window_rebuilt = False
 
     try:
         raw_bars = get_candles(inst_id, bar=spec.key, limit=limit)
@@ -365,10 +370,25 @@ def sync_latest_closed_symbol(
             timeframe=spec.key,
             expected_latest_closed=expected,
         )
-        if _closed_merge_required(existing, latest):
+        latest_window_required = _closed_merge_required(existing, latest)
+        if replace_with_latest_window and not latest.empty:
+            closed_existing = _closed_existing(existing, expected_latest_closed=expected)
+            latest_ts = pd.to_datetime(latest["ts"], utc=True)
+            current_ts = pd.to_datetime(closed_existing["ts"], utc=True) if not closed_existing.empty else pd.Series(dtype="datetime64[ns, UTC]")
+            latest_window_required = (
+                latest_window_required
+                or len(closed_existing) != len(latest)
+                or current_ts.empty
+                or current_ts.min() != latest_ts.min()
+                or current_ts.max() != latest_ts.max()
+            )
+
+        if latest_window_required:
             write_attempted = True
-            write_succeeded = handler.merge_and_save(inst_id, latest, mode="merge")
+            mode = "replace" if replace_with_latest_window else "merge"
+            write_succeeded = handler.merge_and_save(inst_id, latest, mode=mode)
             if write_succeeded:
+                latest_window_rebuilt = replace_with_latest_window
                 existing = _read_existing(path)
             else:
                 write_error = handler.last_merge_error or f"closed backfill cache write failed: {handler.data_dir}"
@@ -418,6 +438,7 @@ def sync_latest_closed_symbol(
         required_history_bars=int(status["required_history_bars"]),
         repair_attempted=repair_attempted,
         internal_gaps_repaired=internal_gaps_repaired,
+        latest_window_rebuilt=latest_window_rebuilt,
     )
 
 
@@ -434,6 +455,9 @@ class ClosedCandleBackfillService:
         fetch_limit: int = 100,
         required_history_bars: int | None = None,
         minimum_continuous_tail_bars: int = 0,
+        replace_with_latest_window: bool = False,
+        max_symbol_attempts: int = 1,
+        retry_delay_seconds: float = 0.0,
     ) -> None:
         self.symbols = symbols
         self.timeframe = timeframe_spec(timeframe).key
@@ -447,6 +471,9 @@ class ClosedCandleBackfillService:
             0,
             int(required_history_bars if required_history_bars is not None else self.minimum_continuous_tail),
         )
+        self.replace_with_latest_window = bool(replace_with_latest_window)
+        self.max_symbol_attempts = max(1, int(max_symbol_attempts))
+        self.retry_delay_seconds = max(0.0, float(retry_delay_seconds))
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
     def next_run_at(self, *, now: datetime | None = None) -> datetime:
@@ -463,19 +490,29 @@ class ClosedCandleBackfillService:
             self.timeframe,
             settle_seconds=self.settle_seconds,
         )
-        rows = [
-            sync_latest_closed_symbol(
-                inst_id,
-                timeframe=self.timeframe,
-                dataset=self.dataset,
-                data_dir=self.data_dir,
-                expected_latest_closed=expected,
-                limit=self.fetch_limit,
-                required_history_bars=self.required_history_bars,
-                minimum_continuous_tail=self.minimum_continuous_tail,
-            )
-            for inst_id in self.symbols
-        ]
+        rows: list[ClosedBackfillSymbolStatus] = []
+        for inst_id in self.symbols:
+            row: ClosedBackfillSymbolStatus | None = None
+            for attempt in range(1, self.max_symbol_attempts + 1):
+                row = sync_latest_closed_symbol(
+                    inst_id,
+                    timeframe=self.timeframe,
+                    dataset=self.dataset,
+                    data_dir=self.data_dir,
+                    expected_latest_closed=expected,
+                    limit=self.fetch_limit,
+                    required_history_bars=self.required_history_bars,
+                    minimum_continuous_tail=self.minimum_continuous_tail,
+                    replace_with_latest_window=self.replace_with_latest_window,
+                )
+                row.attempts = attempt
+                if row.data_complete or row.status not in {"lagging"}:
+                    break
+                if attempt < self.max_symbol_attempts and self.retry_delay_seconds > 0:
+                    time.sleep(self.retry_delay_seconds)
+            if row is None:
+                raise RuntimeError(f"closed backfill produced no status for {inst_id}")
+            rows.append(row)
         payload = ClosedBackfillCycleStatus(
             generated_at=datetime.now(timezone.utc).isoformat(),
             timeframe=self.timeframe,

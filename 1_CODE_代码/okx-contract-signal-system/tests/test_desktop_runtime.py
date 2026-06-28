@@ -2,7 +2,10 @@ import pandas as pd
 import pytest
 import inspect
 import asyncio
+import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import okx_signal_system
 from okx_signal_system.exchange.position_monitor import (
@@ -14,6 +17,117 @@ from okx_signal_system.exchange.position_monitor import (
 from okx_signal_system.strategy.ensemble import ensemble_vote
 from okx_signal_system.strategy.trend_breakout import StrategyParams
 from okx_signal_system.strategy.vote_gate import min_vote_approval_rate, vote_gate_passed
+
+
+def test_runtime_health_reports_stale_dashboard_5m_backfill_as_warning(tmp_path, monkeypatch) -> None:
+    from scripts import system_check
+
+    symbol = "BTC-USDT-SWAP"
+    now = datetime.now(timezone.utc)
+    status_path = tmp_path / "latest_scan_status.json"
+    status_path.write_text(
+        json.dumps(
+            {
+                "generated_at": now.isoformat(),
+                "status": "running",
+                "error": None,
+                "websocket": {
+                    "connected": True,
+                    "degraded": False,
+                    "subscriptions": [symbol],
+                },
+                "symbols": [{"symbol": symbol}],
+                "lifecycle_summary": {"outbox": {}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "closed_kline_backfill_status.json").write_text(
+        json.dumps(
+            {
+                "generated_at": now.isoformat(),
+                "all_complete": True,
+                "symbols_checked": 1,
+                "write_failures": 0,
+                "expected_latest_closed": now.isoformat(),
+                "symbols": [{"inst_id": symbol, "status": "passed"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "closed_kline_backfill_status_5m.json").write_text(
+        json.dumps(
+            {
+                "generated_at": (now - timedelta(days=1)).isoformat(),
+                "all_complete": True,
+                "symbols_checked": 1,
+                "write_failures": 0,
+                "expected_latest_closed": (now - timedelta(days=1)).isoformat(),
+                "symbols": [{"inst_id": symbol, "status": "passed"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(system_check, "configured_symbols", lambda: [symbol])
+
+    results = system_check.run_runtime(
+        status_path,
+        mode="observation",
+        max_age_seconds=120,
+        max_pending=100,
+    )
+    by_name = {item.name: item for item in results}
+
+    assert by_name["dashboard_5m_backfill_fresh"].ok is False
+    assert by_name["dashboard_5m_backfill_fresh"].blocking is False
+    assert by_name["dashboard_5m_backfill_complete"].ok is True
+    assert by_name["dashboard_5m_symbol_coverage"].ok is True
+
+
+def test_gui_dashboard_5m_backfill_uses_latest_window_mode(monkeypatch) -> None:
+    import gui
+    from okx_signal_system.data import closed_backfill
+
+    captured = {}
+    updates = []
+
+    class FakeService:
+        def __init__(self, symbols, **kwargs):
+            captured["symbols"] = list(symbols)
+            captured.update(kwargs)
+
+        def run_once(self):
+            row = SimpleNamespace(
+                status="passed",
+                inst_id="BTC-USDT-SWAP",
+                missing_closed_bars=0,
+                latest_window_rebuilt=True,
+            )
+            return SimpleNamespace(
+                all_complete=True,
+                symbols_checked=1,
+                expected_latest_closed="2026-06-28T13:00:00+00:00",
+                symbols=[row],
+                write_failures=0,
+            )
+
+    monkeypatch.setattr(closed_backfill, "ClosedCandleBackfillService", FakeService)
+    dummy = SimpleNamespace(
+        _watched_symbols=["BTC-USDT-SWAP"],
+        _update_runtime_module_status=lambda *args, **kwargs: updates.append((args, kwargs)),
+    )
+
+    status = gui.OKXSignalGUI._run_dashboard_5m_backfill_once(dummy)
+
+    assert status.all_complete
+    assert captured["timeframe"] == "5m"
+    assert captured["dataset"] == "okx_5m_extended"
+    assert captured["fetch_limit"] == 300
+    assert captured["replace_with_latest_window"] is True
+    assert captured["max_symbol_attempts"] == 3
+    assert captured["retry_delay_seconds"] == 1.0
+    assert updates[0][0] == ("dashboard_5m_backfill", "healthy")
+    assert "asyncio.create_task(self._dashboard_5m_backfill_loop())" in inspect.getsource(gui.OKXSignalGUI)
 
 
 def test_gui_runtime_dependencies_import() -> None:

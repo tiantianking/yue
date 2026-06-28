@@ -437,6 +437,129 @@ def test_closed_backfill_service_writes_runtime_cache_without_mutating_history(t
     assert history_path.stat().st_mtime_ns == before_mtime
 
 
+def test_dashboard_5m_backfill_rebuilds_stale_latest_window_without_long_gap_repair(
+    tmp_path, monkeypatch
+) -> None:
+    expected = pd.Timestamp("2026-06-15T18:15:00Z")
+    stale = _closed_backfill_frame(
+        pd.date_range("2026-06-10T00:00:00Z", periods=4, freq="5min", tz="UTC")
+    )
+    stale["timeframe"] = "5m"
+    stale.to_parquet(tmp_path / "BTC_USDT_USDT_5m.parquet", index=False)
+    latest = pd.date_range(end=expected, periods=4, freq="5min", tz="UTC")
+
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.latest_closed_candle_start",
+        lambda *args, **kwargs: expected.to_pydatetime(),
+    )
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.seconds_until_next_closed_run",
+        lambda *args, **kwargs: 60.0,
+    )
+
+    def fake_get_candles(*_args, **_kwargs):
+        return [
+            [
+                str(int(ts.timestamp() * 1000)),
+                "100",
+                "101",
+                "99",
+                "100.5",
+                "10",
+                "1000",
+                "1000",
+                "1",
+            ]
+            for ts in reversed(latest)
+        ]
+
+    monkeypatch.setattr("okx_signal_system.data.closed_backfill.get_candles", fake_get_candles)
+    monkeypatch.setattr(
+        "okx_signal_system.data.gap_handler.get_candles",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("long gap repair must not run")),
+    )
+
+    service = ClosedCandleBackfillService(
+        ["BTC-USDT-SWAP"],
+        timeframe="5m",
+        dataset="okx_5m_extended",
+        data_dir=tmp_path,
+        output_path=tmp_path / "status.json",
+        fetch_limit=300,
+        required_history_bars=4,
+        minimum_continuous_tail_bars=4,
+        replace_with_latest_window=True,
+    )
+    status = service.run_once()
+    row = status.symbols[0]
+
+    assert status.all_complete
+    assert row.status == "passed"
+    assert row.latest_window_rebuilt is True
+    assert row.repair_attempted is False
+    assert row.internal_gap_count == 0
+    saved = pd.read_parquet(tmp_path / "BTC_USDT_USDT_5m.parquet")
+    saved["ts"] = pd.to_datetime(saved["ts"], utc=True)
+    assert list(saved["ts"]) == list(latest)
+    assert set(saved["timeframe"]) == {"5m"}
+
+
+def test_dashboard_5m_backfill_retries_transient_symbol_failure(tmp_path, monkeypatch) -> None:
+    expected = pd.Timestamp("2026-06-15T18:15:00Z")
+    latest = pd.date_range(end=expected, periods=4, freq="5min", tz="UTC")
+    calls = {"count": 0}
+
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.latest_closed_candle_start",
+        lambda *args, **kwargs: expected.to_pydatetime(),
+    )
+    monkeypatch.setattr(
+        "okx_signal_system.data.closed_backfill.seconds_until_next_closed_run",
+        lambda *args, **kwargs: 60.0,
+    )
+
+    def flaky_get_candles(*_args, **_kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise ConnectionError("temporary OKX network failure")
+        return [
+            [
+                str(int(ts.timestamp() * 1000)),
+                "100",
+                "101",
+                "99",
+                "100.5",
+                "10",
+                "1000",
+                "1000",
+                "1",
+            ]
+            for ts in reversed(latest)
+        ]
+
+    monkeypatch.setattr("okx_signal_system.data.closed_backfill.get_candles", flaky_get_candles)
+
+    service = ClosedCandleBackfillService(
+        ["BTC-USDT-SWAP"],
+        timeframe="5m",
+        dataset="okx_5m_extended",
+        data_dir=tmp_path,
+        output_path=tmp_path / "status.json",
+        fetch_limit=300,
+        replace_with_latest_window=True,
+        max_symbol_attempts=3,
+        retry_delay_seconds=0.0,
+    )
+    status = service.run_once()
+    row = status.symbols[0]
+
+    assert status.all_complete
+    assert row.status == "passed"
+    assert row.attempts == 2
+    assert row.latest_window_rebuilt is True
+    assert calls["count"] == 2
+
+
 def test_closed_backfill_allows_runtime_cache_open_tail(tmp_path, monkeypatch) -> None:
     expected = pd.Timestamp("2026-06-15T18:15:00Z")
     timestamps = pd.date_range("2026-06-15T17:30:00Z", periods=4, freq="15min", tz="UTC")

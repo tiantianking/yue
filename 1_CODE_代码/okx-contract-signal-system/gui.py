@@ -385,6 +385,62 @@ class OKXSignalGUI:
         )
         return status
 
+    def _run_dashboard_5m_backfill_once(self):
+        from okx_signal_system.config import project_paths
+        from okx_signal_system.data.closed_backfill import ClosedCandleBackfillService
+
+        service = ClosedCandleBackfillService(
+            self._watched_symbols,
+            timeframe="5m",
+            dataset="okx_5m_extended",
+            settle_seconds=20,
+            output_path=project_paths().output_dir / "closed_kline_backfill_status_5m.json",
+            fetch_limit=300,
+            replace_with_latest_window=True,
+            max_symbol_attempts=3,
+            retry_delay_seconds=1.0,
+        )
+        status = service.run_once()
+        lagging = [row for row in status.symbols if row.status != "passed"]
+        self._update_runtime_module_status(
+            "dashboard_5m_backfill",
+            "healthy" if status.all_complete else "degraded",
+            all_complete=status.all_complete,
+            symbols_checked=status.symbols_checked,
+            expected_latest_closed=status.expected_latest_closed,
+            lagging_symbols=[row.inst_id for row in lagging[:8]],
+            missing_closed_bars=sum(row.missing_closed_bars for row in status.symbols),
+            latest_window_rebuilt=sum(1 for row in status.symbols if row.latest_window_rebuilt),
+            write_failures=status.write_failures,
+        )
+        return status
+
+    async def _dashboard_5m_backfill_loop(self) -> None:
+        from okx_signal_system.data.closed_backfill import seconds_until_next_closed_run
+
+        while self.monitoring:
+            try:
+                status = await asyncio.to_thread(self._run_dashboard_5m_backfill_once)
+                if status.all_complete:
+                    rebuilt = sum(1 for row in status.symbols if row.latest_window_rebuilt)
+                    self.message_queue.put(
+                        ('log', (f"5分钟面板K线已更新：{status.symbols_checked} 个币种，重建 {rebuilt} 个连续窗口", "INFO"))
+                    )
+                else:
+                    lagging = [row for row in status.symbols if row.status != "passed"]
+                    first = lagging[0].error if lagging and lagging[0].error else "unknown"
+                    self.message_queue.put(
+                        ('log', (f"5分钟面板K线仍有缺口：{len(lagging)} 个币种，原因: {first}", "WARNING"))
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._update_runtime_module_status("dashboard_5m_backfill", "failed", error=str(exc))
+                self.message_queue.put(('log', (f"5分钟面板K线后台更新异常: {exc}", "WARNING")))
+
+            delay = seconds_until_next_closed_run("5m", settle_seconds=20)
+            await asyncio.sleep(min(delay, 3600.0))
+
     async def _closed_backfill_loop(self) -> None:
         from okx_signal_system.data.closed_backfill import seconds_until_next_closed_run
 
@@ -1037,6 +1093,7 @@ class OKXSignalGUI:
 
             self._background_tasks = [
                 asyncio.create_task(self._closed_backfill_loop()),
+                asyncio.create_task(self._dashboard_5m_backfill_loop()),
                 asyncio.create_task(self._outbox_loop()),
             ]
             self._update_runtime_module_status(

@@ -440,15 +440,84 @@ def run_runtime(
             fallback_backfill = {}
 
     outbox_counts = _load_outbox_counts(status_file.parent / "signal_lifecycle.sqlite3")
-    return evaluate_runtime(
+    configured = configured_symbols()
+    results = evaluate_runtime(
         status,
         mode=mode,
         max_age_seconds=max_age_seconds,
-        configured=configured_symbols(),
+        configured=configured,
         fallback_backfill=fallback_backfill,
         authoritative_outbox=outbox_counts or None,
         max_pending=max(0, max_pending),
     )
+
+    dashboard_5m_path = status_file.parent / "closed_kline_backfill_status_5m.json"
+    if not dashboard_5m_path.exists():
+        results.append(
+            CheckResult(
+                "runtime",
+                "dashboard_5m_backfill_status_exists",
+                False,
+                str(dashboard_5m_path),
+                blocking=False,
+            )
+        )
+        return results
+
+    try:
+        dashboard_5m = json.loads(dashboard_5m_path.read_text(encoding="utf-8-sig"))
+        generated_5m = _parse_time(dashboard_5m.get("generated_at"))
+        age_5m = (
+            (datetime.now(timezone.utc) - generated_5m).total_seconds()
+            if generated_5m
+            else float("inf")
+        )
+        maximum_5m_age = max(900, max_age_seconds)
+        dashboard_5m_symbols = _backfill_symbol_set(dashboard_5m)
+        configured_set = {str(item) for item in configured}
+        detail_5m = (
+            f"age_seconds={age_5m:.1f} all_complete={dashboard_5m.get('all_complete')} "
+            f"symbols_checked={dashboard_5m.get('symbols_checked')} "
+            f"write_failures={dashboard_5m.get('write_failures', 0)} "
+            f"latest={dashboard_5m.get('expected_latest_closed')}"
+        )
+        results.extend(
+            [
+                CheckResult(
+                    "runtime",
+                    "dashboard_5m_backfill_fresh",
+                    age_5m <= maximum_5m_age,
+                    f"{detail_5m} max_age_seconds={maximum_5m_age}",
+                    blocking=False,
+                ),
+                CheckResult(
+                    "runtime",
+                    "dashboard_5m_backfill_complete",
+                    dashboard_5m.get("all_complete") is True
+                    and int(dashboard_5m.get("write_failures") or 0) == 0,
+                    detail_5m,
+                    blocking=False,
+                ),
+                CheckResult(
+                    "runtime",
+                    "dashboard_5m_symbol_coverage",
+                    dashboard_5m_symbols == configured_set,
+                    f"configured={len(configured_set)} backfill={len(dashboard_5m_symbols)}",
+                    blocking=False,
+                ),
+            ]
+        )
+    except Exception as exc:
+        results.append(
+            CheckResult(
+                "runtime",
+                "dashboard_5m_backfill_status_valid",
+                False,
+                str(exc),
+                blocking=False,
+            )
+        )
+    return results
 
 
 def _read_release_files() -> list[str]:
