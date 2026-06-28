@@ -1596,3 +1596,34 @@
 ### Current recovery point
 - Keep the desktop runtime running under v3.56.30. The 5-minute dashboard cache should refresh after each confirmed five-minute close; any stale, incomplete or partial-coverage state is now visible in `system_check.py runtime` instead of being silently hidden.
 - Continue H22 only as forward observation with rejected survivor-dependent history, and continue V357/H27 under their frozen prospective protocols.
+
+## 2026-06-28 - Task: V357 point-in-time dynamic-universe survivorship audit and v3.56.31 research-gate correction
+### What was done
+- Froze the V357 audit before outcomes. Both released members, EMA/Donchian/relative-strength/breadth/volume rules, ATR stops, holding periods, entry timing, cost reserves and 0.5 percent per-trade portfolio-risk normalization remained unchanged.
+- Replaced the fixed mature-survivor list with a causal top-18 point-in-time liquidity panel. Eligibility required 180 consecutive closed four-hour bars, all latest 84 quote-volume bars strictly positive, a next four-hour open and exclusion of USDC/XAUT. The top 12 within the panel supplied the original cross-sectional relative-strength and breadth references.
+- Built 5,391 dynamic decision panels across 154 historical contracts. Eligible-count range was 144 to 214 with a median of 192. The dynamic top 18 overlapped the fixed 18 by only 7.60 symbols on average and changed on 3,171 four-hour bars.
+- Replayed 1,896 comparable dynamic trades against 1,837 fixed-survivor trades over 896 common daily periods. Only three dynamic trades required terminal-data exits, so the result is not driven by missing delisted data.
+- The fixed panel had base PF 1.1598, return +59.82 percent and drawdown -51.41 percent; stress PF 1.0050, compounded return -13.94 percent and drawdown -61.54 percent.
+- The point-in-time dynamic panel failed: base PF 1.0552, return +6.78 percent and drawdown -35.06 percent; stress PF 0.9386, return -32.36 percent and drawdown -42.47 percent. The middle segment had base/stress PF 0.8534/0.7622.
+- Maximum positive symbol and month contribution shares were 20.79 and 18.17 percent, so the failure is not a single-symbol or single-month concentration artifact.
+- Verified the vectorized rolling ATR-percentile implementation against the released runtime feature builder on BTC; all audited feature columns matched with zero maximum absolute difference.
+### Evidence and artifacts
+- Added the locked protocol, reproducible audit script, machine result, Chinese report, concise failure note and SHA-256 manifest under `v357_dynamic_universe_survivorship_audit_v1`.
+- Archived `V357_动态币池存活者偏差失败_20260628.md` to the desktop failed-strategy folder.
+- The candidate files and their frozen SHA-256 values were not modified.
+### Decision
+- Status: `V357_SURVIVORSHIP_DEPENDENT_HISTORICAL_SUPPORT_REJECTED_NO_RESCUE`.
+- V357 fixed mature-survivor history is no longer valid promotion evidence. The existing frozen runtime may continue only as fully prospective research observation.
+- Do not rescue the family by changing either member, panel size, reference size, liquidity window, minimum history, parameters, stops, holding periods, costs, symbols, dates or direction.
+### Machine-state correction
+- Updated the existing `4h_donchian_volatility_compression` registry entry from `shadow_reference` to `historical_support_rejected_survivorship_dependent_forward_observation_only`.
+- Registered both V357 candidate IDs and both member aliases so renamed candidates cannot reuse the rejected fixed-survivor history.
+- Added a regression test pinning the rejected status, failure metrics and no-rescue boundary.
+- H27 remains a pure prospective diversification observation and may not repackage H22 or V357 fixed-survivor history as combination support.
+### Release boundary
+- Bumped application/package metadata and release documentation to `3.56.31`; approved strategy remains `3.56.15` and strict research identity remains `v3.56-strict`.
+- No frozen V357 rule, formal signal, A-grade strategy, Feishu policy, leverage, account, position or order behavior changed. The system remains signal-only.
+### Current recovery point
+- Continue H22 and V357 only as frozen fully prospective observations with survivor-dependent historical support rejected.
+- Continue H27 only as record-only forward diversification evidence.
+- Resume the independent mechanism funnel using the validated point-in-time dynamic universe; every future cross-sectional candidate must pass the same survivorship audit before historical support can be claimed.

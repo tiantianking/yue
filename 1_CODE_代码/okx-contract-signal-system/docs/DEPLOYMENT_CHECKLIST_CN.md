@@ -1,6 +1,6 @@
 # OKX 合约信号系统部署前后完整清单
 
-适用版本：v3.56.30
+适用版本：v3.56.31
 
 本系统是 `SIGNAL_ONLY` 公共行情信号观察系统。部署过程不得配置 OKX 私有 API Key，不得加入下单、撤单、开仓、平仓或真实账户仓位逻辑。
 
@@ -59,7 +59,7 @@ outputs/runtime/approved_strategy_manifest.json
 必须满足：
 
 - [ ] 研究版本是 `v3.56-strict`。
-- [ ] 应用版本是 `3.56.30`，approved strategy version 仍是 `3.56.15`。
+- [ ] 应用版本是 `3.56.31`，approved strategy version 仍是 `3.56.15`。
 - [ ] validation 与 blind 时间窗严格隔离。
 - [ ] blind 状态为真实 `BLIND_SEALED_PASS`。
 - [ ] 成本压力测试通过。

@@ -1,0 +1,224 @@
+{
+  "schema": "v357_dynamic_universe_survivorship_audit_result_v1",
+  "protocol_id": "V357_DYNAMIC_UNIVERSE_SURVIVORSHIP_AUDIT_V1",
+  "protocol_sha256": "1fe0ed8e2a6f6c0d185eb1e59c50a9c7c1360c82f6f9afb95f2b1e8a76da30c7",
+  "script_sha256": "88a59cc3773a99ace2ab6327b4dcad95dc923ab1686090c92483c2f4557d6f7a",
+  "dataset_manifest_sha256": "acbc5afa26002a9048ba50ce6024904d307a0f99947d5a5b515ce704b98c5e89",
+  "status": "COMPLETE",
+  "decision": "V357_SURVIVORSHIP_DEPENDENT_HISTORICAL_SUPPORT_REJECTED_NO_RESCUE",
+  "all_fixed_gates_pass": false,
+  "fixed_gate_checks": {
+    "dynamic_base_profit_factor_min": false,
+    "dynamic_stress_profit_factor_min": false,
+    "dynamic_base_total_return_gt_zero": true,
+    "dynamic_stress_total_return_gt_zero": false,
+    "dynamic_base_maximum_drawdown_abs_max": false,
+    "dynamic_stress_maximum_drawdown_abs_max": false,
+    "dynamic_positive_base_segments_min": true,
+    "dynamic_positive_stress_segments_min": true,
+    "maximum_single_symbol_positive_net_contribution_share": true,
+    "maximum_single_month_positive_net_contribution_share": true,
+    "minimum_completed_dynamic_trades": true,
+    "minimum_mean_fixed_panel_overlap_count": true
+  },
+  "dataset_summary": {
+    "dataset_id": "OKX_DYNAMIC_UNIVERSE_4H_20230701_20260616_V1",
+    "quality_status": "PASS",
+    "rows": 1203424,
+    "unique_instruments": 307
+  },
+  "common_metrics": {
+    "first_day_utc": "2024-01-02T04:00:00+00:00",
+    "last_day_utc": "2026-06-15T04:00:00+00:00",
+    "daily_periods": 896
+  },
+  "universe_diagnostics": {
+    "panel_observations": 5391,
+    "first_panel_utc": "2023-12-31T00:00:00+00:00",
+    "last_panel_utc": "2026-06-16T08:00:00+00:00",
+    "eligible_count_min": 144,
+    "eligible_count_median": 192.0,
+    "eligible_count_max": 214,
+    "mean_fixed_panel_overlap_count": 7.604897050639956,
+    "minimum_fixed_panel_overlap_count": 4,
+    "maximum_fixed_panel_overlap_count": 12,
+    "distinct_dynamic_symbols": 154,
+    "panel_change_bars": 3171,
+    "terminal_data_exit_count": 3,
+    "terminal_data_exit_symbols": {
+      "ETC-USDT-SWAP": 1,
+      "FLOKI-USDT-SWAP": 1,
+      "MATIC-USDT-SWAP": 1
+    }
+  },
+  "fixed_survivor_panel": {
+    "trade_count": 1837,
+    "member_counts": {
+      "DC_n24_t50_slow": 1733,
+      "VCB_A": 104
+    },
+    "side_counts": {
+      "long": 947,
+      "short": 890
+    },
+    "outcome_counts": {
+      "TRAILING_STOP": 1394,
+      "MAX_HOLD": 443
+    },
+    "base": {
+      "daily_metrics": {
+        "periods": 896,
+        "net_return_sum": 0.6415269619686179,
+        "profit_factor": 1.15977227302516,
+        "total_return": 0.5982402235319704,
+        "maximum_drawdown": -0.5140590831152393,
+        "positive_period_fraction": 0.24776785714285715
+      },
+      "trade_metrics": {
+        "trades": 1837,
+        "profit_factor": 1.1316544638454182,
+        "win_rate": 0.37016875340228633,
+        "mean_r": 0.06984506934878801,
+        "payoff_ratio": 1.9254767862781603
+      },
+      "positive_segment_count": 2,
+      "maximum_single_symbol_positive_net_contribution_share": 0.2458797658370073,
+      "maximum_symbol": "DOGE-USDT-SWAP",
+      "maximum_single_month_positive_net_contribution_share": 0.15360880179560707,
+      "maximum_month": "2024-11"
+    },
+    "stress": {
+      "daily_metrics": {
+        "periods": 896,
+        "net_return_sum": 0.021795999153104983,
+        "profit_factor": 1.0049560778033393,
+        "total_return": -0.13942160628652345,
+        "maximum_drawdown": -0.6154073547287111,
+        "positive_period_fraction": 0.23772321428571427
+      },
+      "trade_metrics": {
+        "trades": 1837,
+        "profit_factor": 1.0041632913914194,
+        "win_rate": 0.35166031573217205,
+        "mean_r": 0.0023729993634300536,
+        "payoff_ratio": 1.8513289164817037
+      },
+      "positive_segment_count": 1
+    }
+  },
+  "dynamic_point_in_time_panel": {
+    "trade_count": 1896,
+    "member_counts": {
+      "DC_n24_t50_slow": 1789,
+      "VCB_A": 107
+    },
+    "side_counts": {
+      "long": 961,
+      "short": 935
+    },
+    "outcome_counts": {
+      "TRAILING_STOP": 1445,
+      "MAX_HOLD": 448,
+      "TERMINAL_DATA_EXIT": 3
+    },
+    "base": {
+      "daily_metrics": {
+        "periods": 896,
+        "net_return_sum": 0.20834166667188106,
+        "profit_factor": 1.0552221051843054,
+        "total_return": 0.06784689053884319,
+        "maximum_drawdown": -0.3505538000121794,
+        "positive_period_fraction": 0.28236607142857145
+      },
+      "trade_metrics": {
+        "trades": 1896,
+        "profit_factor": 1.0402513601290033,
+        "win_rate": 0.3570675105485232,
+        "mean_r": 0.02143969370663334,
+        "payoff_ratio": 1.873067072374084
+      },
+      "segments": {
+        "S1": {
+          "net_return_sum": 0.16596098965623635,
+          "profit_factor": 1.1728760140693801,
+          "total_return": 0.1376979878819906,
+          "maximum_drawdown": -0.1435711588100239
+        },
+        "S2": {
+          "net_return_sum": -0.19513281475922714,
+          "profit_factor": 0.8534015621087986,
+          "total_return": -0.20157720793495792,
+          "maximum_drawdown": -0.2533652588972477
+        },
+        "S3": {
+          "net_return_sum": 0.2375134917748719,
+          "profit_factor": 1.1602953228336856,
+          "total_return": 0.17557156142583596,
+          "maximum_drawdown": -0.35055380001217895
+        }
+      },
+      "positive_segment_count": 2,
+      "maximum_single_symbol_positive_net_contribution_share": 0.2079271381573813,
+      "maximum_symbol": "DOGE-USDT-SWAP",
+      "maximum_single_month_positive_net_contribution_share": 0.1817310326492704,
+      "maximum_month": "2025-10"
+    },
+    "stress": {
+      "daily_metrics": {
+        "periods": 896,
+        "net_return_sum": -0.24887307580488166,
+        "profit_factor": 0.938594479138855,
+        "total_return": -0.323615184496179,
+        "maximum_drawdown": -0.4246671406320155,
+        "positive_period_fraction": 0.27455357142857145
+      },
+      "trade_metrics": {
+        "trades": 1896,
+        "profit_factor": 0.9522213828560538,
+        "win_rate": 0.3470464135021097,
+        "mean_r": -0.026799558699459436,
+        "payoff_ratio": 1.791565458929779
+      },
+      "segments": {
+        "S1": {
+          "net_return_sum": 0.05993288491987356,
+          "profit_factor": 1.0587272963292114,
+          "total_return": 0.023479000702088637,
+          "maximum_drawdown": -0.1762631416044701
+        },
+        "S2": {
+          "net_return_sum": -0.3393729874814907,
+          "profit_factor": 0.762241787881863,
+          "total_return": -0.30892670934648636,
+          "maximum_drawdown": -0.3163444469718488
+        },
+        "S3": {
+          "net_return_sum": 0.030567026756735532,
+          "profit_factor": 1.019044551586552,
+          "total_return": -0.043707378895620486,
+          "maximum_drawdown": -0.38879725256591957
+        }
+      },
+      "positive_segment_count": 2
+    }
+  },
+  "interpretation": {
+    "fixed_panel_base_pf_difference": 0.10455016784085461,
+    "fixed_panel_stress_pf_difference": 0.06636159866448433,
+    "dynamic_base_total_return_reduction": 0.5303933329931272,
+    "dynamic_stress_total_return_reduction": 0.18419357820965555,
+    "blocking_failures": [
+      "base_profit_factor_below_1.10",
+      "stress_profit_factor_below_1.03_and_below_1.00",
+      "stress_total_return_negative",
+      "base_maximum_drawdown_above_20_percent",
+      "stress_maximum_drawdown_above_25_percent",
+      "middle_segment_negative_under_base_and_stress",
+      "final_segment_negative_total_return_under_stress"
+    ]
+  },
+  "anti_rescue": "Do not change either V357 member, dynamic panel size, reference panel size, liquidity window, minimum history, EMA, Donchian, relative-strength, breadth, volume, ATR, stop, holding period, costs, symbols or dates after this result.",
+  "production_effect": "NONE",
+  "formal_signal_effect": "NONE",
+  "automatic_promotion": false
+}

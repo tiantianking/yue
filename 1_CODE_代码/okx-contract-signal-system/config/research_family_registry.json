@@ -1,6 +1,6 @@
 {
   "schema": "okx_research_family_registry_v1",
-  "updated_at": "2026-06-26T18:30:00Z",
+  "updated_at": "2026-06-28T17:50:00Z",
   "families": [
     {
       "family_id": "14_day_cross_sectional_momentum",
@@ -30,7 +30,10 @@
     },
     {
       "family_id": "4h_donchian_volatility_compression",
-      "status": "shadow_reference",
+      "aliases": ["v357-4h-donchian-n24-rs50-slow", "v357-shadow-donchian-slow-plus-vcb-a", "DC_n24_t50_slow", "VCB_A"],
+      "status": "historical_support_rejected_survivorship_dependent_forward_observation_only",
+      "warning": "The frozen V357 runtime may continue only as prospective research observation. Its fixed mature-survivor history cannot be used for promotion, A-grade classification or formal signal admission.",
+      "failure_reason": "Under the frozen top-18 point-in-time liquidity universe across 154 historical contracts, V357 produced base PF 1.0552, return 6.78 percent and drawdown -35.06 percent; stress PF 0.9386, return -32.36 percent and drawdown -42.47 percent. Parameter, member, universe, date and cost rescue are prohibited.",
       "family": {
         "core_signal": "donchian_breakout_after_atr_compression",
         "direction": "breakout_direction",

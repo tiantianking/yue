@@ -158,6 +158,26 @@ def test_h22_registry_rejects_survivor_history_as_promotion_evidence() -> None:
     assert "Parameter, universe and date rescue are prohibited" in h22["failure_reason"]
 
 
+def test_v357_registry_rejects_survivor_history_as_promotion_evidence() -> None:
+    registry = json.loads(
+        (ROOT / "config" / "research_family_registry.json").read_text(encoding="utf-8")
+    )
+    v357 = next(
+        item
+        for item in registry["families"]
+        if item["family_id"] == "4h_donchian_volatility_compression"
+    )
+
+    assert v357["status"] == (
+        "historical_support_rejected_survivorship_dependent_forward_observation_only"
+    )
+    assert "v357-shadow-donchian-slow-plus-vcb-a" in v357["aliases"]
+    assert "fixed mature-survivor history cannot be used for promotion" in v357["warning"]
+    assert "base PF 1.0552" in v357["failure_reason"]
+    assert "stress PF 0.9386" in v357["failure_reason"]
+    assert "Parameter, member, universe, date and cost rescue are prohibited" in v357["failure_reason"]
+
+
 def test_failure_fingerprint_rejects_option_surface_relabel(tmp_path: Path) -> None:
     module = _load_system_check()
     registry = tmp_path / "registry.json"
