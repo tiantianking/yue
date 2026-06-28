@@ -1555,7 +1555,15 @@
 - The already frozen H22 forward shadow may continue only as prospective observation of today's mature fixed pool. It cannot use the old historical evidence for promotion, A-grade status or automation. V357 and H27 remain independent and continue under their own frozen prospective protocols.
 ### Change-control boundary
 - No application strategy, runtime signal configuration, formal signal, A-grade, Feishu, leverage, account, position, order or approved-manifest behavior changed.
-- The machine research family registry previously still classified H22 as historically supported, contradicting the completed survivorship audit. That formal research-gate configuration is corrected in v3.56.29, with package metadata, release notes, manifests, tests, release package, Git commit and GitHub synchronization required before completion.
+- The machine research family registry previously still classified H22 as historically supported, contradicting the completed survivorship audit. That formal research-gate configuration is corrected in v3.56.29.
+### Release completion
+- Bumped application/package metadata and release documentation to `3.56.29`; approved strategy remains `3.56.15` and strict research identity remains `v3.56-strict`.
+- Added a machine regression test requiring H22 to remain `historical_support_rejected_survivorship_dependent_forward_observation_only` with the frozen failure metrics and no-rescue boundary.
+- H22 registry and release-safety targeted tests: 42 passed. Full Python suite: 467 collected, 449 passed, 18 skipped because `JIAOYI_DATA_DIR` is not configured, 0 failed.
+- `system_check.py source --json` passed for version 3.56.29, 264 unique release files, 21 configured swaps, 23 registered research families and 30 failure fingerprints.
+- A real H19 research-gate run correctly passed data/leakage/freedom checks and rejected the already registered duplicate by structural and alias gates.
+- Change governance passed; the versioned release ZIP and SHA-256 sidecar were rebuilt and verified.
+- Functional release commit `a13f2689` was pushed to `origin/master`, and the required remote-sync governance check confirmed local HEAD and upstream were identical with a clean project directory.
 ### Current recovery point
 - Treat H22 as `FORWARD_OBSERVATION_ONLY_HISTORICAL_SUPPORT_REJECTED_SURVIVORSHIP_DEPENDENT` and continue recording its frozen prospective shadow without early promotion or parameter rescue.
 - Continue V357 and H27 under their existing frozen forward protocols and resume the independent mechanism funnel. Do not reuse fixed-survivor historical evidence as proof for another cross-sectional strategy without a point-in-time universe audit.
