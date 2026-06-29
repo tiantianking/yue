@@ -140,7 +140,7 @@ def test_registered_alias_rejects_relabelled_historical_candidate(tmp_path: Path
     assert "MC02_DOWNSIDE_BETA_ASYMMETRY_PREMIUM" in alias_gate.detail
 
 
-def test_h22_registry_rejects_survivor_history_as_promotion_evidence() -> None:
+def test_h22_registry_keeps_fixed_21_candidate_pending_forward_validation() -> None:
     registry = json.loads(
         (ROOT / "config" / "research_family_registry.json").read_text(encoding="utf-8")
     )
@@ -150,15 +150,14 @@ def test_h22_registry_rejects_survivor_history_as_promotion_evidence() -> None:
         if item["family_id"] == "MOMENTUM_14D_STAGGERED_3X3_REFRESH_HYSTERESIS6_V1"
     )
 
-    assert h22["status"] == (
-        "historical_support_rejected_survivorship_dependent_forward_observation_only"
-    )
-    assert "survivor-list dependent" in h22["warning"]
-    assert "base PF 0.9247" in h22["failure_reason"]
-    assert "Parameter, universe and date rescue are prohibited" in h22["failure_reason"]
+    assert h22["status"] == "fixed_21_scope_candidate_forward_validation_pending"
+    assert "operator-frozen 21 mature OKX USDT swaps" in h22["warning"]
+    assert "not an independent Alpha" in h22["warning"]
+    assert "portability warning" in h22["scope_limit"]
+    assert "base PF 0.9247" in h22["out_of_scope_stress_result"]
 
 
-def test_v357_registry_rejects_survivor_history_as_promotion_evidence() -> None:
+def test_v357_registry_keeps_fixed_21_candidate_pending_forward_validation() -> None:
     registry = json.loads(
         (ROOT / "config" / "research_family_registry.json").read_text(encoding="utf-8")
     )
@@ -168,14 +167,47 @@ def test_v357_registry_rejects_survivor_history_as_promotion_evidence() -> None:
         if item["family_id"] == "4h_donchian_volatility_compression"
     )
 
-    assert v357["status"] == (
-        "historical_support_rejected_survivorship_dependent_forward_observation_only"
+    policy = json.loads(
+        (ROOT / "config" / "research_universe_policy.json").read_text(encoding="utf-8")
     )
+    assert v357["status"] == policy["candidate_definitions"]["V357"]["status"]
+    assert v357["status"] == "fixed_21_scope_candidate_forward_validation_pending"
     assert "v357-shadow-donchian-slow-plus-vcb-a" in v357["aliases"]
-    assert "fixed mature-survivor history cannot be used for promotion" in v357["warning"]
-    assert "base PF 1.0552" in v357["failure_reason"]
-    assert "stress PF 0.9386" in v357["failure_reason"]
-    assert "Parameter, member, universe, date and cost rescue are prohibited" in v357["failure_reason"]
+    assert policy["dynamic_universe_evidence"]["classification"] == (
+        "out_of_scope_generalization_stress_test"
+    )
+    assert policy["dynamic_universe_evidence"]["v357"]["base_profit_factor"] == 1.0552
+    assert policy["dynamic_universe_evidence"]["v357"]["stress_profit_factor"] == 0.9386
+    assert "broad-market generalization stress test" in v357["scope_limit"]
+
+
+def test_fixed_21_research_universe_policy_matches_runtime_symbols() -> None:
+    policy = json.loads(
+        (ROOT / "config" / "research_universe_policy.json").read_text(encoding="utf-8")
+    )
+    base_lines = (ROOT / "config" / "base.yaml").read_text(encoding="utf-8").splitlines()
+    start = base_lines.index("  symbols:") + 1
+    runtime_symbols: list[str] = []
+    for line in base_lines[start:]:
+        if line.startswith("    - "):
+            runtime_symbols.append(line.removeprefix("    - ").strip())
+            continue
+        if line and not line.startswith("    "):
+            break
+
+    assert policy["universe_mode"] == "fixed_operator_selected_mature_21"
+    assert len(policy["symbols"]) == 21
+    assert policy["symbols"] == runtime_symbols
+    assert policy["candidate_definitions"]["H22"]["status"] == (
+        "fixed_21_scope_candidate_forward_validation_pending"
+    )
+    assert policy["candidate_definitions"]["V357"]["status"] == (
+        "fixed_21_scope_candidate_forward_validation_pending"
+    )
+    assert policy["candidate_definitions"]["H27"]["status"] == (
+        "record_only_forward_diversification_observation"
+    )
+    assert policy["runtime_boundary"].endswith("SIGNAL_ONLY.")
 
 
 def test_failure_fingerprint_rejects_option_surface_relabel(tmp_path: Path) -> None:

@@ -1,6 +1,6 @@
 {
   "schema": "okx_research_family_registry_v1",
-  "updated_at": "2026-06-28T17:50:00Z",
+  "updated_at": "2026-06-29T04:39:23Z",
   "families": [
     {
       "family_id": "14_day_cross_sectional_momentum",
@@ -31,16 +31,17 @@
     {
       "family_id": "4h_donchian_volatility_compression",
       "aliases": ["v357-4h-donchian-n24-rs50-slow", "v357-shadow-donchian-slow-plus-vcb-a", "DC_n24_t50_slow", "VCB_A"],
-      "status": "historical_support_rejected_survivorship_dependent_forward_observation_only",
-      "warning": "The frozen V357 runtime may continue only as prospective research observation. Its fixed mature-survivor history cannot be used for promotion, A-grade classification or formal signal admission.",
-      "failure_reason": "Under the frozen top-18 point-in-time liquidity universe across 154 historical contracts, V357 produced base PF 1.0552, return 6.78 percent and drawdown -35.06 percent; stress PF 0.9386, return -32.36 percent and drawdown -42.47 percent. Parameter, member, universe, date and cost rescue are prohibited.",
+      "status": "fixed_21_scope_candidate_forward_validation_pending",
+      "warning": "V357 is conditionally defined only for the operator-frozen 21 mature OKX USDT swaps and its frozen candidate-specific eligibility rules. It is not approved, A-grade or formally admitted until the original prospective acceptance gates pass.",
+      "scope_limit": "The point-in-time 154-contract dynamic-universe audit failed as a broad-market generalization stress test, but that universe is outside the operator's declared trading mandate and is not a disqualifying gate for the fixed-21 candidate.",
+      "out_of_scope_stress_result": "Dynamic-universe base PF 1.0552, return 6.78 percent and drawdown -35.06 percent; stress PF 0.9386, return -32.36 percent and drawdown -42.47 percent. These results prohibit claims of broad-universe portability, not continued fixed-21 forward validation.",
       "family": {
         "core_signal": "donchian_breakout_after_atr_compression",
         "direction": "breakout_direction",
         "holding_period_bars": 96,
         "rebalance_bars": 16,
         "selection": "eligible_breakouts",
-        "universe": "okx_usdt_swap_cross_section",
+        "universe": "operator_frozen_21_mature_okx_usdt_swaps_with_candidate_specific_eligibility",
         "features": ["donchian", "atr_percentile", "relative_strength", "breadth", "volume_ratio"]
       }
     },
@@ -285,16 +286,17 @@
     },
     {
       "family_id": "MOMENTUM_14D_STAGGERED_3X3_REFRESH_HYSTERESIS6_V1",
-      "status": "historical_support_rejected_survivorship_dependent_forward_observation_only",
-      "warning": "H22 is a staggered execution variant of the existing 14-day momentum family, not independent Alpha. The frozen point-in-time dynamic-universe audit rejected its historical support as survivor-list dependent. The existing shadow may continue only as prospective observation and cannot use prior historical evidence for promotion.",
-      "failure_reason": "Under the frozen top-18 point-in-time liquidity universe, H22 produced base PF 0.9247, return -26.74 percent and drawdown -38.93 percent; stress PF 0.8730, return -39.75 percent and drawdown -47.71 percent, with zero positive segments out of three at both cost levels. Parameter, universe and date rescue are prohibited.",
+      "status": "fixed_21_scope_candidate_forward_validation_pending",
+      "warning": "H22 is a staggered execution variant of the existing 14-day momentum family, not an independent Alpha. It is conditionally defined only for the operator-frozen 21 mature OKX USDT swaps and the frozen 18-symbol eligible subset; no promotion is allowed before the original prospective acceptance gates pass.",
+      "scope_limit": "The point-in-time broad-market dynamic-universe audit failed, but that universe is outside the operator's declared trading mandate and is retained only as a portability warning rather than a fixed-21 disqualification gate.",
+      "out_of_scope_stress_result": "Dynamic-universe base PF 0.9247, return -26.74 percent and drawdown -38.93 percent; stress PF 0.8730, return -39.75 percent and drawdown -47.71 percent. These results prohibit broad-universe claims and dynamic-universe deployment, not continued fixed-21 forward validation.",
       "family": {
         "core_signal": "existing_14_day_momentum_three_equal_cohorts_staggered_zero_one_two_days",
         "direction": "inherit_parent_momentum_direction",
         "holding_period_bars": 288,
         "rebalance_bars": 288,
         "selection": "top4_entry_top6_exit_three_calendar_phases",
-        "universe": "okx_usdt_swap_18_symbol_funding_complete_cross_section",
+        "universe": "operator_frozen_21_mature_okx_usdt_swaps_with_frozen_18_symbol_eligible_subset",
         "features": ["closed_return", "cross_sectional_rank", "hysteresis", "staggered_calendar_cadence", "low_turnover_execution"]
       }
     },

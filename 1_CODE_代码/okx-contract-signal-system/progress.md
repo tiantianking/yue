@@ -1627,3 +1627,25 @@
 - Continue H22 and V357 only as frozen fully prospective observations with survivor-dependent historical support rejected.
 - Continue H27 only as record-only forward diversification evidence.
 - Resume the independent mechanism funnel using the validated point-in-time dynamic universe; every future cross-sectional candidate must pass the same survivorship audit before historical support can be claimed.
+
+## 2026-06-29 - Task: fixed-21 mature-universe mandate and v3.56.32 candidate-scope correction
+### User mandate clarified
+- The operator explicitly froze the intended future trading scope to the 21 mature OKX USDT swaps already configured in `config/base.yaml`. Other current, historical, delisted or future contracts are outside the strategy mandate.
+- The prior 307-contract point-in-time audits therefore answer a different question: whether H22 or V357 generalizes to a broad changing market. They do not directly answer whether either frozen candidate can work inside the operator-selected fixed 21.
+### Machine-state correction
+- Added `config/research_universe_policy.json` with the exact 21 symbols, no outcome-driven additions/removals, prospective replacement governance and an explicit prohibition on claiming broad-market portability from fixed-21 evidence.
+- Reclassified H22 and V357 as `fixed_21_scope_candidate_forward_validation_pending`. Their parameters, directions, costs, dates, entry timing, eligible-subset rules and existing forward ledgers remain unchanged.
+- Reclassified the dynamic-universe results as `out_of_scope_generalization_stress_test`. H22 dynamic PF 0.9247/0.8730 and V357 dynamic PF 1.0552/0.9386 remain valid warnings against dynamic-universe deployment or broad-market claims, but no longer disqualify the fixed-21 mandate.
+- Kept H27 as `record_only_forward_diversification_observation`. It is not a third independent Alpha and may not search weights or promote the two parent candidates.
+### Evidence standard
+- This is a scope correction, not a parameter or sample rescue. Because the 21 projects are known mature survivors as of the policy date, their old fixed-history results remain conditional rather than decisive.
+- H22 must still complete its original 60-day/50-observation stage and preferred 90-day/80-observation review. V357 must still complete its original frozen time, trade-count, cost, drawdown and concentration gates. Neither is approved or A-grade now.
+### Release boundary
+- Bumped application/package metadata and documentation to `3.56.32`; approved strategy remains `3.56.15` and strict research identity remains `v3.56-strict`.
+- Added machine tests that require the policy symbols to match the runtime 21 exactly and pin H22/V357/H27 to their corrected roles.
+- The 44 focused release/research tests passed; the complete Python suite passed with only the expected external-data skips. Source audit and change governance both returned `ok=true`, and the v3.56.32 release ZIP plus SHA-256 sidecar were built successfully.
+- No formal signal, Feishu policy, leverage, account, position, order or automatic-trading behavior changed. The system remains `SIGNAL_ONLY`.
+### Current recovery point
+- Continue H22 and V357 under their unchanged frozen prospective protocols as two fixed-21 conditional candidates.
+- Continue H27 only as a record-only diversification observer.
+- Use the 307-contract dataset only for portability diagnostics or separately declared broad-market research; do not use it to eliminate a fixed-21 candidate solely because out-of-mandate contracts perform differently.
