@@ -49,7 +49,7 @@ v3.54 release boundary:
 - Lifecycle storage must preserve separate setup and outcome state fields for auditability and old SQLite stores must migrate forward without losing existing status.
 
 v3.56 release boundary:
-- Package metadata, launcher display, and GUI display are synchronized to `3.56.32`; approved strategy identity remains `3.56.15`, and strict research identity remains `v3.56-strict`.
+- Package metadata, launcher display, and GUI display are synchronized to `3.56.33`; approved strategy identity remains `3.56.15`, and strict research identity remains `v3.56-strict`.
 - The realtime signal chain must not import or start `backtest`, `training`, or ML decision modules. Daily learning and strict research remain offline sidecar flows.
 - All runtime notifications use `notification_outbox` plus `LifecycleOutboxWorker`: A-tier signals, B-tier summaries, candidate health reports, status reports, startup notices, and lifecycle events.
 - Formal history, runtime cache, research, and runtime frames fail fast on missing metadata or missing `is_closed`; only explicit raw ingestion may synthesize canonical metadata from confirmed OKX candles.
@@ -58,6 +58,7 @@ v3.56 release boundary:
 - ML/shadow scoring must remain observation-only in live paths. Legacy runtime leverage-adjustment methods remain neutral; only the deterministic signal-only leverage-advice module may produce the normalized manual-review suggestion.
 - The fixed three-day momentum cadence is an isolated research-only execution variant. Its registration-preceding position is reference-only, its first scored refresh is 2026-06-29 04:00 UTC, and it cannot be evaluated before 50 fully prospective refreshes.
 - `config/research_universe_policy.json` freezes promotion scope to the operator-selected 21 mature swaps. H22 and V357 remain conditional fixed-21 candidates pending their original prospective gates; dynamic-universe results limit broad-market portability claims but do not disqualify the fixed-21 mandate. H27 remains record-only.
+- Observation priority is fixed as H22, then V357, then H27. H27 may run only after both source ledgers are current. Secondary reference tracks and independent mechanism research may continue, but cannot alter, delay or tune the frozen H22/V357 protocols.
 - Linux deployment must run under the dedicated `okxsignal` user, execute preflight checks before startup, use systemd restart policy, run periodic health checks, and rotate file logs.
 - `FEISHU_ENABLED` is the emergency notification switch and overrides the YAML notification default on every send path.
 - `DEPLOYMENT_MODE=production` requires a valid current-version approved manifest; observation mode may run market-data validation while formal push remains fail-closed.

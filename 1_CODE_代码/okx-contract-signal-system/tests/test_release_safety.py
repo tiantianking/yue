@@ -94,7 +94,7 @@ def test_release_version_sources_stay_consistent() -> None:
     gui_text = _read("gui.py")
     start_text = _read("start.bat")
 
-    assert package_version == "3.56.32"
+    assert package_version == "3.56.33"
     assert pyproject["project"]["version"] == package_version
     assert APPROVED_STRATEGY_VERSION == "3.56.15"
     assert f"Version: {package_version}" in pkg_info
@@ -203,6 +203,7 @@ def test_release_file_manifest_is_present_and_self_including() -> None:
     assert "docs/PROJECT_OVERVIEW_CN.md" in lines
     assert "docs/V3.56.31_RELEASE_CN.md" in lines
     assert "docs/V3.56.32_RELEASE_CN.md" in lines
+    assert "docs/V3.56.33_RELEASE_CN.md" in lines
     assert "config/research_universe_policy.json" in lines
     assert len(lines) == len(set(lines))
     assert all("\\" not in line and not line.startswith("/") and ".." not in Path(line).parts for line in lines)

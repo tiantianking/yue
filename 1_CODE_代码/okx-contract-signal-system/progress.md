@@ -1649,3 +1649,24 @@
 - Continue H22 and V357 under their unchanged frozen prospective protocols as two fixed-21 conditional candidates.
 - Continue H27 only as a record-only diversification observer.
 - Use the 307-contract dataset only for portability diagnostics or separately declared broad-market research; do not use it to eliminate a fixed-21 candidate solely because out-of-mandate contracts perform differently.
+
+## 2026-06-29 - Task: prioritize H22 and V357 observation and v3.56.33
+### Priority directive
+- The operator designated H22 and V357 as the primary observation targets.
+- Machine priority is now frozen as `H22 -> V357 -> H27`. H27 remains a dependent record-only observer and may run only after both source ledgers are current.
+- The original 14-day momentum reference and fixed three-day refresh track remain available as secondary references. Independent mechanism intake continues in parallel but cannot displace, delay or tune H22/V357.
+### Configuration changes
+- Added machine-readable observation priority to `config/research_universe_policy.json`, including the primary candidates, update order, H27 source-ledger dependency and a prohibition on using priority to change parameters or rules.
+- Reordered `config/parallel_acceptance.yaml` so H22 is updated first and V357 second. Secondary tracks follow afterward.
+- Added a regression test requiring the first two configured tracks to remain H22 and V357 and pinning the H27 dependency.
+### Current observed H22 sample
+- The H22 updater reached closed data through `2026-06-29T04:45:00Z`, with 3 fully prospective rebalances, 2 closed observations and 1 active observation. All protocol, ledger, data-quality and snapshot-chain checks pass.
+- The H22 sample remains far below its 60-day/50-observation stage gate, so all displayed PF, return and concentration values remain non-decisive and must not trigger early judgment.
+### Release boundary
+- Bumped package and documentation to `3.56.33`; approved strategy remains `3.56.15` and strict research identity remains `v3.56-strict`.
+- Sixty focused priority/research/release tests passed. The complete Python suite passed with only the expected external-data skips. Source audit and change governance returned `ok=true`, and the v3.56.33 release ZIP plus SHA-256 sidecar were built successfully.
+- No H22 or V357 parameter, signal, cost, position, leverage, Feishu, account, order or automatic-trading behavior changed. The system remains `SIGNAL_ONLY`.
+### Current recovery point
+- Refresh and inspect H22 first, V357 second, and H27 only after both source ledgers are current.
+- Do not evaluate either primary candidate before its frozen sample gates are due.
+- Keep new strategy research active as a secondary parallel line.

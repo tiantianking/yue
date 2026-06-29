@@ -12,44 +12,10 @@ parallel_acceptance:
   # Every new candidate must first pass scripts/system_check.py research and
   # provide its okx_research_gate_report_v2 file. Only pre-existing frozen
   # reference tracks may use admission_exempt_frozen_reference: true.
+  # Primary observation order is frozen by the operator: H22 first, then V357.
+  # H27 is refreshed separately only after both primary source ledgers are current.
   tracks:
-    - track_id: momentum_14d_and_4in6out
-      label: 14日动量与固定4入6出
-      source_status: HISTORY_PACKAGES_20260621/RESEARCH/local_only_hypothesis_discovery_v1/MOMENTUM_FORWARD_ACCEPTANCE_STATUS.json
-      source_ledger: HISTORY_PACKAGES_20260621/RESEARCH/local_only_hypothesis_discovery_v1/MOMENTUM_FORWARD_SHADOW_LEDGER.json
-      updater_script: HISTORY_PACKAGES_20260621/RESEARCH/local_only_hypothesis_discovery_v1/momentum_forward_shadow_observations.py
-      admission_exempt_frozen_reference: true
-      variants:
-        original: 原始14日动量
-        hysteresis_4_in_6_out: 固定4入6出
-
-    - track_id: v357_shadow_ensemble
-      label: 4小时Donchian慢趋势与波动压缩组合
-      source_status: 1_CODE_代码/okx-contract-signal-system/outputs/shadow_ensemble_forward_acceptance_status.json
-      source_ledger: 1_CODE_代码/okx-contract-signal-system/outputs/shadow_ensemble_forward_ledger.json
-      updater_script: 1_CODE_代码/okx-contract-signal-system/scripts/update_shadow_ensemble_acceptance.py
-      admission_exempt_frozen_reference: true
-      variants:
-        DC_n24_t50_slow: 4小时Donchian慢趋势
-        VCB_A: 波动压缩突破A
-
-    - track_id: momentum_fixed_3d_refresh
-      label: 14日动量固定3日低换手版
-      source_status: 1_CODE_代码/okx-contract-signal-system/outputs/momentum_fixed_3d_forward_status.json
-      source_ledger: 1_CODE_代码/okx-contract-signal-system/outputs/momentum_fixed_3d_forward_ledger.json
-      updater_script: 1_CODE_代码/okx-contract-signal-system/scripts/update_momentum_fixed_3d_shadow.py
-      admission_exempt_frozen_reference: true
-      sample_profile:
-        cadence_days: 3
-        minimum_calendar_days: 90
-        minimum_closed_observations: 30
-        preferred_calendar_days: 150
-        preferred_closed_observations: 50
-        minimum_failure_terminal: false
-      variants:
-        fixed_3d_refresh_hysteresis_4_in_6_out: 固定3日刷新4入6出
-
-    # Frozen execution variant of the admitted momentum parent; not a new Alpha claim.
+    # H22: frozen staggered execution variant of the admitted momentum parent.
     - track_id: momentum_staggered_3x3_refresh
       label: 14日动量3组错开低换手版
       source_status: 1_CODE_代码/okx-contract-signal-system/outputs/momentum_staggered_3x3_forward_status.json
@@ -65,6 +31,45 @@ parallel_acceptance:
         minimum_failure_terminal: false
       variants:
         staggered_3x3_refresh_hysteresis_4_in_6_out: 3组等权错开3日刷新4入6出
+
+    # V357: frozen Donchian/volatility-compression shadow ensemble.
+    - track_id: v357_shadow_ensemble
+      label: 4小时Donchian慢趋势与波动压缩组合
+      source_status: 1_CODE_代码/okx-contract-signal-system/outputs/shadow_ensemble_forward_acceptance_status.json
+      source_ledger: 1_CODE_代码/okx-contract-signal-system/outputs/shadow_ensemble_forward_ledger.json
+      updater_script: 1_CODE_代码/okx-contract-signal-system/scripts/update_shadow_ensemble_acceptance.py
+      admission_exempt_frozen_reference: true
+      variants:
+        DC_n24_t50_slow: 4小时Donchian慢趋势
+        VCB_A: 波动压缩突破A
+
+    # Secondary reference track; maintained without displacing H22/V357 priority.
+    - track_id: momentum_14d_and_4in6out
+      label: 14日动量与固定4入6出
+      source_status: HISTORY_PACKAGES_20260621/RESEARCH/local_only_hypothesis_discovery_v1/MOMENTUM_FORWARD_ACCEPTANCE_STATUS.json
+      source_ledger: HISTORY_PACKAGES_20260621/RESEARCH/local_only_hypothesis_discovery_v1/MOMENTUM_FORWARD_SHADOW_LEDGER.json
+      updater_script: HISTORY_PACKAGES_20260621/RESEARCH/local_only_hypothesis_discovery_v1/momentum_forward_shadow_observations.py
+      admission_exempt_frozen_reference: true
+      variants:
+        original: 原始14日动量
+        hysteresis_4_in_6_out: 固定4入6出
+
+    # Secondary execution reference; maintained without displacing H22/V357 priority.
+    - track_id: momentum_fixed_3d_refresh
+      label: 14日动量固定3日低换手版
+      source_status: 1_CODE_代码/okx-contract-signal-system/outputs/momentum_fixed_3d_forward_status.json
+      source_ledger: 1_CODE_代码/okx-contract-signal-system/outputs/momentum_fixed_3d_forward_ledger.json
+      updater_script: 1_CODE_代码/okx-contract-signal-system/scripts/update_momentum_fixed_3d_shadow.py
+      admission_exempt_frozen_reference: true
+      sample_profile:
+        cadence_days: 3
+        minimum_calendar_days: 90
+        minimum_closed_observations: 30
+        preferred_calendar_days: 150
+        preferred_closed_observations: 50
+        minimum_failure_terminal: false
+      variants:
+        fixed_3d_refresh_hysteresis_4_in_6_out: 固定3日刷新4入6出
 
   # Early-stop thresholds are loaded exclusively from the SHA-256-pinned JSON
   # protocol above. Editing YAML cannot change them.

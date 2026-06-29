@@ -11,11 +11,16 @@ from okx_signal_system.research.parallel_acceptance import (
     ParallelAcceptanceConfig,
     archive_failed_track,
     build_parallel_acceptance_status,
+    configured_tracks,
     evaluate_track_admission,
     evaluate_variant,
     format_research_shadow_message,
+    load_parallel_acceptance_config,
     _load_frozen_early_stop_protocol,
 )
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _config(tmp_path: Path) -> ParallelAcceptanceConfig:
@@ -89,6 +94,24 @@ def _status(*, days: int = 1, rebalances: int = 2, summary: dict | None = None, 
             "hysteresis_4_in_6_out": {"status": fixed_status, "all_pass": fixed_pass},
         },
     }
+
+
+def test_operator_priority_runs_h22_then_v357_before_secondary_tracks() -> None:
+    config = load_parallel_acceptance_config(ROOT / "config" / "parallel_acceptance.yaml")
+    track_ids = [track.track_id for track in configured_tracks(config)]
+
+    assert track_ids[:2] == [
+        "momentum_staggered_3x3_refresh",
+        "v357_shadow_ensemble",
+    ]
+
+    policy = json.loads(
+        (ROOT / "config" / "research_universe_policy.json").read_text(encoding="utf-8")
+    )
+    assert policy["observation_priority"]["primary_candidates"] == ["H22", "V357"]
+    assert policy["observation_priority"]["update_order"] == ["H22", "V357", "H27"]
+    assert policy["observation_priority"]["h27_runs_only_after_both_source_ledgers"] is True
+    assert policy["observation_priority"]["priority_does_not_allow_parameter_or_rule_changes"] is True
 
 
 def test_early_sample_remains_research_shadow(tmp_path: Path) -> None:

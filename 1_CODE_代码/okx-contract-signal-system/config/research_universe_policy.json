@@ -38,6 +38,14 @@
     ],
     "future_replacement_rule": "A delisting or permanent loss of tradability may trigger a separate prospective governance decision. No replacement may be chosen from candidate PnL or retrospective factor performance."
   },
+  "observation_priority": {
+    "priority_updated_at": "2026-06-29T05:10:06Z",
+    "primary_candidates": ["H22", "V357"],
+    "update_order": ["H22", "V357", "H27"],
+    "h27_runs_only_after_both_source_ledgers": true,
+    "independent_mechanism_search": "secondary_parallel_track",
+    "priority_does_not_allow_parameter_or_rule_changes": true
+  },
   "candidate_definitions": {
     "H22": {
       "role": "fixed-21 conditional strategy candidate",
