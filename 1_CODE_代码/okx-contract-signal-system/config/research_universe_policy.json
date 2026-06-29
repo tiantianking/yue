@@ -1,9 +1,9 @@
 {
-  "schema": "okx_research_universe_policy_v1",
-  "policy_id": "FIXED_21_MATURE_OKX_USDT_SWAPS_20260629",
-  "effective_at": "2026-06-29T04:39:23Z",
-  "mandate": "The operator intends to monitor and trade only these 21 mature OKX USDT perpetual swaps. Other historical or future contracts are outside the strategy mandate unless this policy is explicitly replaced before new outcome evidence is viewed.",
-  "universe_mode": "fixed_operator_selected_mature_21",
+  "schema": "okx_research_universe_policy_v2",
+  "policy_id": "OPERATOR_21_ALLOWED_POOL_CANDIDATE_SUBSETS_20260629",
+  "effective_at": "2026-06-29T10:50:00Z",
+  "mandate": "The operator's allowed trading pool is the declared 21 mature OKX USDT perpetual swaps, but no strategy is required to trade all 21 or any minimum breadth. A new strategy may trade any prospectively frozen subset from one to 21 symbols when the subset follows directly from the mechanism or point-in-time data availability. Profitability and robustness are the objective; symbol count is not an objective.",
+  "universe_mode": "operator_selected_21_allowed_pool_candidate_specific_subset",
   "symbols_source": "config/base.yaml:data.symbols",
   "symbols": [
     "BTC-USDT-SWAP",
@@ -29,37 +29,93 @@
     "OP-USDT-SWAP"
   ],
   "selection_boundary": {
-    "reason": "mature projects selected for the operator's intended future trading scope",
+    "reason": "The 21 symbols are the operator's maximum allowed trading pool, not a mandatory portfolio breadth.",
     "not_allowed": [
-      "adding or removing symbols because a backtest improved",
+      "adding or removing symbols because candidate PnL, profit factor, drawdown or win rate improved",
+      "testing all symbols and retaining only historical winners",
+      "deleting a losing symbol after opening returns",
       "rotating into the historical top performers",
-      "using the 307-contract point-in-time universe as a mandatory promotion gate",
-      "claiming that fixed-21 evidence generalizes to the full crypto market"
+      "claiming that evidence from a narrow subset generalizes to the other allowed symbols",
+      "using the 307-contract point-in-time universe as a mandatory promotion gate"
     ],
-    "future_replacement_rule": "A delisting or permanent loss of tradability may trigger a separate prospective governance decision. No replacement may be chosen from candidate PnL or retrospective factor performance."
+    "future_replacement_rule": "A delisting or permanent loss of tradability may trigger a separate prospective governance decision. No replacement may be selected from candidate PnL or retrospective factor performance."
+  },
+  "new_candidate_subset_policy": {
+    "minimum_symbols": 1,
+    "maximum_symbols": 21,
+    "single_symbol_strategy_allowed": true,
+    "minimum_breadth_required_for_profitability": false,
+    "explicit_symbol_list_required_before_pnl": true,
+    "selection_locked_before_pnl": true,
+    "outcome_based_symbol_selection_forbidden": true,
+    "permitted_selection_bases": [
+      "the mechanism is intrinsically specific to the declared asset or assets",
+      "the same point-in-time raw field and economic definition exists only for the declared subset",
+      "the declared subset shares a pre-existing protocol or market structure not shared by the rest of the allowed pool",
+      "history length or causal data quality passes a frozen minimum before any candidate returns are opened",
+      "a prospective liquidity or tradability rule frozen before candidate returns are opened"
+    ],
+    "forbidden_selection_bases": [
+      "historical return",
+      "profit factor",
+      "win rate",
+      "drawdown improvement",
+      "positive contribution",
+      "removing a symbol that lost money",
+      "choosing the best-performing subset from a symbol search"
+    ],
+    "validation_by_subset_size": {
+      "one_symbol": {
+        "cross_symbol_contribution_gate": "NOT_APPLICABLE",
+        "required_replacements": [
+          "purged time splits",
+          "multiple market regimes",
+          "single-month contribution limit",
+          "single-trade and top-three-trade contribution limits",
+          "minimum effective positive trades",
+          "baseline and stressed cost survival",
+          "frozen forward evidence"
+        ]
+      },
+      "two_to_five_symbols": {
+        "cross_symbol_contribution_gate": "DIAGNOSTIC_NOT_A_FIXED_25_PERCENT_REJECTION_GATE",
+        "required_replacements": [
+          "per-symbol result disclosure",
+          "leave-one-symbol-out diagnostic without deleting the frozen member set",
+          "purged time splits and market regimes",
+          "trade and month concentration limits",
+          "frozen forward evidence"
+        ]
+      },
+      "six_to_twenty_one_symbols": {
+        "cross_symbol_contribution_gate": "MAX_25_PERCENT_POSITIVE_CONTRIBUTION",
+        "required_replacements": []
+      }
+    },
+    "legacy_coverage_result_interpretation": "A historical failure caused only by an 18-symbol or 21-symbol breadth requirement remains valid for that broad cross-sectional design but is not a global rejection of a prospectively frozen single-asset or small-subset mechanism. Reopening requires a new return-blind protocol and may not use previously viewed outcomes to choose the subset."
   },
   "observation_priority": {
-    "priority_updated_at": "2026-06-29T05:10:06Z",
+    "priority_updated_at": "2026-06-29T10:50:00Z",
     "primary_candidates": ["H22", "V357"],
     "update_order": ["H22", "V357", "H27"],
     "h27_runs_only_after_both_source_ledgers": true,
-    "independent_mechanism_search": "secondary_parallel_track",
+    "independent_mechanism_search": "parallel_candidate_specific_subset_track",
     "priority_does_not_allow_parameter_or_rule_changes": true
   },
   "candidate_definitions": {
     "H22": {
-      "role": "fixed-21 conditional strategy candidate",
+      "role": "existing frozen fixed-21-pool conditional strategy candidate",
       "machine_family_id": "MOMENTUM_14D_STAGGERED_3X3_REFRESH_HYSTERESIS6_V1",
       "status": "fixed_21_scope_candidate_forward_validation_pending",
-      "eligibility_note": "The frozen H22 implementation uses the predeclared 18-symbol funding-complete eligible subset inside the fixed 21 monitored symbols.",
+      "eligibility_note": "The frozen H22 implementation uses its predeclared 18-symbol funding-complete eligible subset inside the allowed 21-symbol pool. The new subset policy does not permit deleting members or changing H22.",
       "acceptance": "Keep the original 60-day/50-observation stage and 90-day/80-observation preferred prospective gates. Do not alter parameters, membership rules, cadence, direction, costs or dates after outcomes are observed."
     },
     "V357": {
-      "role": "fixed-21 conditional strategy candidate",
+      "role": "existing frozen fixed-21-pool conditional strategy candidate",
       "machine_family_id": "4h_donchian_volatility_compression",
       "status": "fixed_21_scope_candidate_forward_validation_pending",
-      "eligibility_note": "The frozen V357 members continue to apply their existing warmup, reference-symbol and feature-availability rules within the fixed 21 monitored symbols.",
-      "acceptance": "Keep the original frozen prospective acceptance protocol. No A-grade or formal admission is allowed before all time, trade-count, cost, drawdown and concentration gates pass."
+      "eligibility_note": "The frozen V357 members continue to apply their existing warmup, reference-symbol and feature-availability rules within the allowed 21-symbol pool. The new subset policy does not permit post-hoc member deletion.",
+      "acceptance": "Keep the original frozen prospective acceptance protocol. No A-grade or formal admission is allowed before all time, trade-count, cost, drawdown and applicable concentration gates pass."
     },
     "H27": {
       "role": "record-only diversification observer, not an independent strategy candidate",
@@ -69,7 +125,7 @@
   },
   "dynamic_universe_evidence": {
     "classification": "out_of_scope_generalization_stress_test",
-    "interpretation": "The dynamic-universe audits show that H22 and V357 should not be described as portable broad-market strategies. Because the operator has now fixed the future mandate to the declared 21 mature contracts, those audits are warnings about external generalization rather than disqualifying evidence for the fixed-21 candidates.",
+    "interpretation": "The dynamic-universe audits show that H22 and V357 should not be described as portable broad-market strategies. They do not require every future candidate to trade all 21 allowed symbols, and they do not disqualify a prospectively frozen asset-specific mechanism.",
     "h22": {
       "base_profit_factor": 0.9247,
       "stress_profit_factor": 0.8730
@@ -79,6 +135,6 @@
       "stress_profit_factor": 0.9386
     }
   },
-  "promotion_boundary": "Historical fixed-universe evidence is conditional and cannot by itself approve a strategy because the 21 symbols are known survivors as of the policy date. The prospective frozen acceptance period is the decisive evidence for this mandate.",
+  "promotion_boundary": "A candidate's subset must be frozen before its returns are opened. Historical evidence remains conditional and cannot approve a strategy by itself. The decisive evidence is the candidate-specific locked historical protocol plus frozen prospective acceptance, with cross-symbol concentration applied only when the frozen subset contains at least six symbols.",
   "runtime_boundary": "This policy does not enable orders, positions, account access or automatic trading. The application remains SIGNAL_ONLY."
 }

@@ -181,7 +181,7 @@ def test_v357_registry_keeps_fixed_21_candidate_pending_forward_validation() -> 
     assert "broad-market generalization stress test" in v357["scope_limit"]
 
 
-def test_fixed_21_research_universe_policy_matches_runtime_symbols() -> None:
+def test_allowed_21_pool_policy_matches_runtime_symbols_and_allows_candidate_subsets() -> None:
     policy = json.loads(
         (ROOT / "config" / "research_universe_policy.json").read_text(encoding="utf-8")
     )
@@ -195,9 +195,19 @@ def test_fixed_21_research_universe_policy_matches_runtime_symbols() -> None:
         if line and not line.startswith("    "):
             break
 
-    assert policy["universe_mode"] == "fixed_operator_selected_mature_21"
+    assert policy["schema"] == "okx_research_universe_policy_v2"
+    assert policy["universe_mode"] == (
+        "operator_selected_21_allowed_pool_candidate_specific_subset"
+    )
     assert len(policy["symbols"]) == 21
     assert policy["symbols"] == runtime_symbols
+    subset_policy = policy["new_candidate_subset_policy"]
+    assert subset_policy["minimum_symbols"] == 1
+    assert subset_policy["maximum_symbols"] == 21
+    assert subset_policy["single_symbol_strategy_allowed"] is True
+    assert subset_policy["minimum_breadth_required_for_profitability"] is False
+    assert subset_policy["explicit_symbol_list_required_before_pnl"] is True
+    assert subset_policy["outcome_based_symbol_selection_forbidden"] is True
     assert policy["candidate_definitions"]["H22"]["status"] == (
         "fixed_21_scope_candidate_forward_validation_pending"
     )
@@ -208,6 +218,111 @@ def test_fixed_21_research_universe_policy_matches_runtime_symbols() -> None:
         "record_only_forward_diversification_observation"
     )
     assert policy["runtime_boundary"].endswith("SIGNAL_ONLY.")
+
+
+def test_single_symbol_candidate_subset_gate_is_allowed_before_pnl(tmp_path: Path) -> None:
+    module = _load_system_check()
+    code_path = tmp_path / "single_asset_signal.py"
+    code_path.write_text(
+        "def signal(frame):\n    return frame['close'].shift(1)\n",
+        encoding="utf-8",
+    )
+    candidate = {
+        "schema": "okx_pre_pnl_candidate_v2",
+        "candidate_id": "TEST_BTC_SINGLE_ASSET_MECHANISM",
+        "mechanism": {
+            "payer": "Predeclared forced BTC seller",
+            "direction": "Long BTC after the forced flow completes",
+            "observable_proxy": "Closed point-in-time BTC field",
+            "persistence_reason": "Execution lag and inventory transfer",
+        },
+        "family": {
+            "core_signal": "test_unique_btc_flow_completion",
+            "direction": "long_after_completion",
+            "holding_period_bars": 8,
+            "rebalance_bars": 8,
+            "selection": "single_asset_threshold",
+            "universe": "operator_allowed_pool_predeclared_subset",
+            "features": ["test_btc_flow"],
+        },
+        "universe_selection": {
+            "selection_locked_before_pnl": True,
+            "outcome_based_selection": False,
+            "selection_basis": "The mechanism and raw field are intrinsically BTC-specific.",
+            "legacy_outcomes_used_to_choose_subset": False,
+        },
+        "data": {
+            "exchange": "OKX",
+            "cross_exchange": False,
+            "local_only": True,
+            "closed_only": True,
+            "symbols": ["BTC-USDT-SWAP"],
+        },
+        "leakage": {
+            "future_returns_opened": False,
+            "pnl_opened": False,
+            "entry_uses_next_tradable_price": True,
+        },
+        "parameter_space": {
+            "all_choices_declared_before_pnl": True,
+            "declared_free_parameters": 0,
+            "declared_combinations": 1,
+            "parameters": [],
+        },
+        "robustness_protocol": {
+            "schema": "okx_robustness_screen_protocol_v1",
+            "random_time_trials": 500,
+            "random_time_alpha": 0.05,
+            "entry_delay_bars": 1,
+            "minimum_neighbor_variants": 3,
+            "minimum_positive_neighbor_ratio": 2 / 3,
+            "portfolio_increment_required": True,
+            "locked_before_pnl": True,
+            "evidence_files": [
+                "falsification_trials.csv",
+                "parameter_neighborhood.csv",
+                "portfolio_increment.csv",
+            ],
+        },
+        "representation_invariance_passed": True,
+        "measurement_semantics_passed": True,
+        "code_files": [str(code_path)],
+    }
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+
+    results = module.run_candidate_gate(candidate_path)
+    by_name = {item.name: item for item in results}
+
+    assert by_name["candidate_symbol_subset_explicit"].ok is True
+    assert by_name["candidate_symbol_subset_unique"].ok is True
+    assert by_name["candidate_symbol_subset_within_allowed_pool"].ok is True
+    assert by_name["candidate_symbol_subset_size_allowed"].ok is True
+    assert by_name["candidate_symbol_selection_locked_before_pnl"].ok is True
+    assert by_name["candidate_symbol_selection_basis_present"].ok is True
+
+
+def test_small_frozen_subset_does_not_fail_cross_symbol_contribution_gate() -> None:
+    module = _load_system_check()
+
+    one_ok, one_detail = module.evaluate_symbol_contribution_gate(
+        declared_symbol_count=1,
+        single_symbol_share=1.0,
+    )
+    five_ok, _ = module.evaluate_symbol_contribution_gate(
+        declared_symbol_count=5,
+        single_symbol_share=0.8,
+    )
+    six_ok, six_detail = module.evaluate_symbol_contribution_gate(
+        declared_symbol_count=6,
+        single_symbol_share=0.8,
+    )
+
+    assert one_ok is True
+    assert "not_applicable=frozen_subset_size_1" in one_detail
+    assert five_ok is True
+    assert six_ok is False
+    assert "max=0.25" in six_detail
 
 
 def test_failure_fingerprint_rejects_option_surface_relabel(tmp_path: Path) -> None:

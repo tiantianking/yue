@@ -14,8 +14,16 @@
     "holding_period_bars": 0,
     "rebalance_bars": 0,
     "selection": "REPLACE_ME",
-    "universe": "okx_usdt_swap_cross_section",
+    "universe": "operator_allowed_pool_predeclared_subset",
     "features": []
+  },
+  "universe_selection": {
+    "selection_locked_before_pnl": true,
+    "outcome_based_selection": false,
+    "selection_basis": "State the mechanism, point-in-time data or prospective tradability reason that fixes this subset before returns are opened.",
+    "selection_timestamp_utc": null,
+    "allow_single_symbol": true,
+    "legacy_outcomes_used_to_choose_subset": false
   },
   "data": {
     "exchange": "OKX",
@@ -23,17 +31,28 @@
     "local_only": true,
     "dataset": "okx_15m_extended",
     "timeframe": "15m",
+    "symbols": [
+      "REPLACE_WITH_ONE_OR_MORE_ALLOWED_SYMBOLS"
+    ],
     "fields": [],
     "start_utc": null,
     "end_utc": null,
     "closed_only": true
   },
   "data_gate": {
-    "min_symbols": 12,
-    "coverage_ratio": 0.8,
+    "min_symbols": 1,
+    "coverage_ratio": 1.0,
     "min_history_days": 365,
     "min_new_days": 30,
     "max_gap_ratio": 0.02
+  },
+  "subset_validation": {
+    "cross_symbol_contribution_gate_applies_from_symbol_count": 6,
+    "single_asset_requires_time_segment_stability": true,
+    "single_asset_requires_market_regime_stability": true,
+    "multi_asset_per_symbol_results_required": true,
+    "two_to_five_symbol_leave_one_out_diagnostic_required": true,
+    "frozen_subset_may_not_be_reduced_after_pnl": true
   },
   "parameter_space": {
     "all_choices_declared_before_pnl": true,

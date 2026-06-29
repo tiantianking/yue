@@ -104,6 +104,7 @@ FINGERPRINT_GENERIC_TAGS = {
     "usdt",
 }
 MAX_SYMBOL_CONTRIBUTION = 0.25
+MIN_SYMBOLS_FOR_CROSS_SYMBOL_CONTRIBUTION_GATE = 6
 MAX_MONTH_CONTRIBUTION = 0.35
 MAX_SINGLE_TRADE_CONTRIBUTION = 0.25
 MAX_TOP_THREE_TRADE_CONTRIBUTION = 0.50
@@ -115,6 +116,7 @@ DEFAULT_MIN_NEW_DATA_DAYS = 30.0
 DEFAULT_MAX_GAP_RATIO = 0.02
 DEFAULT_DATA_COVERAGE_RATIO = 0.80
 DEFAULT_FAMILY_REGISTRY = PROJECT_ROOT / "config" / "research_family_registry.json"
+DEFAULT_UNIVERSE_POLICY = PROJECT_ROOT / "config" / "research_universe_policy.json"
 DEFAULT_DATA_STATE = PROJECT_ROOT / "outputs" / "research_data_state.json"
 DEFAULT_DATA_REPORT = PROJECT_ROOT / "outputs" / "research_data_readiness.json"
 DEFAULT_RESEARCH_REPORT = PROJECT_ROOT / "outputs" / "research_gate_report.json"
@@ -580,8 +582,25 @@ def run_source_audit() -> list[CheckResult]:
     registry_path = DEFAULT_FAMILY_REGISTRY
     try:
         template = _json_mapping(template_path)
-        template_ok = template.get("schema") == "okx_pre_pnl_candidate_v2"
-        template_detail = str(template.get("schema"))
+        template_data = template.get("data") if isinstance(template.get("data"), dict) else {}
+        template_gate = template.get("data_gate") if isinstance(template.get("data_gate"), dict) else {}
+        template_selection = (
+            template.get("universe_selection")
+            if isinstance(template.get("universe_selection"), dict)
+            else {}
+        )
+        template_ok = bool(
+            template.get("schema") == "okx_pre_pnl_candidate_v2"
+            and template_gate.get("min_symbols") == 1
+            and float(template_gate.get("coverage_ratio", 0.0)) == 1.0
+            and isinstance(template_data.get("symbols"), list)
+            and template_selection.get("selection_locked_before_pnl") is True
+            and template_selection.get("outcome_based_selection") is False
+        )
+        template_detail = (
+            f"schema={template.get('schema')} min_symbols={template_gate.get('min_symbols')} "
+            f"coverage={template_gate.get('coverage_ratio')}"
+        )
     except Exception as exc:
         template_ok = False
         template_detail = str(exc)
@@ -1082,6 +1101,35 @@ def run_candidate_gate(candidate_path: Path, *, registry_path: Path = DEFAULT_FA
     mechanism = candidate.get("mechanism") if isinstance(candidate.get("mechanism"), dict) else {}
     data = candidate.get("data") if isinstance(candidate.get("data"), dict) else {}
     leakage = candidate.get("leakage") if isinstance(candidate.get("leakage"), dict) else {}
+    universe_selection = (
+        candidate.get("universe_selection")
+        if isinstance(candidate.get("universe_selection"), dict)
+        else {}
+    )
+    candidate_symbols_raw = data.get("symbols")
+    candidate_symbols = (
+        [str(symbol).strip() for symbol in candidate_symbols_raw if str(symbol).strip()]
+        if isinstance(candidate_symbols_raw, list)
+        else []
+    )
+    try:
+        universe_policy = _json_mapping(DEFAULT_UNIVERSE_POLICY)
+    except Exception:
+        universe_policy = {}
+    allowed_symbols = {
+        str(symbol).strip()
+        for symbol in universe_policy.get("symbols", [])
+        if str(symbol).strip()
+    }
+    subset_policy = (
+        universe_policy.get("new_candidate_subset_policy")
+        if isinstance(universe_policy.get("new_candidate_subset_policy"), dict)
+        else {}
+    )
+    minimum_subset = int(subset_policy.get("minimum_symbols", 1))
+    maximum_subset = int(subset_policy.get("maximum_symbols", len(allowed_symbols) or 21))
+    invalid_symbols = sorted(set(candidate_symbols).difference(allowed_symbols))
+    selection_basis = str(universe_selection.get("selection_basis", "")).strip()
     parameter_audit = audit_parameter_space(candidate)
     robustness_protocol_ok, robustness_protocol_detail = frozen_protocol_ok(
         candidate.get("robustness_protocol")
@@ -1095,6 +1143,44 @@ def run_candidate_gate(candidate_path: Path, *, registry_path: Path = DEFAULT_FA
         CheckResult("research", "observable_proxy_identified", bool(str(mechanism.get("observable_proxy", "")).strip()), str(mechanism.get("observable_proxy", ""))),
         CheckResult("research", "same_exchange_okx_only", data.get("exchange") == "OKX" and data.get("cross_exchange") is False and data.get("local_only") is True, json.dumps(data, ensure_ascii=False)),
         CheckResult("research", "closed_data_only", data.get("closed_only") is True, str(data.get("closed_only"))),
+        CheckResult(
+            "research",
+            "candidate_symbol_subset_explicit",
+            bool(candidate_symbols),
+            json.dumps(candidate_symbols, ensure_ascii=False),
+        ),
+        CheckResult(
+            "research",
+            "candidate_symbol_subset_unique",
+            bool(candidate_symbols) and len(candidate_symbols) == len(set(candidate_symbols)),
+            f"count={len(candidate_symbols)} unique={len(set(candidate_symbols))}",
+        ),
+        CheckResult(
+            "research",
+            "candidate_symbol_subset_within_allowed_pool",
+            bool(candidate_symbols) and bool(allowed_symbols) and not invalid_symbols,
+            ", ".join(invalid_symbols) or f"allowed_pool={len(allowed_symbols)}",
+        ),
+        CheckResult(
+            "research",
+            "candidate_symbol_subset_size_allowed",
+            minimum_subset <= len(candidate_symbols) <= maximum_subset,
+            f"count={len(candidate_symbols)} allowed={minimum_subset}-{maximum_subset}",
+        ),
+        CheckResult(
+            "research",
+            "candidate_symbol_selection_locked_before_pnl",
+            universe_selection.get("selection_locked_before_pnl") is True
+            and universe_selection.get("outcome_based_selection") is False
+            and universe_selection.get("legacy_outcomes_used_to_choose_subset") is False,
+            json.dumps(universe_selection, ensure_ascii=False),
+        ),
+        CheckResult(
+            "research",
+            "candidate_symbol_selection_basis_present",
+            bool(selection_basis),
+            selection_basis,
+        ),
         CheckResult(
             "research",
             "future_returns_closed",
@@ -1197,6 +1283,23 @@ def contribution_metrics(trades: pd.DataFrame) -> dict[str, float | int]:
         "top_three_trade_share": top_three,
         "effective_positive_trades": effective,
     }
+
+
+def evaluate_symbol_contribution_gate(
+    *,
+    declared_symbol_count: int,
+    single_symbol_share: float,
+) -> tuple[bool, str]:
+    if 0 < declared_symbol_count < MIN_SYMBOLS_FOR_CROSS_SYMBOL_CONTRIBUTION_GATE:
+        return (
+            True,
+            f"not_applicable=frozen_subset_size_{declared_symbol_count}; "
+            "time/month/trade/regime robustness remains mandatory",
+        )
+    return (
+        single_symbol_share <= MAX_SYMBOL_CONTRIBUTION,
+        f"share={single_symbol_share:.4f} max={MAX_SYMBOL_CONTRIBUTION:.2f}",
+    )
 
 
 def _stress_metric(stress: pd.DataFrame, scenario: str, column: str, default: float) -> float:
@@ -1328,6 +1431,39 @@ def run_artifact_gate(
 
     trades = pd.read_csv(artifact_dir / "sample_trades.csv")
     metrics = contribution_metrics(trades)
+    candidate_data = (
+        candidate.get("data")
+        if isinstance(candidate, dict) and isinstance(candidate.get("data"), dict)
+        else {}
+    )
+    declared_symbols_raw = candidate_data.get("symbols")
+    declared_symbols = (
+        [str(symbol).strip() for symbol in declared_symbols_raw if str(symbol).strip()]
+        if isinstance(declared_symbols_raw, list)
+        else []
+    )
+    traded_symbols = sorted(
+        {
+            str(symbol).strip()
+            for symbol in trades.get("inst_id", pd.Series(dtype=str)).dropna().astype(str)
+            if str(symbol).strip()
+        }
+    )
+    undeclared_traded_symbols = sorted(set(traded_symbols).difference(declared_symbols))
+    if candidate is not None:
+        results.append(
+            CheckResult(
+                "research",
+                "sample_trades_within_frozen_subset",
+                bool(declared_symbols) and not undeclared_traded_symbols,
+                ", ".join(undeclared_traded_symbols)
+                or f"declared={len(declared_symbols)} traded={len(traded_symbols)}",
+            )
+        )
+    symbol_contribution_ok, symbol_contribution_detail = evaluate_symbol_contribution_gate(
+        declared_symbol_count=len(declared_symbols),
+        single_symbol_share=float(metrics["single_symbol_share"]),
+    )
     results.extend(
         [
             CheckResult(
@@ -1339,8 +1475,8 @@ def run_artifact_gate(
             CheckResult(
                 "research",
                 "single_symbol_positive_contribution_bounded",
-                float(metrics["single_symbol_share"]) <= MAX_SYMBOL_CONTRIBUTION,
-                f"share={float(metrics['single_symbol_share']):.4f} max={MAX_SYMBOL_CONTRIBUTION:.2f}",
+                symbol_contribution_ok,
+                symbol_contribution_detail,
             ),
             CheckResult(
                 "research",

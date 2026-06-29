@@ -1670,3 +1670,117 @@
 - Refresh and inspect H22 first, V357 second, and H27 only after both source ledgers are current.
 - Do not evaluate either primary candidate before its frozen sample gates are due.
 - Keep new strategy research active as a secondary parallel line.
+
+## 2026-06-29 - Task: next-step forward refresh and existing-data mechanism boundary audit
+### Forward evidence refresh
+- Updated H22 first. Closed data now reaches `2026-06-29T06:00:00Z`; the ledger has 6 fully prospective rebalances, 5 closed observations and 1 active observation for both the original and 4-in-6-out variants. Data quality and the daily snapshot hash chain pass. The sample remains `NOT_EVALUATED_SAMPLE_INCOMPLETE`, with 44 rebalances and 55 closed-data days still required for the minimum gate.
+- Updated the frozen V357 runtime and acceptance adapter second. Coverage remains 21/21 symbols, elapsed closed-data time is 7 days and there are 6 fully prospective observations. The Donchian member has 2 closed and 4 active observations; VCB has no eligible forward observation yet. The sample remains incomplete and no automatic promotion is allowed.
+- Updated H27 only after both source ledgers. It has 4 common daily rows, 2 usable H22 closed observations and 2 V357 closed trades. It remains `RECORD_ONLY_SAMPLE_INCOMPLETE`; correlations and weight selection are unavailable.
+### Existing local numeric-field audit
+- Confirmed 21-symbol mark-price and index-price four-hour histories are present through `2026-06-29T04:00:00Z`, with 179,066 and 179,538 rows respectively. These values do not reopen H11/H12, basis convergence, execution-mismatch or liquidation-trigger families.
+- Confirmed the long official funding archive still covers 18 mature symbols from 2022-06 through 2026-05; the runtime 21-symbol funding table has 6,295 rows from 2026-03-21 through 2026-06-29. Carry, persistence, crowding reversal and settlement families remain closed without smoothing, threshold or price/OI rescue variants.
+- Confirmed the runtime fixed-21 open-interest table contains only 57 hourly points per symbol (`2026-06-24T13:00:00Z` through `2026-06-29T06:00:00Z`). The legacy native-OKX CSV fragments have no complete common 16/18/21-symbol hourly or daily cross-section.
+- Clarified that the Stage 4 result showing about 908 common daily OI timestamps was an online coverage probe. It retained timestamp summaries, not the underlying historical OI values, so it is not admissible for an existing-local-data-only signal backtest.
+### Recent primary-research screen
+- The updated asset-pricing survey continues to identify size, two-week momentum and network value as the core cross-sectional factors. Two-week momentum is already H22; size and network value require point-in-time market-cap and on-chain address histories not present locally.
+- Recent hidden-factor work relies on equity-industry factors, sentiment, speculative-rotation indices and security shocks. Recent explainable microstructure work relies on one-second L2/trades, CatBoost and maker/taker execution. These routes violate the local-only, low-complexity or no-continuous-L2 boundaries and map to already closed families.
+### Decision and recovery point
+- No new independent candidate, PnL protocol or forward shadow was created. The current local dataset has no unused numeric field with sufficient history, unique direction, observable payer and cost capacity.
+- Continue H22 and V357 frozen forward evidence and H27 record-only observation. Allow fixed-21 OI and funding values to accumulate naturally without predefining rescue strategies.
+- Reopen the independent candidate funnel only after a genuinely new locally stored numeric field has sufficient point-in-time history and passes payer, unique-direction, cost-ceiling and global-duplicate gates.
+- This round changed research outputs and documentation only. Application code, runtime configuration and version remain `3.56.33`; no Git commit or GitHub push is required.
+
+## 2026-06-29 - Task: complete fixed-21 OKX daily open-interest history
+### Data completion
+- Added a resumable research-only downloader under `HISTORY_PACKAGES_20260621/RESEARCH/local_only_hypothesis_discovery_v1/okx_fixed21_daily_oi_history_v1/`.
+- Downloaded actual daily OI values for all 21 configured OKX USDT swaps from the official public contract open-interest history endpoint. The data are isolated under `历史数据_保留/imports/okx_open_interest_history` and are not mixed with the legacy Binance/fragmented OI directory.
+- Stored per-symbol CSV and Parquet, a unified long panel, USD/contract/coin wide panels, a machine manifest, Chinese coverage report, README, resumable state and SHA-256 manifest.
+- Final long table contains 18,711 rows across 21 symbols. The complete data package contains 51 files and occupies about 7.28 MiB.
+### Coverage and quality
+- The exact fixed-21 common panel contains 491 daily timestamps from `2025-02-21T16:00:00Z` through `2026-06-28T16:00:00Z`, limited by HYPE history.
+- The mature-18 common panel contains 910 daily timestamps from `2023-12-31T16:00:00Z` through `2026-06-28T16:00:00Z`.
+- HYPE contains 493 daily rows beginning `2025-02-21T16:00:00Z`.
+- OP is missing `2025-08-25T16:00:00Z` and ARB is missing `2026-06-26T16:00:00Z`. Targeted official queries skipped those dates directly, so they remain missing with no interpolation or forward fill.
+- All per-symbol structural checks, unified-panel schema checks and SHA-256 file checks passed. No cross-exchange OI, synthetic values or pre-listing backfill were used.
+### Research and release boundary
+- The earlier statement that Stage 4 only had timestamp coverage and no local daily OI values is now superseded. Fixed-21 daily OI is a valid local research data asset.
+- No strategy was created and no PnL was opened. The next permitted action is a return-blind causality and global-family deduplication audit against FP12, ordinary momentum, reversal and liquidation-proxy families.
+- OI may not be added as a post-hoc filter to H22 or V357. Both frozen candidates remain unchanged.
+- Application code, runtime configuration and version remain `3.56.33`; no Git commit or GitHub push is required for this research-data completion.
+### Current recovery point
+- Continue H22 and V357 forward evidence first, then H27 record-only observation.
+- The next independent research step is the fixed-21 daily-OI pre-PnL screen. Do not open returns until payer, unique direction, causal timing, data coverage, turnover, concentration and family-deduplication gates pass.
+
+## 2026-06-29 - Task: fixed-21 daily-OI return-blind causality and deduplication audit
+### Frozen audit boundary
+- Locked a research-only protocol before structural results: user-fixed 21 OKX USDT swaps as the primary universe, mature 18 symbols as a robustness universe, Sunday 16:00 UTC weekly decisions, a seven-day primary window, three-day/fourteen-day neighbors and equal 4-long/4-short weights for structure only.
+- Future returns, PnL, calibration, validation and sealed history remained closed. No H22, V357 or H27 rule could be changed or filtered by OI.
+- Enforced strictly prior closed-hour price alignment. The audit used 18,369 causal price points, used zero equal-time/future points and rejected 336 stale end-tail joins. OI-only routes continued through 2026-06-28; price-linked routes stopped at the last complete weekly decision on 2026-06-07.
+### Numeraire and route results
+- Contract-count and coin-denominated OI changes are effectively identical scalings in the fixed swaps. USD OI is not independent: seven-day `log USD OI change - log coin OI change` correlates `0.99996` with the seven-day underlying price change.
+- Coin-denominated OI growth produced 130 weekly structures but had 86.34% one-way turnover, failed three-day/fourteen-day stability and could not identify a signed entrant or unique continuation/reversal direction.
+- OI-share migration was an exact ranking duplicate of raw OI growth: weight correlation `1.0` and same-side overlap `100%`.
+- Price-confirmed OI expansion had 77.88% turnover and was a hard duplicate of seven-day price momentum (`0.6476` weight correlation, `65.94%` same-side overlap). The mature-18 overlap remained `67.03%`.
+- OI-expansion reversal used the same unsigned field but selected the opposite explanation, so direction was not identifiable before outcomes.
+- Deleveraging continuation had 79.07% turnover, weak neighbor stability and duplicated seven-day momentum (`0.5541` correlation, `58.17%` overlap); OI contraction cannot distinguish continuing liquidation from completed exhaustion.
+- USD-OI growth had 85.37% turnover and duplicated coin-OI growth (`0.7510` correlation, `75.19%` overlap) in addition to its mechanical price contamination.
+### Decision and recovery point
+- All six routes stopped before PnL. Decision: `NO_INDEPENDENT_OI_CANDIDATE_PASSES_PRE_PNL`; new formal C/H candidates remain zero.
+- No desktop failed-strategy folder was created because none of the routes became a formal executable candidate. Their protocol, script, compact result, Chinese report and hashes remain in `fixed21_daily_oi_return_blind_audit_v1/` as negative evidence.
+- Continue H22 and V357 under their unchanged frozen forward protocols and keep H27 record-only. Daily OI is diagnostic only; higher-frequency OI may accumulate passively without rescue rules.
+- This round changed research utilities, artifacts and documentation only. Application code, runtime configuration and application version remain `3.56.33`; no version bump, Git commit or GitHub push was performed.
+
+## 2026-06-29 - Task: ordered forward refresh and M01 point-in-time market-cap data gate
+### Ordered forward refresh
+- Refreshed H22 first. The validated frozen ledger now reaches `2026-06-29T07:30:00Z` with exactly 3 fully prospective rebalances, 2 closed observations and 1 active observation; protocol, ledger, data-quality and snapshot-chain integrity all pass. The earlier local summary reporting 6 total and 5 closed observations was incorrect and is superseded by the actual three dated evidence snapshots.
+- Refreshed V357 second. The first attempt correctly stopped at `frozen_reference_bar_misaligned` because the LTC 15-minute runtime cache lagged the other frozen reference symbols. Causally backfilled four closed LTC bars through `2026-06-29T08:30:00Z`, then reran successfully with 21/21 coverage, 7 closed-data days and 6 fully prospective observations: 2 closed and 4 active. No strategy rule changed.
+- Updated H27 only after both source ledgers. It now has 4 common daily rows, 2 H22 closed observations and 2 V357 closed trades, and remains `RECORD_ONLY_SAMPLE_INCOMPLETE`; correlation and weight-selection decisions remain unavailable.
+### M01 data feasibility and provenance
+- Froze a data-only protocol before downloading any market-cap history. Future returns, PnL, factor direction, rank counts, rebalance cadence and no-trade bands remained unopened.
+- Downloaded a small Coin Metrics Community `CapMrktEstUSD` daily snapshot for the fixed 21. Twenty symbols cover every day from `2023-06-15` through `2026-06-28`; HYPE covers its natural history from `2024-12-13`. The snapshot contains 22,763 valid rows, zero gaps, duplicates, non-midnight timestamps or nonpositive values, occupies about 3.5 MB and has panel SHA-256 `caacbb5b6daccdc8c93e1f32c36e00772f9a5eb2b0a4ed62902676c8bcab7084`.
+- Coverage alone was not accepted as point-in-time validity. `CapMrktEstUSD` combines recalculable reference prices with project self-reported circulating-supply estimates sourced through CoinGecko, and no immutable historical vintage/as-of archive was established. The chain-native `CapMrktCurUSD` alternative has only 10 fixed symbols with usable coverage over the required window and is not economically equivalent to circulating/free-float market capitalization.
+- Free CoinGecko and CoinPaprika histories are too short; adequate CoinMarketCap, CoinPaprika or Messari bulk history requires payment and still did not establish immutable historical vintages. M01 therefore stopped before factor-structure testing or PnL as `STOP_M01_BEFORE_FACTOR_AUDIT_NO_FREE_STRICT_POINT_IN_TIME_SOURCE`.
+### Decision and recovery point
+- Formal new-candidate count remains zero. The downloaded market-cap panel is diagnostic and a future revision anchor only; it may not be merged into a causal backtest or added to H22/V357.
+- Continue the frozen order `H22 -> V357 -> H27` when new closed data arrives. Reopen M01 only if at least 18 fixed symbols obtain auditable historical circulating/free-float market-cap vintages that match each decision-time information set.
+- Application source, formal configuration, signal behavior and version remain `3.56.33`; no version bump, commit or GitHub push was performed.
+
+## 2026-06-29 - Task: fixed-21 free on-chain field coverage audit
+### Frozen data-only boundary
+- Locked the fixed 21 symbols, canonical chain/token mappings, 2023-06-15 start date, 18-symbol minimum, free-access requirement, same-economic-scope rule, revision/vintage requirement and a prohibition on reading returns or PnL before the full catalog audit.
+- Disclosed that small public catalog probes had been used only to verify endpoint syntax and exact project slugs before the full protocol. No OKX future return, strategy outcome or PnL was queried or merged.
+- Prevented ticker-only matching: UNI was pinned to the Ethereum contract, ARB and OP to their governance-token contracts, and BTC/ETH ETF or bridged same-ticker projects were excluded.
+### Public catalog results
+- Queried Coin Metrics Community, Santiment SANAPI FREE and DefiLlama Free catalogs across 21 field routes. Santiment project queries completed for all 21 fixed symbols after retry handling; no unresolved source-query error remains.
+- Coin Metrics `AdrActCnt`, `TxCnt` and `TxTfrCnt` each reach only 12 raw symbols, 11 with the required catalog window and 9 economically comparable full-window symbols. DOT community history ends in 2022-06-03. Coin Metrics free exchange inflow/outflow fields reach only BTC and ETH.
+- Santiment `active_addresses_24h` reaches 14 raw symbols but only 10 under the frozen comparable-scope rule. `daily_active_addresses` reaches 12. Transaction volume reaches 14 raw symbols, while exchange inflow/outflow reaches 6 and has zero unrestricted full-history symbols on the FREE plan.
+- DefiLlama chain catalog is the broadest raw route at 16 symbols, but only 14 are economically comparable. LINK and UNI are token contracts; Arbitrum and Optimism network activity is not equivalent to ARB and OP governance-token demand. Chain TVL, DEX volume and fees therefore cannot form a fixed-21 asset factor.
+### Decision and recovery point
+- None of the 21 routes reaches the frozen 18-symbol free coverage gate. Decision: `NO_FREE_FIELD_REACHES_FIXED21_COVERAGE_GATE`.
+- The audit stopped before bulk historical timeseries download, rank construction, turnover, correlations, PnL, PF, win rate or drawdown. No formal candidate or desktop failed-strategy folder was created because no executable candidate formed.
+- Do not reopen active-address, network-growth, transaction-count, transaction-volume, chain-fee, chain-TVL, DEX-volume or exchange-flow routes merely by switching provider names. Reopen only if one source reaches at least 18 comparable fixed symbols with the required history and auditable metric/wallet-label vintages.
+- Continue `H22 -> V357 -> H27` under their unchanged frozen protocols. Application source, runtime configuration, signal behavior and version remain `3.56.33`; no version bump, commit or GitHub push was performed.
+
+## 2026-06-29 - Task: post-audit ordered forward refresh
+- Ran H22 first and advanced closed-data availability from 07:30 UTC to 09:45 UTC. No new scheduled rebalance was due, so the evidence count remains exactly 3 fully prospective rebalances, 2 closed observations and 1 active observation. Protocol, ledger, data quality and snapshot-chain integrity remain PASS.
+- Ran V357 second. It remains at 21/21 eligible symbols, 7 closed-data days and 6 fully prospective observations: 2 closed and 4 active. No rule, member, parameter, stop or holding period changed.
+- Recomputed H27 last. It remains record-only with 4 common daily rows, 2 H22 closed observations and 2 V357 closed trades; correlations and weight selection remain unavailable.
+- The next scheduled H22 refresh and entry is `2026-06-30T04:00:00Z` (`2026-06-30 13:00` Japan time). Until that point, repeated refreshes can update data freshness but cannot create a new H22 rebalance sample.
+- Application source, formal configuration, signal behavior and version remain `3.56.33`; no version bump, commit or GitHub push was performed.
+
+## 2026-06-29 - Task: allow profitable candidate-specific subsets and v3.56.34
+### Policy correction
+- Replaced the mandatory-breadth interpretation with an allowed-pool interpretation: the declared 21 mature OKX USDT swaps remain the maximum permitted trading pool, but a new strategy may prospectively freeze any subset from one to 21 symbols. Profitability and robustness are objectives; symbol count is not.
+- Outcome-driven membership remains forbidden. A candidate must list its exact symbols and selection basis before PnL, may not test all 21 and retain winners, may not delete losing members after results, and may not use the new policy to redesign H22 or V357.
+### Machine gates
+- Upgraded `config/research_universe_policy.json` to v2 and the pre-PnL template to require an explicit candidate subset, full data coverage for that subset, a pre-PnL selection basis and declarations that no legacy outcomes selected the symbols.
+- Extended `scripts/system_check.py` to reject empty, duplicate, out-of-pool or outcome-selected subsets and to reject sample trades in undeclared symbols.
+- Cross-symbol concentration now depends on frozen subset size. One-to-five-symbol candidates no longer fail mechanically because one symbol exceeds 25% of positive contribution; six-to-21-symbol candidates retain the 25% gate. Time splits, market regimes, month/trade concentration, effective positive trades, costs, future leakage, family deduplication and forward evidence remain mandatory for every size.
+- Added focused tests proving that a BTC-only candidate can pass the subset gate before PnL, while the 25% cross-symbol contribution gate reactivates at six symbols. All focused research-automation tests pass.
+### Historical evidence interpretation
+- Preserved the original free on-chain catalog audit. Its `NO_FREE_FIELD_REACHES_FIXED21_COVERAGE_GATE` result still rejects a uniform 18-plus-symbol on-chain cross-section, but no longer globally rejects BTC-only, BTC/ETH or naturally defined small subsets.
+- Added `SUPERSESSION_20260629_CANDIDATE_SUBSET_POLICY.json`. Reopening any narrow route requires a new return-blind protocol and cannot use historical outcomes to choose members; wallet-label vintages, field revisions and chain-versus-token semantics remain binding.
+### Release boundary
+- Bumped package and release documentation to `3.56.34`. Approved strategy identity remains `3.56.15`, strict research identity remains `v3.56-strict`, and the application remains signal-only with no automatic ordering or promotion.
+- Focused release/research tests passed, the complete Python suite passed with only expected data-dependent skips, unified source audit passed, and change governance returned `ok=true`.
+- Built `dist/okx-contract-signal-system-v3.56.34.zip` with its SHA-256 sidecar. Repository synchronization is verified separately by the Git governance check.
