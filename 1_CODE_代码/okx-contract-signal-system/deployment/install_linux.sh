@@ -82,7 +82,7 @@ chmod 0750 "${APP_DIR}/outputs" "${APP_DIR}/logs"
 systemctl daemon-reload
 systemctl enable okx-signal.service okx-signal-health.timer
 
-sudo -u "${APP_USER}" "${VENV_DIR}/bin/python" "${APP_DIR}/scripts/system_check.py" preflight --env-file "${ENV_FILE}"
+sudo -u "${APP_USER}" "${VENV_DIR}/bin/python" "${APP_DIR}/scripts/runtime_check.py" preflight --env-file "${ENV_FILE}"
 
 if [[ "${START_SERVICE}" == "true" ]]; then
   systemctl restart okx-signal.service

@@ -70,6 +70,7 @@ docs/V3.56.33_RELEASE_CN.md
 docs/V3.56.34_RELEASE_CN.md
 docs/V3.56.35_RELEASE_CN.md
 docs/V3.56.36_RELEASE_CN.md
+docs/V3.56.37_RELEASE_CN.md
 docs/V3.56.3_RUNTIME_CACHE_INTEGRATION_CN.md
 docs/V3.56.4_ACCEPTANCE_CN.md
 docs/V3.56.4_DUPLICATE_PACKAGE_RECONCILIATION_CN.md
@@ -91,6 +92,7 @@ scripts/refresh_failure_archive.py
 scripts/run_candidate_factory.py
 scripts/run_parallel_acceptance.py
 scripts/runtime_healthcheck.py
+scripts/runtime_check.py
 scripts/update_momentum_fixed_3d_shadow.py
 scripts/update_momentum_staggered_3x3_shadow.py
 scripts/update_shadow_ensemble_acceptance.py
@@ -163,6 +165,7 @@ src/okx_signal_system/risk/__init__.py
 src/okx_signal_system/risk/costs.py
 src/okx_signal_system/risk/leverage_advice.py
 src/okx_signal_system/risk/model.py
+src/okx_signal_system/runtime_manifest.py
 src/okx_signal_system/signal_quality/__init__.py
 src/okx_signal_system/signal_quality/candidate.py
 src/okx_signal_system/signal_quality/correlation.py
@@ -216,6 +219,7 @@ tests/test_panel_view.py
 tests/test_parallel_acceptance.py
 tests/test_rank_conviction_weighting.py
 tests/test_realtime_research_isolation.py
+tests/test_runtime_research_boundary.py
 tests/test_release_safety.py
 tests/test_reporting_signal.py
 tests/test_research_automation.py

@@ -48,11 +48,28 @@ FORBIDDEN_RUNTIME_RELEASE_PATHS = (
     "src/okx_signal_system/notification/",
     "src/okx_signal_system/signal_service/app.py",
     "src/okx_signal_system/ml/",
-    "src/okx_signal_system/training/daily_learning.py",
+    "src/okx_signal_system/backtest/",
+    "src/okx_signal_system/research/",
+    "src/okx_signal_system/training/",
     "src/okx_contract_signal_system.egg-info/",
+    "scripts/system_check.py",
     "scripts/preflight_check.py",
     "scripts/runtime_healthcheck.py",
     "scripts/check_shadow_ensemble_local.py",
+    "scripts/run_candidate_factory.py",
+    "scripts/run_parallel_acceptance.py",
+    "scripts/refresh_failure_archive.py",
+    "scripts/research_",
+    "config/research_protocols/",
+    "config/research_candidates/PRE_PNL_CANDIDATE_TEMPLATE.json",
+    "config/research_family_registry.json",
+    "config/research_universe_policy.json",
+    "config/parallel_acceptance.yaml",
+    "config/parallel_acceptance_early_stop_protocol.json",
+    "config/shadow_ensemble_forward_acceptance_protocol.json",
+    "docs/RESEARCH_ROBUSTNESS_SCREEN_CN.md",
+    "docs/PARALLEL_FORWARD_ACCEPTANCE_CN.md",
+    "tests/",
 )
 
 FUTURE_LEAK_PATTERNS = (
@@ -654,27 +671,63 @@ def run_source_audit() -> list[CheckResult]:
         registry_detail = str(exc)
     results.append(CheckResult("source", "research_candidate_template_v2", template_ok, template_detail))
     results.append(CheckResult("source", "research_family_registry_valid", registry_ok, registry_detail))
-    results.append(CheckResult("source", "unified_research_gate_released", "scripts/system_check.py" in release_files, "scripts/system_check.py"))
-    results.append(CheckResult("source", "research_registry_released", "config/research_family_registry.json" in release_files, "config/research_family_registry.json"))
-    parallel_release_files = {
-        "RUN_PARALLEL_ACCEPTANCE.cmd",
-        "config/parallel_acceptance.yaml",
-        "config/parallel_acceptance_early_stop_protocol.json",
-        "config/shadow_ensemble_forward_acceptance_protocol.json",
-        "docs/PARALLEL_FORWARD_ACCEPTANCE_CN.md",
-        "scripts/run_candidate_factory.py",
-        "scripts/run_parallel_acceptance.py",
-        "scripts/update_shadow_ensemble_acceptance.py",
-        "src/okx_signal_system/research/parallel_acceptance.py",
-        "src/okx_signal_system/research/shadow_ensemble_acceptance.py",
+
+    required_runtime_release = {
+        "scripts/runtime_check.py",
+        "src/okx_signal_system/runtime_manifest.py",
+        "src/okx_signal_system/signal_service/runtime.py",
+        "src/okx_signal_system/signal_service/scan.py",
+        "src/okx_signal_system/risk/model.py",
+        "src/okx_signal_system/signal_quality/selector.py",
+        "src/okx_signal_system/signal_quality/execution.py",
+        "src/okx_signal_system/signal_quality/lifecycle.py",
+        "src/okx_signal_system/notify/dispatcher.py",
+        "deployment/systemd/okx-signal.service",
+        "deployment/systemd/okx-signal-health.service",
     }
-    missing_parallel_release = sorted(parallel_release_files.difference(release_files))
+    missing_runtime_release = sorted(required_runtime_release.difference(release_files))
     results.append(
         CheckResult(
             "source",
-            "parallel_research_pipeline_released",
-            not missing_parallel_release,
-            ", ".join(missing_parallel_release) or "complete",
+            "production_runtime_modules_released",
+            not missing_runtime_release,
+            ", ".join(missing_runtime_release) or "complete",
+        )
+    )
+
+    required_v357_runtime = {
+        "config/shadow_ensemble.yaml",
+        "config/research_candidates/v357_4h_donchian_shadow_candidate.json",
+        "config/research_candidates/v357_shadow_ensemble_candidate.json",
+        "src/okx_signal_system/shadow_ensemble.py",
+    }
+    missing_v357_runtime = sorted(required_v357_runtime.difference(release_files))
+    results.append(
+        CheckResult(
+            "source",
+            "v357_runtime_observation_dependencies_released",
+            not missing_v357_runtime,
+            ", ".join(missing_v357_runtime) or "complete",
+        )
+    )
+
+    runtime_check_text = (PROJECT_ROOT / "scripts" / "runtime_check.py").read_text(encoding="utf-8")
+    runtime_loader_text = (PROJECT_ROOT / "src" / "okx_signal_system" / "signal_service" / "runtime.py").read_text(encoding="utf-8")
+    results.append(
+        CheckResult(
+            "source",
+            "runtime_checker_is_research_independent",
+            "system_check" not in runtime_check_text and "okx_signal_system.research" not in runtime_check_text,
+            "scripts/runtime_check.py",
+        )
+    )
+    results.append(
+        CheckResult(
+            "source",
+            "runtime_manifest_loader_is_research_independent",
+            "okx_signal_system.research" not in runtime_loader_text
+            and "okx_signal_system.runtime_manifest" in runtime_loader_text,
+            "src/okx_signal_system/signal_service/runtime.py",
         )
     )
     return results

@@ -1,3 +1,26 @@
+## 2026-07-01 - Task: v3.56.37 local-research / production-runtime split
+### What was done
+- Added lightweight `scripts/runtime_check.py`; Linux preflight, health timer and installer no longer import the unified local research checker.
+- Added runtime-only `src/okx_signal_system/runtime_manifest.py`; formal signal loading no longer imports `okx_signal_system.research`.
+- Rebuilt `RELEASE_FILES.txt` as a 104-file production allow-list. It excludes PRE_PNL templates, candidate factory, backtests, parameter searches, research protocols, research tests, failure-archive tools and historical research documents.
+- Kept all runtime signal gates: approved manifest/version/hash, closed-candle causality, freshness, 21-symbol coverage, risk validation, quality tiering, correlation control, lifecycle, duplicate suppression, expiry cleanup, outbox/Feishu health and SIGNAL_ONLY/no-order checks.
+- Kept only the V357 files actually loaded by the isolated desktop shadow observer; they remain outside formal A/B notification and approved-strategy promotion.
+- Reduced PyInstaller data/import scope so Windows packaging no longer bundles the full research config tree or research/ML/backtest modules.
+- Updated project overview, architecture, deployment checklist, change-control policy and governance tests so future research files default to local-only and production inclusion requires an actual runtime dependency.
+### Testing
+- Focused boundary/deployment/release tests: `45 passed`.
+- Full pytest: `466 passed, 18 skipped`.
+- Dashboard production build: passed; root and both API routes compiled.
+- `scripts/system_check.py source`: passed; release allow-list unique, all files present, 21 symbols configured, research modules excluded, runtime/V357 dependencies complete.
+- `scripts/runtime_check.py preflight --mode observation`: passed; expected nonblocking warnings only for missing explicit local safety variables and absent approved manifest.
+- Live `scripts/runtime_check.py runtime --mode observation`: passed; status fresh, WebSocket connected, 21/21 status/subscription/backfill coverage, 15m and 5m closed backfills complete, outbox healthy.
+- Production ZIP built as `dist/okx-contract-signal-system-v3.56.37-production.zip`; staged import succeeded with 104 entries and no system checker, PRE_PNL template, candidate factory, backtest, research, training or Python tests.
+- `compileall`, `git diff --check`, source governance and change governance passed; line-ending warnings only.
+### Permanent boundary reminder
+- Local research safety gates remain mandatory for candidate approval, but they must never be loaded by or packaged with the production runtime.
+- Runtime signal-quality and safety gates are production requirements and must never be removed as “research bloat”.
+- New files enter `RELEASE_FILES.txt` only after proving a direct runtime dependency; local research files stay outside by default.
+
 ## 2026-07-01 - Task: v3.56.36 anti-overfit and future-leakage hard gate
 ### What was done
 - Converted the zero-tolerance research rule into blocking pre-PnL candidate checks.

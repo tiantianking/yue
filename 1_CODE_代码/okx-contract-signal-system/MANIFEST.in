@@ -4,6 +4,7 @@ include requirements.lock
 include RUN_PARALLEL_ACCEPTANCE.cmd
 include scripts/preflight_check.py
 include scripts/runtime_healthcheck.py
+include scripts/runtime_check.py
 include scripts/run_candidate_factory.py
 include scripts/run_parallel_acceptance.py
 include scripts/update_shadow_ensemble_acceptance.py

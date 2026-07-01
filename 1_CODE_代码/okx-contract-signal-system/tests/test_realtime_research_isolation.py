@@ -17,6 +17,7 @@ RUNTIME_SOURCES = [
 ]
 BLOCKED_ROOTS = {
     "okx_signal_system.backtest",
+    "okx_signal_system.research",
     "okx_signal_system.training",
     "okx_signal_system.ml",
 }
@@ -53,7 +54,7 @@ import okx_signal_system.signal_service.job  # noqa: F401
 import okx_signal_system.scheduler  # noqa: F401
 import okx_signal_system.exchange.realtime  # noqa: F401
 
-blocked_roots = ("okx_signal_system.backtest", "okx_signal_system.training", "okx_signal_system.ml")
+blocked_roots = ("okx_signal_system.backtest", "okx_signal_system.research", "okx_signal_system.training", "okx_signal_system.ml")
 loaded = sorted(name for name in sys.modules if name.startswith(blocked_roots))
 print(json.dumps(loaded))
 raise SystemExit(1 if loaded else 0)

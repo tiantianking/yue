@@ -86,6 +86,10 @@ def test_release_tests_package_can_import_integration_helpers() -> None:
 
 def test_release_version_sources_stay_consistent() -> None:
     from okx_signal_system.research.approved_strategy_manifest import APPROVED_RESEARCH_VERSION, APPROVED_STRATEGY_VERSION
+    from okx_signal_system.runtime_manifest import (
+        APPROVED_RESEARCH_VERSION as RUNTIME_RESEARCH_VERSION,
+        APPROVED_STRATEGY_VERSION as RUNTIME_STRATEGY_VERSION,
+    )
 
     pyproject = tomllib.loads(_read("pyproject.toml"))
     package_version = okx_signal_system.__version__
@@ -94,9 +98,11 @@ def test_release_version_sources_stay_consistent() -> None:
     gui_text = _read("gui.py")
     start_text = _read("start.bat")
 
-    assert package_version == "3.56.36"
+    assert package_version == "3.56.37"
     assert pyproject["project"]["version"] == package_version
     assert APPROVED_STRATEGY_VERSION == "3.56.15"
+    assert RUNTIME_STRATEGY_VERSION == APPROVED_STRATEGY_VERSION
+    assert RUNTIME_RESEARCH_VERSION == APPROVED_RESEARCH_VERSION
     assert f"Version: {package_version}" in pkg_info
     assert "from okx_signal_system import __version__ as _PACKAGE_VERSION" in main_text
     assert 'APP_VERSION = f"v{_PACKAGE_VERSION}"' in main_text
@@ -166,7 +172,7 @@ def test_distribution_sources_cover_all_python_modules_and_release_docs() -> Non
     assert expected - sources == set()
 
 
-def test_release_file_manifest_is_present_and_self_including() -> None:
+def test_release_file_manifest_is_production_only() -> None:
     manifest_path = ROOT / "RELEASE_FILES.txt"
     lines = [
         line.strip()
@@ -174,42 +180,73 @@ def test_release_file_manifest_is_present_and_self_including() -> None:
         if line.strip() and not line.lstrip().startswith("#")
     ]
 
-    assert "RELEASE_FILES.txt" in lines
-    assert "CHECK_REMOTE_SYNC.cmd" in lines
-    assert "scripts/build_release_zip.py" in lines
-    assert "scripts/check_change_governance.py" in lines
-    assert "scripts/refresh_failure_archive.py" in lines
-    assert "scripts/system_check.py" in lines
-    assert "scripts/run_candidate_factory.py" in lines
-    assert "scripts/run_parallel_acceptance.py" in lines
-    assert "scripts/update_shadow_ensemble_acceptance.py" in lines
-    assert "scripts/update_momentum_fixed_3d_shadow.py" in lines
-    assert "scripts/update_momentum_staggered_3x3_shadow.py" in lines
-    assert "config/parallel_acceptance.yaml" in lines
-    assert "config/parallel_acceptance_early_stop_protocol.json" in lines
-    assert "config/shadow_ensemble_forward_acceptance_protocol.json" in lines
-    assert "RUN_PARALLEL_ACCEPTANCE.cmd" in lines
-    assert "scripts/preflight_check.py" not in lines
-    assert "scripts/runtime_healthcheck.py" not in lines
-    assert "scripts/check_shadow_ensemble_local.py" not in lines
-    assert "deployment/install_linux.sh" in lines
-    assert "deployment/systemd/okx-signal.service" in lines
-    assert "deployment/systemd/okx-signal-health.service" in lines
-    assert "deployment/systemd/okx-signal-health.timer" in lines
-    assert "deployment/logrotate/okx-signal" in lines
-    assert "deployment/okx-signal.env.example" in lines
-    assert "docs/CHANGE_CONTROL_POLICY_CN.md" in lines
-    assert "docs/DEPLOYMENT_CHECKLIST_CN.md" in lines
-    assert "docs/PROJECT_OVERVIEW_CN.md" in lines
-    assert "docs/V3.56.31_RELEASE_CN.md" in lines
-    assert "docs/V3.56.32_RELEASE_CN.md" in lines
-    assert "docs/V3.56.33_RELEASE_CN.md" in lines
-    assert "docs/V3.56.34_RELEASE_CN.md" in lines
-    assert "docs/V3.56.35_RELEASE_CN.md" in lines
-    assert "docs/V3.56.36_RELEASE_CN.md" in lines
-    assert "config/research_universe_policy.json" in lines
+    required_runtime = {
+        "RELEASE_FILES.txt",
+        "scripts/runtime_check.py",
+        "src/okx_signal_system/runtime_manifest.py",
+        "src/okx_signal_system/signal_service/runtime.py",
+        "src/okx_signal_system/signal_service/scan.py",
+        "src/okx_signal_system/risk/model.py",
+        "src/okx_signal_system/signal_quality/selector.py",
+        "src/okx_signal_system/signal_quality/execution.py",
+        "src/okx_signal_system/signal_quality/lifecycle.py",
+        "src/okx_signal_system/notify/dispatcher.py",
+        "deployment/install_linux.sh",
+        "deployment/systemd/okx-signal.service",
+        "deployment/systemd/okx-signal-health.service",
+        "deployment/systemd/okx-signal-health.timer",
+        "docs/V3.56.37_RELEASE_CN.md",
+    }
+    assert required_runtime.issubset(lines)
+
+    required_v357_runtime = {
+        "config/shadow_ensemble.yaml",
+        "config/research_candidates/v357_4h_donchian_shadow_candidate.json",
+        "config/research_candidates/v357_shadow_ensemble_candidate.json",
+        "src/okx_signal_system/shadow_ensemble.py",
+    }
+    assert required_v357_runtime.issubset(lines)
+
+    forbidden_exact = {
+        "scripts/system_check.py",
+        "scripts/preflight_check.py",
+        "scripts/runtime_healthcheck.py",
+        "scripts/run_candidate_factory.py",
+        "scripts/run_parallel_acceptance.py",
+        "scripts/refresh_failure_archive.py",
+        "config/research_candidates/PRE_PNL_CANDIDATE_TEMPLATE.json",
+        "config/research_family_registry.json",
+        "config/research_universe_policy.json",
+        "config/parallel_acceptance.yaml",
+        "config/parallel_acceptance_early_stop_protocol.json",
+        "config/shadow_ensemble_forward_acceptance_protocol.json",
+        "docs/RESEARCH_ROBUSTNESS_SCREEN_CN.md",
+        "docs/PARALLEL_FORWARD_ACCEPTANCE_CN.md",
+    }
+    assert forbidden_exact.isdisjoint(lines)
+    assert not any(path.startswith("src/okx_signal_system/backtest/") for path in lines)
+    assert not any(path.startswith("src/okx_signal_system/research/") for path in lines)
+    assert not any(path.startswith("src/okx_signal_system/training/") for path in lines)
+    assert not any(path.startswith("tests/") for path in lines)
+    assert not any(path.startswith("config/research_protocols/") for path in lines)
+    assert not any(path.startswith("scripts/research_") for path in lines)
     assert len(lines) == len(set(lines))
     assert all("\\" not in line and not line.startswith("/") and ".." not in Path(line).parts for line in lines)
+
+
+def test_runtime_entrypoints_do_not_import_local_research_tools() -> None:
+    runtime_check = _read("scripts/runtime_check.py")
+    runtime_loader = _read("src/okx_signal_system/signal_service/runtime.py")
+    service = _read("deployment/systemd/okx-signal.service")
+    health_service = _read("deployment/systemd/okx-signal-health.service")
+
+    assert "import system_check" not in runtime_check
+    assert "okx_signal_system.research" not in runtime_check
+    assert "okx_signal_system.research" not in runtime_loader
+    assert "okx_signal_system.runtime_manifest" in runtime_loader
+    assert "scripts/runtime_check.py preflight" in service
+    assert "scripts/runtime_check.py runtime" in health_service
+    assert "scripts/system_check.py" not in service + health_service
 
 
 def test_dashboard_uses_validated_runtime_snapshot_and_never_legacy_param_overrides() -> None:
@@ -490,18 +527,19 @@ def test_release_docs_do_not_advertise_live_order_defaults() -> None:
         assert token not in docs
 
 
-def test_release_docs_mark_learning_paths_experimental_not_production_tuning() -> None:
+def test_release_docs_exclude_automatic_research_and_tuning() -> None:
     docs = "\n".join(
         [
-            _read("docs/RELEASE_SAFETY.md"),
+            _read("README.md"),
             _read("docs/SYSTEM_ARCHITECTURE.md"),
+            _read("docs/V3.56.37_RELEASE_CN.md"),
         ]
     )
 
-    assert "experimental sidecar paths" in docs
-    assert "not production automatic tuning features" in docs
-    assert "must not promote parameters into runtime by themselves" in docs
-    assert "strict research acceptance flow and operator review" in docs
+    assert "excludes local candidate factories" in docs
+    assert "不能搜索参数" in docs
+    assert "不在生产机器上自动搜索参数、回测或晋级" in docs
+    assert "The deployed runtime only reads and validates a frozen approved manifest" in docs
 
 
 def test_ml_live_scoring_paths_are_observation_only() -> None:
@@ -558,6 +596,13 @@ def test_pyinstaller_datas_do_not_include_runtime_artifacts() -> None:
 
     for token in forbidden:
         assert token not in spec
+
+    assert "('config', 'config')" not in spec
+    assert "PRE_PNL_CANDIDATE_TEMPLATE" not in spec
+    assert "okx_signal_system.backtest" in spec
+    assert "okx_signal_system.research" in spec
+    assert "okx_signal_system.training" in spec
+    assert "v357_shadow_ensemble_candidate.json" in spec
 
 
 def test_realtime_runtime_api_does_not_expose_trade_execution() -> None:

@@ -1,6 +1,6 @@
 # OKX 合约信号系统部署前后完整清单
 
-适用版本：v3.56.34
+适用版本：v3.56.37
 
 本系统是 `SIGNAL_ONLY` 公共行情信号观察系统。部署过程不得配置 OKX 私有 API Key，不得加入下单、撤单、开仓、平仓或真实账户仓位逻辑。
 
@@ -50,16 +50,12 @@ OKX_PASSPHRASE=
 outputs/runtime/approved_strategy_manifest.json
 ```
 
-该文件只能由合法 strict-research 产物晋级生成：
-
-```bash
-/opt/okx-signal/venv/bin/python -m okx_signal_system.research.promote --run-id <合法运行ID>
-```
+该文件只能在本地完整研究仓库中，由合法 strict-research 产物经过人工批准后生成。生产发布包不包含晋级、回测或候选研究代码；部署时只复制经过SHA-256核验的冻结manifest到 `outputs/runtime/`，生产运行只读并重新校验。
 
 必须满足：
 
 - [ ] 研究版本是 `v3.56-strict`。
-- [ ] 应用版本是 `3.56.34`，approved strategy version 仍是 `3.56.15`。
+- [ ] 应用版本是 `3.56.37`，approved strategy version 仍是 `3.56.15`。
 - [ ] validation 与 blind 时间窗严格隔离。
 - [ ] blind 状态为真实 `BLIND_SEALED_PASS`。
 - [ ] 成本压力测试通过。
@@ -138,7 +134,7 @@ deployment/logrotate/okx-signal
 
 ```bash
 sudo -u okxsignal /opt/okx-signal/venv/bin/python \
-  /opt/okx-signal/app/scripts/system_check.py preflight \
+  /opt/okx-signal/app/scripts/runtime_check.py preflight \
   --mode observation \
   --env-file /etc/okx-signal/okx-signal.env
 ```
@@ -147,7 +143,7 @@ sudo -u okxsignal /opt/okx-signal/venv/bin/python \
 
 ```bash
 sudo -u okxsignal /opt/okx-signal/venv/bin/python \
-  /opt/okx-signal/app/scripts/system_check.py preflight \
+  /opt/okx-signal/app/scripts/runtime_check.py preflight \
   --mode production \
   --env-file /etc/okx-signal/okx-signal.env
 ```
@@ -222,7 +218,7 @@ sudo journalctl -u okx-signal.service -f
 
 ```bash
 sudo -u okxsignal /opt/okx-signal/venv/bin/python \
-  /opt/okx-signal/app/scripts/system_check.py runtime --mode observation
+  /opt/okx-signal/app/scripts/runtime_check.py runtime --mode observation
 ```
 
 ### 6. 切换正式推送
@@ -240,10 +236,10 @@ FEISHU_WEBHOOK_URL=<私密Webhook>
 ```bash
 sudo systemctl restart okx-signal.service
 sudo -u okxsignal /opt/okx-signal/venv/bin/python \
-  /opt/okx-signal/app/scripts/system_check.py preflight \
+  /opt/okx-signal/app/scripts/runtime_check.py preflight \
   --mode production --env-file /etc/okx-signal/okx-signal.env
 sudo -u okxsignal /opt/okx-signal/venv/bin/python \
-  /opt/okx-signal/app/scripts/system_check.py runtime --mode production
+  /opt/okx-signal/app/scripts/runtime_check.py runtime --mode production
 ```
 
 ## 三、部署后必须做什么

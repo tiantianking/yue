@@ -149,18 +149,42 @@ def evaluate(*, require_github_sync: bool = False) -> list[GovernanceCheck]:
     }
     required_release_entries = {
         "docs/PROJECT_OVERVIEW_CN.md",
-        "docs/CHANGE_CONTROL_POLICY_CN.md",
         f"docs/V{version}_RELEASE_CN.md",
-        "scripts/check_change_governance.py",
-        "scripts/refresh_failure_archive.py",
-        "CHECK_REMOTE_SYNC.cmd",
+        "docs/DEPLOYMENT_CHECKLIST_CN.md",
+        "docs/RUNTIME_VERIFICATION.md",
+        "docs/SYSTEM_ARCHITECTURE.md",
     }
     missing_release_entries = sorted(required_release_entries - release_files)
     checks.append(
         GovernanceCheck(
-            "governance_files_released",
+            "production_documentation_released",
             not missing_release_entries,
             ", ".join(missing_release_entries) or "complete",
+        )
+    )
+
+    local_governance_paths = {
+        "docs/CHANGE_CONTROL_POLICY_CN.md",
+        "scripts/check_change_governance.py",
+        "scripts/refresh_failure_archive.py",
+        "CHECK_REMOTE_SYNC.cmd",
+    }
+    missing_local_governance = sorted(
+        path for path in local_governance_paths if not (PROJECT_ROOT / path).is_file()
+    )
+    checks.append(
+        GovernanceCheck(
+            "local_governance_files_present",
+            not missing_local_governance,
+            ", ".join(missing_local_governance) or "complete",
+        )
+    )
+    leaked_local_governance = sorted(local_governance_paths.intersection(release_files))
+    checks.append(
+        GovernanceCheck(
+            "local_governance_excluded_from_production",
+            not leaked_local_governance,
+            ", ".join(leaked_local_governance) or "clean",
         )
     )
 

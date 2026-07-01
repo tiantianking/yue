@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from okx_signal_system.research.approved_strategy_manifest import (
+from okx_signal_system.runtime_manifest import (
     ApprovedManifestStatus,
     load_approved_manifest_status,
     strategy_params_from_dict,

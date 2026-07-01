@@ -8,7 +8,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-import system_check as _system_check
+import runtime_check as _runtime_check
 
 
 def evaluate(
@@ -20,8 +20,8 @@ def evaluate(
     authoritative_outbox: dict[str, int] | None = None,
     max_pending: int = 100,
 ):
-    """Backward-compatible evaluator backed by the unified checker."""
-    return _system_check.evaluate_runtime(
+    """Backward-compatible evaluator backed only by the runtime checker."""
+    return _runtime_check.evaluate_runtime(
         status,
         mode=mode,
         max_age_seconds=max_age_seconds,
@@ -32,11 +32,11 @@ def evaluate(
     )
 
 
-evaluate_runtime = _system_check.evaluate_runtime
+evaluate_runtime = _runtime_check.evaluate_runtime
 
 
 def main(argv: list[str] | None = None) -> int:
-    return _system_check.main(["runtime", *(argv if argv is not None else sys.argv[1:])])
+    return _runtime_check.main(["runtime", *(argv if argv is not None else sys.argv[1:])])
 
 
 if __name__ == "__main__":
