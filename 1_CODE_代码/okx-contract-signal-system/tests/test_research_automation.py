@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import sys
@@ -10,6 +11,11 @@ import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _write_json_with_hash(path: Path, payload: dict) -> str:
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _load_system_check():
@@ -43,6 +49,28 @@ def test_future_leak_scan_uses_ast_not_candidate_self_report(tmp_path: Path) -> 
     assert any("negative_shift" in hit for hit in leak_hits)
     assert any("centered_rolling_window" in hit for hit in leak_hits)
     assert any("forward_iloc_offset" in hit for hit in leak_hits)
+
+
+def test_future_leak_scan_blocks_indirect_shift_future_fill_and_forward_join(tmp_path: Path) -> None:
+    module = _load_system_check()
+    leaking = tmp_path / "indirect_leaking.py"
+    leaking.write_text(
+        "import pandas as pd\n"
+        "PERIODS = -1\n"
+        "def signal(left, right):\n"
+        "    shifted = left['close'].shift(PERIODS)\n"
+        "    filled = left['close'].bfill()\n"
+        "    joined = pd.merge_asof(left, right, on='ts', direction='nearest')\n"
+        "    return shifted + filled + joined['value']\n",
+        encoding="utf-8",
+    )
+
+    parsed, hits = module.scan_future_leaks(leaking)
+
+    assert parsed is True
+    assert any("negative_shift" in hit for hit in hits)
+    assert any("future_fill:bfill" in hit for hit in hits)
+    assert any("merge_asof_future_direction:nearest" in hit for hit in hits)
 
 
 def test_parameter_freedom_is_derived_from_parameter_space() -> None:
@@ -227,9 +255,58 @@ def test_single_symbol_candidate_subset_gate_is_allowed_before_pnl(tmp_path: Pat
         "def signal(frame):\n    return frame['close'].shift(1)\n",
         encoding="utf-8",
     )
+    candidate_id = "TEST_BTC_SINGLE_ASSET_MECHANISM"
+    holdout_path = tmp_path / "historical_holdout_manifest.json"
+    holdout_hash = _write_json_with_hash(
+        holdout_path,
+        {
+            "schema": "okx_historical_holdout_manifest_v1",
+            "candidate_id": candidate_id,
+            "locked_before_pnl": True,
+            "opened_count": 0,
+            "months": 8,
+            "start_utc": "2025-11-01T00:00:00Z",
+            "end_utc": "2026-07-01T00:00:00Z",
+            "data_snapshot_sha256": "a" * 64,
+            "split_sha256": "b" * 64,
+        },
+    )
+    trial_path = tmp_path / "family_trial_ledger.json"
+    trial_hash = _write_json_with_hash(
+        trial_path,
+        {
+            "schema": "okx_family_trial_ledger_v1",
+            "complete": True,
+            "trials": [{"candidate_id": candidate_id, "registered_before_pnl": True}],
+        },
+    )
+    point_path = tmp_path / "point_in_time_evidence.json"
+    point_hash = _write_json_with_hash(
+        point_path,
+        {
+            "schema": "okx_point_in_time_evidence_v1",
+            "complete": True,
+            "fields": [
+                {
+                    "name": "test_btc_flow",
+                    "available_at_rule": "Use only records published before the closed signal bar.",
+                    "revision_policy": "frozen_snapshot",
+                }
+            ],
+        },
+    )
+    dependency_path = tmp_path / "code_dependency_manifest.json"
+    dependency_hash = _write_json_with_hash(
+        dependency_path,
+        {
+            "schema": "okx_code_dependency_manifest_v1",
+            "complete": True,
+            "files": [str(code_path)],
+        },
+    )
     candidate = {
         "schema": "okx_pre_pnl_candidate_v2",
-        "candidate_id": "TEST_BTC_SINGLE_ASSET_MECHANISM",
+        "candidate_id": candidate_id,
         "mechanism": {
             "payer": "Predeclared forced BTC seller",
             "direction": "Long BTC after the forced flow completes",
@@ -257,11 +334,55 @@ def test_single_symbol_candidate_subset_gate_is_allowed_before_pnl(tmp_path: Pat
             "local_only": True,
             "closed_only": True,
             "symbols": ["BTC-USDT-SWAP"],
+            "fields": ["test_btc_flow"],
+            "start_utc": "2023-07-01T00:00:00Z",
+            "end_utc": "2026-07-01T00:00:00Z",
         },
         "leakage": {
             "future_returns_opened": False,
             "pnl_opened": False,
             "entry_uses_next_tradable_price": True,
+        },
+        "historical_holdout": {
+            "locked_before_pnl": True,
+            "rules_frozen_before_holdout": True,
+            "months": 8,
+            "start_utc": "2025-11-01T00:00:00Z",
+            "end_utc": "2026-07-01T00:00:00Z",
+            "opened_count": 0,
+            "opened_at_utc": None,
+            "data_snapshot_sha256": "a" * 64,
+            "split_sha256": "b" * 64,
+            "split_manifest_file": str(holdout_path),
+            "split_manifest_sha256": holdout_hash,
+        },
+        "trial_ledger": {
+            "registered_before_pnl": True,
+            "all_family_trials_recorded": True,
+            "family_trial_count": 1,
+            "file": str(trial_path),
+            "sha256": trial_hash,
+        },
+        "point_in_time": {
+            "all_fields_have_available_at": True,
+            "revisions_frozen_or_versioned": True,
+            "no_current_metadata_backfill": True,
+            "signal_after_data_available": True,
+            "execution_after_signal": True,
+            "evidence_file": str(point_path),
+            "evidence_sha256": point_hash,
+        },
+        "outcome_horizon": {
+            "locked_before_pnl": True,
+            "max_holding_bars": 8,
+            "label_horizon_bars": 8,
+            "purge_bars": 8,
+            "embargo_bars": 1,
+        },
+        "code_dependency_manifest": {
+            "complete": True,
+            "file": str(dependency_path),
+            "sha256": dependency_hash,
         },
         "parameter_space": {
             "all_choices_declared_before_pnl": True,
@@ -300,6 +421,97 @@ def test_single_symbol_candidate_subset_gate_is_allowed_before_pnl(tmp_path: Pat
     assert by_name["candidate_symbol_subset_size_allowed"].ok is True
     assert by_name["candidate_symbol_selection_locked_before_pnl"].ok is True
     assert by_name["candidate_symbol_selection_basis_present"].ok is True
+    assert by_name["historical_holdout_precommitted_unopened"].ok is True
+    assert by_name["historical_holdout_window_6_to_10_months"].ok is True
+    assert by_name["historical_holdout_manifest_hash_verified"].ok is True
+    assert by_name["historical_holdout_manifest_content_verified"].ok is True
+    assert by_name["family_trial_ledger_hash_verified"].ok is True
+    assert by_name["family_trial_ledger_content_verified"].ok is True
+    assert by_name["point_in_time_evidence_hash_verified"].ok is True
+    assert by_name["point_in_time_evidence_content_verified"].ok is True
+    assert by_name["purge_covers_complete_outcome_horizon"].ok is True
+    assert by_name["code_dependency_manifest_hash_verified"].ok is True
+    assert by_name["code_dependency_manifest_content_verified"].ok is True
+
+
+def test_candidate_gate_blocks_short_purge_and_reopened_holdout(tmp_path: Path) -> None:
+    module = _load_system_check()
+    code_path = tmp_path / "signal.py"
+    code_path.write_text("def signal(frame):\n    return frame['close'].shift(1)\n", encoding="utf-8")
+    candidate = {
+        "schema": "okx_pre_pnl_candidate_v2",
+        "candidate_id": "BLOCK_BAD_INTEGRITY",
+        "mechanism": {"payer": "x", "direction": "long", "observable_proxy": "field"},
+        "family": {
+            "core_signal": "unique_test",
+            "direction": "long",
+            "holding_period_bars": 12,
+            "rebalance_bars": 12,
+            "selection": "fixed",
+            "universe": "fixed",
+            "features": ["field"],
+        },
+        "universe_selection": {
+            "selection_locked_before_pnl": True,
+            "outcome_based_selection": False,
+            "legacy_outcomes_used_to_choose_subset": False,
+            "selection_basis": "intrinsic",
+        },
+        "data": {
+            "exchange": "OKX",
+            "cross_exchange": False,
+            "local_only": True,
+            "closed_only": True,
+            "symbols": ["BTC-USDT-SWAP"],
+            "fields": ["field"],
+            "start_utc": "2023-07-01T00:00:00Z",
+            "end_utc": "2026-07-01T00:00:00Z",
+        },
+        "leakage": {"future_returns_opened": False, "pnl_opened": False, "entry_uses_next_tradable_price": True},
+        "historical_holdout": {
+            "locked_before_pnl": True,
+            "rules_frozen_before_holdout": True,
+            "months": 8,
+            "start_utc": "2025-11-01T00:00:00Z",
+            "end_utc": "2026-07-01T00:00:00Z",
+            "opened_count": 1,
+            "opened_at_utc": "2026-06-01T00:00:00Z",
+        },
+        "outcome_horizon": {
+            "locked_before_pnl": True,
+            "max_holding_bars": 12,
+            "label_horizon_bars": 12,
+            "purge_bars": 2,
+            "embargo_bars": 1,
+        },
+        "parameter_space": {
+            "all_choices_declared_before_pnl": True,
+            "declared_free_parameters": 0,
+            "declared_combinations": 1,
+            "parameters": [],
+        },
+        "robustness_protocol": {
+            "schema": "okx_robustness_screen_protocol_v1",
+            "random_time_trials": 500,
+            "random_time_alpha": 0.05,
+            "entry_delay_bars": 1,
+            "minimum_neighbor_variants": 3,
+            "minimum_positive_neighbor_ratio": 2 / 3,
+            "portfolio_increment_required": True,
+            "locked_before_pnl": True,
+            "evidence_files": ["falsification_trials.csv", "parameter_neighborhood.csv", "portfolio_increment.csv"],
+        },
+        "representation_invariance_passed": True,
+        "measurement_semantics_passed": True,
+        "code_files": [str(code_path)],
+    }
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+
+    by_name = {item.name: item for item in module.run_candidate_gate(candidate_path)}
+
+    assert by_name["historical_holdout_precommitted_unopened"].ok is False
+    assert by_name["purge_covers_complete_outcome_horizon"].ok is False
 
 
 def test_small_frozen_subset_does_not_fail_cross_symbol_contribution_gate() -> None:

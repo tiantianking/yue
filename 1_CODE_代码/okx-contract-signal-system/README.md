@@ -50,7 +50,7 @@ D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe scripts\system_check.py research
   --mark-researched
 ```
 
-The gate derives parameter freedom, scans Python AST for future leakage, compares the structured family signature against the registry and archived failures, regenerates three cost-stress scenarios, checks symbol/month/top-trade concentration, and refuses a new study until sufficient new data exists. It never promotes parameters automatically.
+The gate derives parameter freedom, scans Python AST for future leakage, compares the structured family signature against the registry and archived failures, verifies a hashed 6–10 month sealed holdout, requires a complete family trial ledger, point-in-time field evidence, a complete code-dependency manifest, and purge coverage of the full outcome horizon, then regenerates three cost-stress scenarios and checks symbol/month/top-trade concentration. Missing evidence, a reopened holdout, or unresolved leakage blocks the candidate. It never promotes parameters automatically.
 
 Change governance:
 

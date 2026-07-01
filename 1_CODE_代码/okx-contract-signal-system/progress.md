@@ -1,3 +1,22 @@
+## 2026-07-01 - Task: v3.56.36 anti-overfit and future-leakage hard gate
+### What was done
+- Converted the zero-tolerance research rule into blocking pre-PnL candidate checks.
+- Required a hashed 6–10 month sealed historical holdout, defaulting to 8 months, with zero prior opens and a matching split manifest.
+- Required a complete family trial ledger, point-in-time field evidence, a complete code dependency manifest, and SHA256 verification of every evidence file.
+- Required purge to cover the declared maximum holding and label horizon, with a positive embargo.
+- Expanded AST leakage scanning to indirect negative shifts, backward fills, forward/nearest `merge_asof`, and backward/bidirectional interpolation.
+- Kept H22, V357, H27, runtime signals, forward ledgers, and SIGNAL_ONLY boundaries unchanged.
+- Permanent new-session reminder: unresolved overfitting or future-leakage risk means reject; holdout opens once only; no post-PnL rescue; H22 and V357 require real forward confirmation.
+### Testing
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests/test_research_automation.py -q` -> `18 passed`.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe scripts/system_check.py source` -> passed.
+- Full `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest -q` -> passed; only the repository's existing skipped tests remained skipped.
+- `python -m compileall scripts/system_check.py tests/test_research_automation.py src/okx_signal_system` -> passed.
+- `git diff --check` -> passed with line-ending warnings only.
+### Notes
+- Modified files: `scripts/system_check.py`, `config/research_candidates/PRE_PNL_CANDIDATE_TEMPLATE.json`, `tests/test_research_automation.py`, `README.md`, `docs/RESEARCH_ROBUSTNESS_SCREEN_CN.md`, `docs/PROJECT_OVERVIEW_CN.md`, version metadata, release manifest, `docs/V3.56.36_RELEASE_CN.md`, and `progress.md`.
+- Rollback: revert the v3.56.36 files listed above; do not modify existing H22/V357/H27 ledgers or frozen protocols.
+
 ## 2026-07-01 - Task: v3.56.35 desktop dashboard connection repair
 ### What was done
 - Reproduced the failure state: the main Python signal process was running, but `127.0.0.1:3001` had no listener and the browser therefore showed a connection failure.

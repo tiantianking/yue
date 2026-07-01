@@ -62,7 +62,22 @@ FUTURE_LEAK_PATTERNS = (
     ".diff(-",
     "center=true",
     "center = true",
+    ".bfill(",
+    ".backfill(",
+    "method=\"bfill\"",
+    "method='bfill'",
+    "direction=\"forward\"",
+    "direction='forward'",
+    "direction=\"nearest\"",
+    "direction='nearest'",
 )
+
+MIN_HOLDOUT_MONTHS = 6
+DEFAULT_HOLDOUT_MONTHS = 8
+MAX_HOLDOUT_MONTHS = 10
+MIN_HOLDOUT_DAYS = 170
+MAX_HOLDOUT_DAYS = 320
+SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
 
 REQUIRED_RESEARCH_CHECKS = {
     "formal_parameter_grid_complete",
@@ -589,6 +604,11 @@ def run_source_audit() -> list[CheckResult]:
             if isinstance(template.get("universe_selection"), dict)
             else {}
         )
+        template_holdout = template.get("historical_holdout") if isinstance(template.get("historical_holdout"), dict) else {}
+        template_trial_ledger = template.get("trial_ledger") if isinstance(template.get("trial_ledger"), dict) else {}
+        template_point_in_time = template.get("point_in_time") if isinstance(template.get("point_in_time"), dict) else {}
+        template_outcome_horizon = template.get("outcome_horizon") if isinstance(template.get("outcome_horizon"), dict) else {}
+        template_dependency_manifest = template.get("code_dependency_manifest") if isinstance(template.get("code_dependency_manifest"), dict) else {}
         template_ok = bool(
             template.get("schema") == "okx_pre_pnl_candidate_v2"
             and template_gate.get("min_symbols") == 1
@@ -596,10 +616,19 @@ def run_source_audit() -> list[CheckResult]:
             and isinstance(template_data.get("symbols"), list)
             and template_selection.get("selection_locked_before_pnl") is True
             and template_selection.get("outcome_based_selection") is False
+            and template_holdout.get("locked_before_pnl") is True
+            and template_holdout.get("months") == DEFAULT_HOLDOUT_MONTHS
+            and template_holdout.get("opened_count") == 0
+            and template_trial_ledger.get("all_family_trials_recorded") is True
+            and template_point_in_time.get("all_fields_have_available_at") is True
+            and template_outcome_horizon.get("locked_before_pnl") is True
+            and template_dependency_manifest.get("complete") is True
         )
         template_detail = (
             f"schema={template.get('schema')} min_symbols={template_gate.get('min_symbols')} "
-            f"coverage={template_gate.get('coverage_ratio')}"
+            f"coverage={template_gate.get('coverage_ratio')} holdout_months={template_holdout.get('months')} "
+            f"trial_ledger={template_trial_ledger.get('all_family_trials_recorded')} "
+            f"point_in_time={template_point_in_time.get('all_fields_have_available_at')}"
         )
     except Exception as exc:
         template_ok = False
@@ -671,6 +700,54 @@ def _candidate_code_files(candidate: dict[str, Any], candidate_path: Path) -> li
     return out
 
 
+def _candidate_relative_path(raw: Any, candidate_path: Path) -> Path | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    path = Path(text)
+    if not path.is_absolute():
+        path = (candidate_path.parent / path).resolve()
+    return path
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _valid_sha256(value: Any) -> bool:
+    return bool(SHA256_PATTERN.fullmatch(str(value or "").strip()))
+
+
+def _hashed_evidence_status(raw_path: Any, declared_hash: Any, candidate_path: Path) -> tuple[bool, str, Path | None]:
+    path = _candidate_relative_path(raw_path, candidate_path)
+    if path is None:
+        return False, "missing_path", None
+    if not path.is_file():
+        return False, f"missing_file:{path}", path
+    declared = str(declared_hash or "").strip().lower()
+    if not _valid_sha256(declared):
+        return False, f"invalid_sha256:{declared}", path
+    actual = _file_sha256(path)
+    return actual == declared, f"path={path} declared={declared} actual={actual}", path
+
+
+def _parse_utc_timestamp(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
 def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -698,9 +775,32 @@ def _call_name(node: ast.Call) -> str:
 class _FutureLeakVisitor(ast.NodeVisitor):
     def __init__(self) -> None:
         self.hits: list[str] = []
+        self.numeric_names: dict[str, float] = {}
 
     def _hit(self, node: ast.AST, reason: str) -> None:
         self.hits.append(f"line={getattr(node, 'lineno', '?')}:{reason}")
+
+    def _resolved_number(self, node: ast.AST | None) -> float | None:
+        literal = _literal_number(node)
+        if literal is not None:
+            return literal
+        if isinstance(node, ast.Name):
+            return self.numeric_names.get(node.id)
+        return None
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        value = _literal_number(node.value)
+        if value is not None:
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    self.numeric_names[target.id] = value
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        value = _literal_number(node.value)
+        if value is not None and isinstance(node.target, ast.Name):
+            self.numeric_names[node.target.id] = value
+        self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
         name = _call_name(node)
@@ -709,13 +809,33 @@ class _FutureLeakVisitor(ast.NodeVisitor):
             for keyword in node.keywords:
                 if keyword.arg in {"periods", "period"}:
                     periods_node = keyword.value
-            periods = _literal_number(periods_node)
+            periods = self._resolved_number(periods_node)
             if periods is not None and periods < 0:
                 self._hit(node, f"negative_{name}({periods:g})")
         if name == "rolling":
             for keyword in node.keywords:
                 if keyword.arg == "center" and isinstance(keyword.value, ast.Constant) and keyword.value.value is True:
                     self._hit(node, "centered_rolling_window")
+        if name in {"bfill", "backfill"}:
+            self._hit(node, f"future_fill:{name}")
+        if name == "fillna":
+            for keyword in node.keywords:
+                if keyword.arg == "method" and isinstance(keyword.value, ast.Constant):
+                    method = str(keyword.value.value).strip().lower()
+                    if method in {"bfill", "backfill"}:
+                        self._hit(node, f"future_fill:fillna_{method}")
+        if name == "merge_asof":
+            for keyword in node.keywords:
+                if keyword.arg == "direction" and isinstance(keyword.value, ast.Constant):
+                    direction = str(keyword.value.value).strip().lower()
+                    if direction in {"forward", "nearest"}:
+                        self._hit(node, f"merge_asof_future_direction:{direction}")
+        if name == "interpolate":
+            for keyword in node.keywords:
+                if keyword.arg == "limit_direction" and isinstance(keyword.value, ast.Constant):
+                    direction = str(keyword.value.value).strip().lower()
+                    if direction in {"backward", "both"}:
+                        self._hit(node, f"future_interpolation:{direction}")
         if name in {"lead", "future", "lookahead"}:
             self._hit(node, f"suspicious_call:{name}")
         self.generic_visit(node)
@@ -751,6 +871,132 @@ def scan_future_leaks(path: Path) -> tuple[bool, list[str]]:
         if pattern in lowered and not any(pattern in hit for hit in visitor.hits):
             visitor.hits.append(f"text_pattern:{pattern}")
     return True, sorted(set(visitor.hits))
+
+
+def _trial_ledger_status(path: Path | None, candidate_id: str, declared_count: Any) -> tuple[bool, str]:
+    if path is None or not path.is_file():
+        return False, f"missing_trial_ledger:{path}"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return False, f"invalid_trial_ledger:{exc}"
+    if not isinstance(payload, dict):
+        return False, "trial_ledger_not_object"
+    trials = payload.get("trials")
+    if not isinstance(trials, list):
+        return False, "trial_ledger_trials_missing"
+    ids = [str(item.get("candidate_id", "")).strip() for item in trials if isinstance(item, dict)]
+    try:
+        expected = int(declared_count)
+    except (TypeError, ValueError):
+        return False, f"invalid_declared_trial_count:{declared_count}"
+    all_registered_before_pnl = all(
+        isinstance(item, dict) and item.get("registered_before_pnl") is True
+        for item in trials
+    )
+    ok = bool(
+        payload.get("schema") == "okx_family_trial_ledger_v1"
+        and payload.get("complete") is True
+        and expected == len(trials)
+        and candidate_id in ids
+        and all(bool(item) for item in ids)
+        and all_registered_before_pnl
+    )
+    return ok, f"schema={payload.get('schema')} complete={payload.get('complete')} declared={expected} actual={len(trials)} candidate_present={candidate_id in ids} all_registered_before_pnl={all_registered_before_pnl}"
+
+
+def _point_in_time_evidence_status(path: Path | None, required_fields: list[str]) -> tuple[bool, str]:
+    if path is None or not path.is_file():
+        return False, f"missing_point_in_time_evidence:{path}"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return False, f"invalid_point_in_time_evidence:{exc}"
+    if not isinstance(payload, dict):
+        return False, "point_in_time_evidence_not_object"
+    fields = payload.get("fields")
+    if not isinstance(fields, list):
+        return False, "point_in_time_fields_missing"
+    valid_policies = {"non_revising", "versioned", "frozen_snapshot"}
+    rows = [item for item in fields if isinstance(item, dict)]
+    names = {str(item.get("name", "")).strip() for item in rows if str(item.get("name", "")).strip()}
+    row_quality = all(
+        _meaningful_text(item.get("available_at_rule"))
+        and str(item.get("revision_policy", "")).strip() in valid_policies
+        for item in rows
+    )
+    required = {str(item).strip() for item in required_fields if str(item).strip()}
+    ok = bool(
+        payload.get("schema") == "okx_point_in_time_evidence_v1"
+        and payload.get("complete") is True
+        and required
+        and required.issubset(names)
+        and row_quality
+    )
+    return ok, f"schema={payload.get('schema')} complete={payload.get('complete')} required={sorted(required)} covered={sorted(names)} row_quality={row_quality}"
+
+
+def _dependency_manifest_status(path: Path | None, code_files: list[Path]) -> tuple[bool, str]:
+    if path is None or not path.is_file():
+        return False, f"missing_dependency_manifest:{path}"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return False, f"invalid_dependency_manifest:{exc}"
+    if not isinstance(payload, dict):
+        return False, "dependency_manifest_not_object"
+    raw_files = payload.get("files")
+    if not isinstance(raw_files, list):
+        return False, "dependency_manifest_files_missing"
+    declared: set[Path] = set()
+    for raw in raw_files:
+        item = Path(str(raw))
+        if not item.is_absolute():
+            item = (path.parent / item).resolve()
+        declared.add(item)
+    expected = {item.resolve() for item in code_files}
+    missing = sorted(str(item) for item in expected.difference(declared))
+    nonexistent = sorted(str(item) for item in declared if not item.is_file())
+    ok = bool(
+        payload.get("schema") == "okx_code_dependency_manifest_v1"
+        and payload.get("complete") is True
+        and expected
+        and not missing
+        and not nonexistent
+    )
+    return ok, f"schema={payload.get('schema')} complete={payload.get('complete')} expected={len(expected)} declared={len(declared)} missing={missing} nonexistent={nonexistent}"
+
+
+def _holdout_manifest_status(
+    path: Path | None,
+    *,
+    candidate_id: str,
+    months: Any,
+    start_utc: Any,
+    end_utc: Any,
+    data_snapshot_sha256: Any,
+    split_sha256: Any,
+) -> tuple[bool, str]:
+    if path is None or not path.is_file():
+        return False, f"missing_holdout_manifest:{path}"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return False, f"invalid_holdout_manifest:{exc}"
+    if not isinstance(payload, dict):
+        return False, "holdout_manifest_not_object"
+    ok = bool(
+        payload.get("schema") == "okx_historical_holdout_manifest_v1"
+        and payload.get("candidate_id") == candidate_id
+        and payload.get("locked_before_pnl") is True
+        and payload.get("opened_count") == 0
+        and payload.get("months") == months
+        and payload.get("start_utc") == start_utc
+        and payload.get("end_utc") == end_utc
+        and payload.get("data_snapshot_sha256") == data_snapshot_sha256
+        and payload.get("split_sha256") == split_sha256
+    )
+    return ok, f"schema={payload.get('schema')} candidate={payload.get('candidate_id')} locked={payload.get('locked_before_pnl')} opened_count={payload.get('opened_count')} months={payload.get('months')} start={payload.get('start_utc')} end={payload.get('end_utc')} data_snapshot_match={payload.get('data_snapshot_sha256') == data_snapshot_sha256} split_match={payload.get('split_sha256') == split_sha256}"
 
 
 def _parameter_choice_count(parameter: dict[str, Any]) -> tuple[int, str | None]:
@@ -1098,9 +1344,16 @@ def run_candidate_gate(candidate_path: Path, *, registry_path: Path = DEFAULT_FA
     except Exception as exc:
         return [CheckResult("research", "candidate_json_valid", False, str(exc))]
 
+    candidate_id = str(candidate.get("candidate_id", "")).strip()
     mechanism = candidate.get("mechanism") if isinstance(candidate.get("mechanism"), dict) else {}
+    family = candidate.get("family") if isinstance(candidate.get("family"), dict) else {}
     data = candidate.get("data") if isinstance(candidate.get("data"), dict) else {}
     leakage = candidate.get("leakage") if isinstance(candidate.get("leakage"), dict) else {}
+    historical_holdout = candidate.get("historical_holdout") if isinstance(candidate.get("historical_holdout"), dict) else {}
+    trial_ledger = candidate.get("trial_ledger") if isinstance(candidate.get("trial_ledger"), dict) else {}
+    point_in_time = candidate.get("point_in_time") if isinstance(candidate.get("point_in_time"), dict) else {}
+    outcome_horizon = candidate.get("outcome_horizon") if isinstance(candidate.get("outcome_horizon"), dict) else {}
+    dependency_manifest = candidate.get("code_dependency_manifest") if isinstance(candidate.get("code_dependency_manifest"), dict) else {}
     universe_selection = (
         candidate.get("universe_selection")
         if isinstance(candidate.get("universe_selection"), dict)
@@ -1133,6 +1386,81 @@ def run_candidate_gate(candidate_path: Path, *, registry_path: Path = DEFAULT_FA
     parameter_audit = audit_parameter_space(candidate)
     robustness_protocol_ok, robustness_protocol_detail = frozen_protocol_ok(
         candidate.get("robustness_protocol")
+    )
+    data_fields_raw = data.get("fields")
+    data_fields = [str(item).strip() for item in data_fields_raw if str(item).strip()] if isinstance(data_fields_raw, list) else []
+    code_files = _candidate_code_files(candidate, candidate_path)
+
+    holdout_start = _parse_utc_timestamp(historical_holdout.get("start_utc"))
+    holdout_end = _parse_utc_timestamp(historical_holdout.get("end_utc"))
+    data_start = _parse_utc_timestamp(data.get("start_utc"))
+    data_end = _parse_utc_timestamp(data.get("end_utc"))
+    try:
+        holdout_months = int(historical_holdout.get("months"))
+    except (TypeError, ValueError):
+        holdout_months = 0
+    holdout_days = (holdout_end - holdout_start).total_seconds() / 86400.0 if holdout_start and holdout_end else 0.0
+    expected_holdout_days = holdout_months * 30.4375
+    holdout_window_ok = bool(
+        MIN_HOLDOUT_MONTHS <= holdout_months <= MAX_HOLDOUT_MONTHS
+        and MIN_HOLDOUT_DAYS <= holdout_days <= MAX_HOLDOUT_DAYS
+        and abs(holdout_days - expected_holdout_days) <= 20.0
+        and holdout_start
+        and holdout_end
+        and data_start
+        and data_end
+        and data_start < holdout_start < holdout_end <= data_end
+    )
+    holdout_hash_ok, holdout_hash_detail, holdout_manifest_path = _hashed_evidence_status(
+        historical_holdout.get("split_manifest_file"),
+        historical_holdout.get("split_manifest_sha256"),
+        candidate_path,
+    )
+    holdout_manifest_ok, holdout_manifest_detail = _holdout_manifest_status(
+        holdout_manifest_path,
+        candidate_id=candidate_id,
+        months=historical_holdout.get("months"),
+        start_utc=historical_holdout.get("start_utc"),
+        end_utc=historical_holdout.get("end_utc"),
+        data_snapshot_sha256=historical_holdout.get("data_snapshot_sha256"),
+        split_sha256=historical_holdout.get("split_sha256"),
+    )
+
+    trial_hash_ok, trial_hash_detail, trial_path = _hashed_evidence_status(
+        trial_ledger.get("file"), trial_ledger.get("sha256"), candidate_path
+    )
+    trial_content_ok, trial_content_detail = _trial_ledger_status(
+        trial_path, candidate_id, trial_ledger.get("family_trial_count")
+    )
+
+    point_hash_ok, point_hash_detail, point_path = _hashed_evidence_status(
+        point_in_time.get("evidence_file"), point_in_time.get("evidence_sha256"), candidate_path
+    )
+    point_content_ok, point_content_detail = _point_in_time_evidence_status(point_path, data_fields)
+
+    dependency_hash_ok, dependency_hash_detail, dependency_path = _hashed_evidence_status(
+        dependency_manifest.get("file"), dependency_manifest.get("sha256"), candidate_path
+    )
+    dependency_content_ok, dependency_content_detail = _dependency_manifest_status(dependency_path, code_files)
+
+    def _positive_int(value: Any) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return 0
+        return parsed if parsed > 0 else 0
+
+    max_holding_bars = _positive_int(outcome_horizon.get("max_holding_bars"))
+    label_horizon_bars = _positive_int(outcome_horizon.get("label_horizon_bars"))
+    purge_bars = _positive_int(outcome_horizon.get("purge_bars"))
+    embargo_bars = _positive_int(outcome_horizon.get("embargo_bars"))
+    family_holding_bars = _positive_int(family.get("holding_period_bars"))
+    outcome_horizon_ok = bool(
+        outcome_horizon.get("locked_before_pnl") is True
+        and max_holding_bars >= family_holding_bars > 0
+        and label_horizon_bars >= max_holding_bars
+        and purge_bars >= label_horizon_bars
+        and embargo_bars > 0
     )
 
     results = [
@@ -1191,6 +1519,76 @@ def run_candidate_gate(candidate_path: Path, *, registry_path: Path = DEFAULT_FA
         ),
         CheckResult(
             "research",
+            "historical_holdout_precommitted_unopened",
+            historical_holdout.get("locked_before_pnl") is True
+            and historical_holdout.get("rules_frozen_before_holdout") is True
+            and historical_holdout.get("opened_count") == 0
+            and historical_holdout.get("opened_at_utc") is None,
+            json.dumps(historical_holdout, ensure_ascii=False),
+        ),
+        CheckResult(
+            "research",
+            "historical_holdout_window_6_to_10_months",
+            holdout_window_ok,
+            f"months={holdout_months} days={holdout_days:.2f} expected_days={expected_holdout_days:.2f} data_start={data_start} holdout_start={holdout_start} holdout_end={holdout_end} data_end={data_end}",
+        ),
+        CheckResult(
+            "research",
+            "historical_holdout_commitment_hashes_present",
+            _valid_sha256(historical_holdout.get("data_snapshot_sha256"))
+            and _valid_sha256(historical_holdout.get("split_sha256")),
+            f"data_snapshot_sha256={historical_holdout.get('data_snapshot_sha256')} split_sha256={historical_holdout.get('split_sha256')}",
+        ),
+        CheckResult(
+            "research",
+            "historical_holdout_manifest_hash_verified",
+            holdout_hash_ok,
+            holdout_hash_detail,
+        ),
+        CheckResult(
+            "research",
+            "historical_holdout_manifest_content_verified",
+            holdout_manifest_ok,
+            holdout_manifest_detail,
+        ),
+        CheckResult(
+            "research",
+            "complete_family_trial_ledger_declared",
+            trial_ledger.get("all_family_trials_recorded") is True
+            and trial_ledger.get("registered_before_pnl") is True
+            and _positive_int(trial_ledger.get("family_trial_count")) > 0,
+            json.dumps(trial_ledger, ensure_ascii=False),
+        ),
+        CheckResult("research", "family_trial_ledger_hash_verified", trial_hash_ok, trial_hash_detail),
+        CheckResult("research", "family_trial_ledger_content_verified", trial_content_ok, trial_content_detail),
+        CheckResult(
+            "research",
+            "point_in_time_policy_declared",
+            point_in_time.get("all_fields_have_available_at") is True
+            and point_in_time.get("revisions_frozen_or_versioned") is True
+            and point_in_time.get("no_current_metadata_backfill") is True
+            and point_in_time.get("signal_after_data_available") is True
+            and point_in_time.get("execution_after_signal") is True,
+            json.dumps(point_in_time, ensure_ascii=False),
+        ),
+        CheckResult("research", "point_in_time_evidence_hash_verified", point_hash_ok, point_hash_detail),
+        CheckResult("research", "point_in_time_evidence_content_verified", point_content_ok, point_content_detail),
+        CheckResult(
+            "research",
+            "purge_covers_complete_outcome_horizon",
+            outcome_horizon_ok,
+            f"family_holding={family_holding_bars} max_holding={max_holding_bars} label_horizon={label_horizon_bars} purge={purge_bars} embargo={embargo_bars}",
+        ),
+        CheckResult(
+            "research",
+            "code_dependency_manifest_declared_complete",
+            dependency_manifest.get("complete") is True,
+            json.dumps(dependency_manifest, ensure_ascii=False),
+        ),
+        CheckResult("research", "code_dependency_manifest_hash_verified", dependency_hash_ok, dependency_hash_detail),
+        CheckResult("research", "code_dependency_manifest_content_verified", dependency_content_ok, dependency_content_detail),
+        CheckResult(
+            "research",
             "automatic_parameter_freedom",
             parameter_audit.bounded,
             f"free={parameter_audit.free_parameters}/{MAX_FREE_PARAMETERS} combinations={parameter_audit.combinations}/{MAX_PARAMETER_COMBINATIONS} problems={list(parameter_audit.problems)}",
@@ -1213,7 +1611,6 @@ def run_candidate_gate(candidate_path: Path, *, registry_path: Path = DEFAULT_FA
         )
     )
 
-    code_files = _candidate_code_files(candidate, candidate_path)
     missing = [str(path) for path in code_files if not path.is_file()]
     results.append(
         CheckResult(

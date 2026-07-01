@@ -39,6 +39,47 @@
     "end_utc": null,
     "closed_only": true
   },
+  "historical_holdout": {
+    "locked_before_pnl": true,
+    "rules_frozen_before_holdout": true,
+    "months": 8,
+    "start_utc": null,
+    "end_utc": null,
+    "opened_count": 0,
+    "opened_at_utc": null,
+    "data_snapshot_sha256": "REPLACE_WITH_64_HEX_SHA256",
+    "split_sha256": "REPLACE_WITH_64_HEX_SHA256",
+    "split_manifest_file": "historical_holdout_manifest.json",
+    "split_manifest_sha256": "REPLACE_WITH_64_HEX_SHA256"
+  },
+  "trial_ledger": {
+    "registered_before_pnl": true,
+    "all_family_trials_recorded": true,
+    "family_trial_count": 1,
+    "file": "family_trial_ledger.json",
+    "sha256": "REPLACE_WITH_64_HEX_SHA256"
+  },
+  "point_in_time": {
+    "all_fields_have_available_at": true,
+    "revisions_frozen_or_versioned": true,
+    "no_current_metadata_backfill": true,
+    "signal_after_data_available": true,
+    "execution_after_signal": true,
+    "evidence_file": "point_in_time_evidence.json",
+    "evidence_sha256": "REPLACE_WITH_64_HEX_SHA256"
+  },
+  "outcome_horizon": {
+    "locked_before_pnl": true,
+    "max_holding_bars": 0,
+    "label_horizon_bars": 0,
+    "purge_bars": 0,
+    "embargo_bars": 0
+  },
+  "code_dependency_manifest": {
+    "complete": true,
+    "file": "code_dependency_manifest.json",
+    "sha256": "REPLACE_WITH_64_HEX_SHA256"
+  },
   "data_gate": {
     "min_symbols": 1,
     "coverage_ratio": 1.0,
