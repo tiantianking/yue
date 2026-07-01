@@ -1,3 +1,20 @@
+## 2026-07-01 - Task: v3.56.35 desktop dashboard connection repair
+### What was done
+- Reproduced the failure state: the main Python signal process was running, but `127.0.0.1:3001` had no listener and the browser therefore showed a connection failure.
+- Changed the desktop launcher to prefer the project-local Next.js CLI through `node.exe`, bypassing the Windows `npm.cmd` shim that could fail silently.
+- Added an npm fallback, port-readiness polling, early-exit reporting, and a 20-second startup timeout so the browser opens only after the dashboard is actually ready.
+- Added three-attempt retry handling for transient 15-minute closed-candle REST failures so one symbol's temporary network error does not immediately stop startup monitoring.
+- Kept strategy, signal, data, backtest, forward-acceptance, and SIGNAL_ONLY boundaries unchanged.
+### Testing
+- Direct local Next.js CLI startup reached `http://127.0.0.1:3001` and reported ready.
+- `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest tests/test_desktop_runtime.py tests/test_release_safety.py -q` -> `51 passed`.
+- Full `D:\JIAOYI-CX\LOCAL_DEPS\venv\Scripts\python.exe -m pytest -q` -> passed after the local runtime cache refreshed.
+- Runtime restart verification: Dashboard root/API/candle endpoints returned HTTP 200; 15-minute backfill was complete for 21/21 symbols; OKX WebSocket connected with 21 subscriptions; latest scan status returned `running` with no error.
+- Added regression coverage for direct local Next.js launch, npm fallback, and transient 15-minute backfill retries.
+### Notes
+- Modified files: `gui.py`, `tests/test_desktop_runtime.py`, `pyproject.toml`, `src/okx_signal_system/__init__.py`, release metadata/manifests, `docs/V3.56.35_RELEASE_CN.md`, and `progress.md`.
+- Rollback: revert this entry and the listed v3.56.35 dashboard-launch files.
+
 ## 2026-06-16 - Task: v3.40 focused regression tests for execution safety and signal quality
 ### What was done
 - Added focused regression coverage for manual-confirmation-only auto-stop behavior, reduce-only order propagation, explicit TP/SL safety handling, lifecycle idempotency/stable persistence, and labeler/execution simulator consistency.

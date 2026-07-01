@@ -84,6 +84,48 @@ def test_runtime_health_reports_stale_dashboard_5m_backfill_as_warning(tmp_path,
     assert by_name["dashboard_5m_symbol_coverage"].ok is True
 
 
+def test_gui_closed_backfill_retries_transient_symbol_failures(monkeypatch) -> None:
+    import gui
+    from okx_signal_system.data import closed_backfill
+
+    captured = {}
+    updates = []
+
+    class FakeService:
+        def __init__(self, symbols, **kwargs):
+            captured["symbols"] = list(symbols)
+            captured.update(kwargs)
+
+        def run_once(self):
+            row = SimpleNamespace(
+                status="passed",
+                inst_id="BTC-USDT-SWAP",
+                missing_closed_bars=0,
+                added_rows=0,
+            )
+            return SimpleNamespace(
+                all_complete=True,
+                symbols_checked=1,
+                expected_latest_closed="2026-07-01T04:30:00+00:00",
+                symbols=[row],
+                write_failures=0,
+            )
+
+    monkeypatch.setattr(closed_backfill, "ClosedCandleBackfillService", FakeService)
+    dummy = SimpleNamespace(
+        _watched_symbols=["BTC-USDT-SWAP"],
+        api=SimpleNamespace(timeframe=SimpleNamespace(key="15m"), dataset="okx_15m"),
+        _update_runtime_module_status=lambda *args, **kwargs: updates.append((args, kwargs)),
+    )
+
+    status = gui.OKXSignalGUI._run_closed_backfill_once(dummy)
+
+    assert status.all_complete
+    assert captured["max_symbol_attempts"] == 3
+    assert captured["retry_delay_seconds"] == 1.0
+    assert updates[0][0] == ("closed_kline_backfill", "healthy")
+
+
 def test_gui_dashboard_5m_backfill_uses_latest_window_mode(monkeypatch) -> None:
     import gui
     from okx_signal_system.data import closed_backfill
@@ -128,6 +170,40 @@ def test_gui_dashboard_5m_backfill_uses_latest_window_mode(monkeypatch) -> None:
     assert captured["retry_delay_seconds"] == 1.0
     assert updates[0][0] == ("dashboard_5m_backfill", "healthy")
     assert "asyncio.create_task(self._dashboard_5m_backfill_loop())" in inspect.getsource(gui.OKXSignalGUI)
+
+
+def test_dashboard_launch_command_prefers_local_next_cli(tmp_path, monkeypatch) -> None:
+    import gui
+
+    dashboard_dir = tmp_path / "dashboard"
+    next_cli = dashboard_dir / "node_modules" / "next" / "dist" / "bin" / "next"
+    next_cli.parent.mkdir(parents=True)
+    next_cli.write_text("", encoding="utf-8")
+    monkeypatch.setattr(gui.sys, "platform", "win32")
+    monkeypatch.setattr(gui.shutil, "which", lambda name: "C:/node/node.exe" if name == "node.exe" else None)
+
+    assert gui._dashboard_launch_command(dashboard_dir) == [
+        "C:/node/node.exe",
+        str(next_cli),
+        "dev",
+        "--hostname",
+        "127.0.0.1",
+        "--port",
+        "3001",
+    ]
+
+
+def test_dashboard_launch_command_falls_back_to_npm(tmp_path, monkeypatch) -> None:
+    import gui
+
+    monkeypatch.setattr(gui.sys, "platform", "win32")
+    monkeypatch.setattr(
+        gui.shutil,
+        "which",
+        lambda name: "C:/node/npm.cmd" if name == "npm.cmd" else None,
+    )
+
+    assert gui._dashboard_launch_command(tmp_path) == ["C:/node/npm.cmd", "run", "dev:local"]
 
 
 def test_gui_runtime_dependencies_import() -> None:

@@ -12,6 +12,7 @@ import logging
 import socket
 import subprocess
 import webbrowser
+import shutil
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -76,6 +77,27 @@ def _symbol_panel_title(symbol_count: int, *, degraded: bool = False) -> str:
 
 def _symbol_list_height(symbol_count: int) -> int:
     return min(10, max(4, int(symbol_count)))
+
+
+def _dashboard_launch_command(dashboard_dir: Path) -> list[str]:
+    """Prefer the local Next CLI directly so Windows cmd shims cannot swallow startup."""
+    node_cmd = shutil.which("node.exe" if sys.platform == "win32" else "node")
+    next_cli = dashboard_dir / "node_modules" / "next" / "dist" / "bin" / "next"
+    if node_cmd and next_cli.is_file():
+        return [
+            node_cmd,
+            str(next_cli),
+            "dev",
+            "--hostname",
+            DASHBOARD_HOST,
+            "--port",
+            str(DASHBOARD_PORT),
+        ]
+
+    npm_cmd = shutil.which("npm.cmd" if sys.platform == "win32" else "npm")
+    if npm_cmd:
+        return [npm_cmd, "run", "dev:local"]
+    raise FileNotFoundError("未找到可用的 Node.js/npm，无法启动面板")
 
 
 def get_resource_path(relative_path):
@@ -371,6 +393,8 @@ class OKXSignalGUI:
             settle_seconds=60,
             output_path=project_paths().output_dir / "closed_kline_backfill_status.json",
             fetch_limit=300,
+            max_symbol_attempts=3,
+            retry_delay_seconds=1.0,
         )
         status = service.run_once()
         lagging = [row for row in status.symbols if row.status != "passed"]
@@ -821,6 +845,22 @@ class OKXSignalGUI:
         except OSError:
             return False
 
+    def _open_dashboard_when_ready(self, attempt: int = 0) -> None:
+        """Open only after the local server is listening; report early exits clearly."""
+        if self._dashboard_is_running():
+            webbrowser.open(DASHBOARD_URL)
+            self.log("面板已打开", "INFO")
+            return
+
+        if self.dashboard_process is not None and self.dashboard_process.poll() is not None:
+            self.log(f"面板进程已退出，退出码: {self.dashboard_process.returncode}", "ERROR")
+            return
+
+        if attempt >= 40:
+            self.log("面板启动超时，3001端口仍未监听", "ERROR")
+            return
+        self.root.after(500, lambda: self._open_dashboard_when_ready(attempt + 1))
+
     def open_dashboard(self):
         """打开本地面板；未启动时先拉起。"""
         dashboard_dir = _project_root / "dashboard"
@@ -833,7 +873,6 @@ class OKXSignalGUI:
             self.log("面板已打开", "INFO")
             return
 
-        npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
         try:
             startupinfo = None
             creationflags = 0
@@ -852,7 +891,7 @@ class OKXSignalGUI:
                 dashboard_env["OKX_DASHBOARD_PYTHON"] = str(Path(sys.executable).resolve())
 
             self.dashboard_process = subprocess.Popen(
-                [npm_cmd, "run", "dev:local"],
+                _dashboard_launch_command(dashboard_dir),
                 cwd=dashboard_dir,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -862,9 +901,9 @@ class OKXSignalGUI:
                 env=dashboard_env,
             )
             self.log("正在启动面板...", "INFO")
-            self.root.after(2500, lambda: webbrowser.open(DASHBOARD_URL))
-        except FileNotFoundError:
-            self.log("未找到 npm，面板无法启动", "ERROR")
+            self.root.after(500, self._open_dashboard_when_ready)
+        except FileNotFoundError as e:
+            self.log(str(e), "ERROR")
         except Exception as e:
             self.log(f"面板启动失败: {e}", "ERROR")
     
